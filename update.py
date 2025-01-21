@@ -1221,7 +1221,7 @@ class cUpdate:
             time_sleep = datetime.timedelta(hours=24)
 
             if time_now - time_service > time_sleep:
-                VSlog("More than 24 hours since last update; proceeding with site.json update and restoring update.py file.")
+                VSlog("More than 24 hours since last update; proceeding with site.json update.")
 
                 # Fetch new properties
                 sUrl = 'https://raw.githubusercontent.com/Kodi-vStream/venom-xbmc-addons/Beta/plugin.video.vstream/resources/sites.json'
