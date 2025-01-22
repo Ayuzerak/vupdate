@@ -1180,6 +1180,58 @@ def set_papadustream_url(url):
     except Exception as e:
         VSlog(f"Error while setting PapaDuStream URL: {e}")
 
+def get_elitegol_url():
+    """Retrieve the EliteGol URL from its website."""
+    VSlog("Retrieving EliteGol URL from its website.")
+    try:
+        response = requests.get("https://lefoot.ru/")
+        content = response.text
+        web_addresses = re.findall('href="(https?://[\\w.-]+(?:\\.[\\w\\.-]+)+(?:/[\\w\\.-]*)*)', content)
+        if web_addresses:
+            url = web_addresses[0].replace("http", "https").replace("httpss", "https") + "/"
+            VSlog(f"EliteGol URL found: {url}")
+            return url
+        VSlog("No web addresses found after 'EliteGol'.")
+        return None
+    except requests.RequestException as e:
+        VSlog(f"Error while retrieving EliteGol URL: {e}")
+        return None
+    
+def set_elitegol_url(url):
+    """Set a new URL for EliteGol in the sites.json file."""
+    VSlog(f"Setting new EliteGol URL to {url}.")
+    sites_json = VSPath('special://home/addons/plugin.video.vstream/resources/sites.json').replace('\\', '/')
+    
+    try:
+        # Load the JSON file
+        with open(sites_json, 'r') as fichier:
+            data = json.load(fichier)
+        
+        # Ensure the 'elitegol' entry exists
+        if 'elitegol' not in data['sites']:
+            VSlog("EliteGol entry not found. Adding it.")
+            ajouter_elitegol()
+            with open(sites_json, 'r') as fichier:
+                data = json.load(fichier)  # Reload data after modification
+        
+        # Update the URL and cloudflare status
+        if 'elitegol' in data['sites']:
+            data['sites']['elitegol']['url'] = url
+            cloudflare_status = is_using_cloudflare(url)
+            data['sites']['elitegol']['cloudflare'] = "False" if not cloudflare_status else "True"
+            VSlog(f"Updated EliteGol URL to {url} with Cloudflare status: {'Enabled' if cloudflare_status else 'Disabled'}.")
+        else:
+            VSlog("Failed to find or add the EliteGol entry.")
+            return
+        
+        # Save changes to the JSON file
+        with open(sites_json, 'w') as fichier:
+            json.dump(data, fichier, indent=4)
+        VSlog("EliteGol URL updated successfully.")
+    
+    except Exception as e:
+        VSlog(f"Error while setting EliteGol URL: {e}")
+
 
 class cUpdate:
 
@@ -1194,9 +1246,10 @@ class cUpdate:
             set_wiflix_url(get_wiflix_url())
             set_frenchstream_url(get_frenchstream_url())
             set_papadustream_url(get_papadustream_url())
+            set_elitegol_url(get_elitegol_url())
 
             # Check site status
-            sites_to_check = ["ianime", "wiflix", "french_stream_com", "o1streaming", "cinemay_cc", "free_telechargement_org"]
+            sites_to_check = ["ianime", "wiflix", "french_stream_com", "o1streaming", "cinemay_cc"]
             for site in sites_to_check:
                 VSlog(f"Checking site: {site}")
                 check_site(site)
