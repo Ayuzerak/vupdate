@@ -1196,7 +1196,7 @@ class cUpdate:
             set_papadustream_url(get_papadustream_url())
 
             # Check site status
-            sites_to_check = ["ianime", "wiflix", "french_stream_com", "o1streaming", "cinemay_cc"]
+            sites_to_check = ["ianime", "wiflix", "french_stream_com", "o1streaming", "cinemay_cc", "free_telechargement_org"]
             for site in sites_to_check:
                 VSlog(f"Checking site: {site}")
                 check_site(site)
