@@ -1133,8 +1133,8 @@ def get_papadustream_url():
         if target_position == -1:
             VSlog("Target position 'Papa Du Stream à ce jour :' not found in the response.")
             return None
-        content_before_target = content[target_position:]
-        web_addresses = re.findall('href="(https?://[\\w.-]+(?:\\.[\\w\\.-]+)+(?:/[\\w\\.-]*)*)', content_before_target)
+        content_after_target = content[target_position:]
+        web_addresses = re.findall('href="(https?://[\\w.-]+(?:\\.[\\w\\.-]+)+(?:/[\\w\\.-]*)*)', content_after_target)
         if web_addresses:
             url = web_addresses[0].replace("http", "https").replace("httpss", "https") + "/"
             VSlog(f"PapaDuStream URL found: {url}")
@@ -1184,6 +1184,19 @@ def get_elitegol_url():
     """Retrieve the EliteGol URL from its website."""
     VSlog("Retrieving EliteGol URL from its website.")
     try:
+        response = requests.get("https://www.astuces-aide-informatique.info/22553/papadustream")
+        content = response.text
+        target_position = content.find("Actuellement, la vraie adresse  de streamonsport est")
+        if target_position == -1:
+            VSlog("Target position 'Actuellement, la vraie adresse  de streamonsport est' not found in the response.")
+            return None
+        content_after_target = content[target_position:]
+        web_addresses = re.findall('href="(https?://[\\w.-]+(?:\\.[\\w\\.-]+)+(?:/[\\w\\.-]*)*)', content_after_target) 
+        if web_addresses:
+            url = web_addresses[0].replace("http", "https").replace("httpss", "https") + "/"
+            VSlog(f"EliteGol URL found: {url}")
+            return url
+
         response = requests.get("https://lefoot.ru/")
         content = response.text
         web_addresses = re.findall('href="(https?://[\\w.-]+(?:\\.[\\w\\.-]+)+(?:/[\\w\\.-]*)*)', content)
