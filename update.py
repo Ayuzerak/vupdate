@@ -1184,7 +1184,7 @@ def get_elitegol_url():
     """Retrieve the EliteGol URL from its website."""
     VSlog("Retrieving EliteGol URL from its website.")
     try:
-        response = requests.get("www.lefoot.ru/")
+        response = requests.get("https://lefoot.ru/")
         content = response.text
         web_addresses = re.findall('href="(https?://[\\w.-]+(?:\\.[\\w\\.-]+)+(?:/[\\w\\.-]*)*)', content)
         if web_addresses:
