@@ -1184,7 +1184,7 @@ def get_elitegol_url():
     """Retrieve the EliteGol URL from its website."""
     VSlog("Retrieving EliteGol URL from its website.")
     try:
-        response = requests.get("https://fulldeals.fr/streamonsport/.html")
+        response = requests.get("https://fulldeals.fr/streamonsport/")
         content = response.text
         target_position = content.find("Actuellement, la vraie adresse  de streamonsport est")
         VSlog(content)
@@ -1263,7 +1263,7 @@ class cUpdate:
             set_elitegol_url(get_elitegol_url())
 
             # Check site status
-            sites_to_check = ["ianime", "wiflix", "french_stream_com", "o1streaming", "cinemay_cc"]
+            sites_to_check = ["ianime", "wiflix", "french_stream_com", "o1streaming", "cinemay_cc", "free_telechargement_org"]
             for site in sites_to_check:
                 VSlog(f"Checking site: {site}")
                 check_site(site)
