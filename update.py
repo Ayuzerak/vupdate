@@ -1184,7 +1184,7 @@ def get_elitegol_url():
     """Retrieve the EliteGol URL from its website."""
     VSlog("Retrieving EliteGol URL from its website.")
     try:
-        response = requests.get("https://www.astuces-aide-informatique.info/22553/papadustream")
+        response = requests.get("https://fulldeals.fr/streamonsport/.html")
         content = response.text
         target_position = content.find("Actuellement, la vraie adresse  de streamonsport est")
         if target_position == -1:
