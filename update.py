@@ -1186,10 +1186,10 @@ def get_elitegol_url():
     try:
         response = requests.get("https://fulldeals.fr/streamonsport/")
         content = response.text
-        target_position = content.find("la <strong>vraie</strong> adresse")
+        target_position = content.find("Actuellement")
         VSlog(content)
         if target_position == -1:
-            VSlog("Target position 'la <strong>vraie</strong> adresse' not found in the response.")
+            VSlog("Target position 'Actuellement' not found in the response.")
             return None
         content_after_target = content[target_position:]
         web_addresses = re.findall('href="(https?://[\\w.-]+(?:\\.[\\w\\.-]+)+(?:/[\\w\\.-]*)*)', content_after_target) 
