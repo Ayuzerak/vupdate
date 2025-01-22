@@ -1187,6 +1187,7 @@ def get_elitegol_url():
         response = requests.get("https://fulldeals.fr/streamonsport/.html")
         content = response.text
         target_position = content.find("Actuellement, la vraie adresse  de streamonsport est")
+        VSlog(content)
         if target_position == -1:
             VSlog("Target position 'Actuellement, la vraie adresse  de streamonsport est' not found in the response.")
             return None
