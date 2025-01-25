@@ -20,7 +20,6 @@ import textwrap
 import random
 import string
 import glob
-import urllib.request
 
 #from resources.lib.monitor import VStreamMonitor
 
@@ -1187,10 +1186,10 @@ def get_elitegol_url():
     try:
         response = requests.get("https://fulldeals.fr/streamonsport/")
         content = response.text
-        target_position = content.find("Actuellement")
+        target_position = content.find("la <strong>vraie adresse")
         VSlog(content)
         if target_position == -1:
-            VSlog("Target position 'Actuellement' not found in the response.")
+            VSlog("Target position 'la <strong>vraie adresse' not found in the response.")
             return None
         content_after_target = content[target_position:]
         web_addresses = re.findall('href="(https?://[\\w.-]+(?:\\.[\\w\\.-]+)+(?:/[\\w\\.-]*)*)', content_after_target) 
@@ -1199,8 +1198,8 @@ def get_elitegol_url():
             VSlog(f"EliteGol URL found: {url}")
             return url
 
-        with urllib.request.urlopen("https://lefoot.ru/") as response:
-            content = response.read().decode('utf-8')
+        response = requests.get("https://lefoot.ru/")
+        content = response.text
         web_addresses = re.findall('href="(https?://[\\w.-]+(?:\\.[\\w\\.-]+)+(?:/[\\w\\.-]*)*)', content)
         if web_addresses:
             url = web_addresses[0].replace("http", "https").replace("httpss", "https") + "/"
