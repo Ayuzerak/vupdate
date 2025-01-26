@@ -1282,7 +1282,7 @@ def check_site(site_name):
             data['sites'][site_name]['active'] = active  # Store as a boolean
 
             # Write updated JSON back to file
-            with open(sites_json_path, 'w') as file:
+            with open(sites_json, 'w') as file:
                 json.dump(data, file, indent=4)
 
             VSlog(f"Site {site_name} status updated to {'active' if active else 'inactive'}.")
