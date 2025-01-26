@@ -24,7 +24,6 @@ import concurrent.futures
 import threading
 from requests.exceptions import RequestException, SSLError
 
-
 #from resources.lib.monitor import VStreamMonitor
 
 def modify_files():
