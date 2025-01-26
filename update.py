@@ -697,22 +697,6 @@ def set_frenchstream_url(url):
     except Exception as e:
         VSlog(f"Error while updating FrenchStream URL: {e}")
 
-def check_site(site_name):
-    """Check the status of a site and update its 'active' state in sites.json."""
-    VSlog(f"Checking status of site: {site_name}.")
-    sites_json = VSPath('special://home/addons/plugin.video.vstream/resources/sites.json').replace('\\', '/')
-    try:
-        with open(sites_json, 'r') as fichier:
-            data = json.load(fichier)
-        if site_name in data['sites']:
-            active = ping_server(data['sites'][site_name]['url']) and not cloudflare_protected(data['sites'][site_name]['url'])
-            data['sites'][site_name]['active'] = "True" if active else "False"
-            with open(sites_json, 'w') as fichier:
-                json.dump(data, fichier, indent=4)
-            VSlog(f"Site {site_name} status updated to {'active' if active else 'inactive'}.")
-    except Exception as e:
-        VSlog(f"Error while checking site {site_name}: {e}")
-
 def activate_site(site_name):
     """Activate a site in the sites.json file."""
     VSlog(f"Activating site: {site_name}.")
@@ -1282,13 +1266,14 @@ class cUpdate:
         addons = addon()
 
         try:
-            check_all_sites()
             # Update URLs for sites
             VSlog("Updating site URLs.")
             set_wiflix_url(get_wiflix_url())
             set_frenchstream_url(get_frenchstream_url())
             set_papadustream_url(get_papadustream_url())
             set_elitegol_url(get_elitegol_url())
+
+            check_all_sites()
 
             # Add new site if necessary
             VSlog("Adding PapaDuStream if not present.")
