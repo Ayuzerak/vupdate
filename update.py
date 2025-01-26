@@ -1230,84 +1230,60 @@ def set_elitegol_url(url):
     except Exception as e:
         VSlog(f"Error while setting EliteGol URL: {e}")
 
-def check_all_sites():
-    """Check the status of all sites in parallel and update their 'active' state in sites.json."""
-    sites_json = VSPath('special://home/addons/plugin.video.vstream/resources/sites.json').replace('\\', '/')
+import threading  # For parallel execution
+from concurrent.futures import ThreadPoolExecutor
+
+def check_site_status(site_name, site_info):
+    """Check the status of a single site."""
     try:
-        VSlog("Loading JSON data from file.")
-        with open(sites_json, 'r') as file:
-            data = json.load(file)
+        url = site_info.get('url', '')
+        if not url:
+            VSlog(f"Site {site_name} is missing a URL.")
+            return site_name, False  # Inactive due to missing URL
 
-        sites_to_check = list(data['sites'].keys())
-        results = {}
-
-        VSlog(f"Sites to check: {sites_to_check}")
-        # Use thread-safe update of results
-        with concurrent.futures.ThreadPoolExecutor() as executor:
-            futures = {executor.submit(check_site_status, site_name, data['sites'][site_name]['url']): site_name for site_name in sites_to_check}
-            for future in concurrent.futures.as_completed(futures):
-                site_name = futures[future]
-                try:
-                    results[site_name] = future.result()
-                    VSlog(f"Site {site_name} checked successfully.")
-                except Exception as e:
-                    VSlog(f"Error checking site {site_name}: {e}")
-                    results[site_name] = False
-
-        # Update JSON data
-        for site_name, active in results.items():
-            data['sites'][site_name]['active'] = active
-            VSlog(f"Site {site_name} active status updated to {active}.")
-
-        # Write updated JSON back to file
-        with open(sites_json, 'w') as file:
-            json.dump(data, file, indent=4)
-
-        VSlog("All sites checked and updated.")
-    except FileNotFoundError:
-        VSlog(f"Error: File not found at {sites_json}.")
-    except json.JSONDecodeError:
-        VSlog(f"Error: Invalid JSON format in {sites_json}.")
-    except Exception as e:
-        VSlog(f"Unexpected error: {e}")
-
-def check_site(site_name):
-    """Check the status of a site and update its 'active' state in sites.json."""
-    sites_json = VSPath('special://home/addons/plugin.video.vstream/resources/sites.json').replace('\\', '/')
-    try:
-        # Load JSON data
-        with open(sites_json, 'r') as file:
-            data = json.load(file)
-
-        if site_name in data['sites']:
-            site_url = data['sites'][site_name]['url']
-            active = check_site_status(site_name, site_url)
-            data['sites'][site_name]['active'] = active  # Store as a boolean
-
-            # Write updated JSON back to file
-            with open(sites_json, 'w') as file:
-                json.dump(data, file, indent=4)
-
-            VSlog(f"Site {site_name} status updated to {'active' if active else 'inactive'}.")
-        else:
-            VSlog(f"Site {site_name} not found in sites.json.")
-    except FileNotFoundError:
-        VSlog(f"Error: File not found at {sites_json}.")
-    except json.JSONDecodeError:
-        VSlog(f"Error: Invalid JSON format in {sites_json}.")
-    except Exception as e:
-        VSlog(f"Error while checking site {site_name}: {e}")
-
-def check_site_status(site_name, url):
-    """Check the status of a site."""
-    VSlog(f"Checking status of site: {site_name}.")
-    try:
+        # Check if the site is active
         active = ping_server(url) and not cloudflare_protected(url)
-        VSlog(f"Site {site_name} status: {'active' if active else 'inactive'}.")
-        return active
+        return site_name, active
     except Exception as e:
         VSlog(f"Error checking site {site_name}: {e}")
-        return False
+        return site_name, False  # Mark as inactive if an error occurs
+
+def check_all_site():
+    """Check the status of all sites and update their 'active' state."""
+    VSlog("Checking the status of all sites.")
+    sites_json = VSPath('special://home/addons/plugin.video.vstream/resources/sites.json').replace('\\', '/')
+
+    try:
+        with open(sites_json, 'r') as fichier:
+            data = json.load(fichier)
+        
+        if 'sites' not in data:
+            VSlog("No 'sites' key found in the JSON file.")
+            return
+
+        sites = data['sites']
+        results = []
+
+        # Use threading to check sites in parallel
+        with ThreadPoolExecutor(max_workers=10) as executor:
+            futures = {executor.submit(check_site_status, name, info): name for name, info in sites.items()}
+            for future in threading.as_completed(futures):
+                site_name, active = future.result()
+                sites[site_name]['active'] = "True" if active else "False"
+                results.append((site_name, active))
+        
+        # Write updated data back to the JSON file
+        with open(sites_json, 'w') as fichier:
+            json.dump(data, fichier, indent=4)
+
+        # Generate a summary
+        active_sites = sum(1 for _, active in results if active)
+        total_sites = len(results)
+        VSlog(f"All site statuses updated. {active_sites}/{total_sites} sites are active.")
+
+    except Exception as e:
+        VSlog(f"Error while processing sites.json: {e}")
+
 
 class cUpdate:
 
