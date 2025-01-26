@@ -1235,7 +1235,7 @@ def check_all_sites():
     sites_json = VSPath('special://home/addons/plugin.video.vstream/resources/sites.json').replace('\\', '/')
     try:
         # Load JSON data once
-        with open(sites_json_path, 'r') as file:
+        with open(sites_json, 'r') as file:
             data = json.load(file)
 
         sites_to_check = list(data['sites'].keys())
