@@ -21,7 +21,6 @@ import random
 import string
 import glob
 import concurrent.futures
-from concurrent.futures import ThreadPoolExecutor
 import threading
 
 #from resources.lib.monitor import VStreamMonitor
@@ -1232,56 +1231,49 @@ def set_elitegol_url(url):
     except Exception as e:
         VSlog(f"Error while setting EliteGol URL: {e}")
 
-def check_site_status(site_name, site_info):
-    """Check the status of a single site."""
-    try:
-        url = site_info.get('url', '')
-        if not url:
-            VSlog(f"Site {site_name} is missing a URL.")
-            return site_name, False  # Inactive due to missing URL
-
-        # Check if the site is active
-        active = ping_server(url) and not cloudflare_protected(url)
-        return site_name, active
-    except Exception as e:
-        VSlog(f"Error checking site {site_name}: {e}")
-        return site_name, False  # Mark as inactive if an error occurs
+# Thread lock to ensure thread-safe file access
+file_lock = threading.Lock()
 
 def check_all_sites():
-    """Check the status of all sites and update their 'active' state."""
-    VSlog("Checking the status of all sites.")
-    sites_json = VSPath('special://home/addons/plugin.video.vstream/resources/sites.json').replace('\\', '/')
+    """Check the status of all sites in parallel and update their 'active' state in sites.json."""
+    sites_json = VSlog('special://home/addons/plugin.video.vstream/resources/sites.json').as_posix()
 
     try:
-        with open(sites_json, 'r') as fichier:
-            data = json.load(fichier)
-        
-        if 'sites' not in data:
-            VSlog("No 'sites' key found in the JSON file.")
-            return
+        with file_lock:
+            with open(sites_json, 'r') as fichier:
+                data = json.load(fichier)
 
-        sites = data['sites']
-        results = []
+        sites_to_check = list(data['sites'].keys())
 
-        # Use ThreadPoolExecutor to check sites in parallel
+        # Limit the number of threads with max_workers
         with concurrent.futures.ThreadPoolExecutor(max_workers=10) as executor:
-            futures = {executor.submit(check_site_status, name, info): name for name, info in sites.items()}
-            for future in concurrent.futures.as_completed(futures):
-                site_name, active = future.result()
-                sites[site_name]['active'] = "True" if active else "False"
-                results.append((site_name, active))
-        
-        # Write updated data back to the JSON file
-        with open(sites_json, 'w') as fichier:
-            json.dump(data, fichier, indent=4)
-
-        # Generate a summary
-        active_sites = sum(1 for _, active in results if active)
-        total_sites = len(results)
-        VSlog(f"All site statuses updated. {active_sites}/{total_sites} sites are active.")
+            executor.map(lambda site: check_site(site, sites_json), sites_to_check)
 
     except Exception as e:
-        VSlog(f"Error while processing sites.json: {e}")
+        VSlog(f"Error while checking all sites: {e}")
+
+def check_site(site_name, sites_json):
+    """Check the status of a site and update its 'active' state in sites.json."""
+    VSlog(f"Checking status of site: {site_name}.")
+
+    try:
+        with file_lock:
+            with open(sites_json, 'r') as fichier:
+                data = json.load(fichier)
+
+        if site_name in data['sites']:
+            site_url = data['sites'][site_name]['url']
+            is_active = ping_server(site_url) and not cloudflare_protected(site_url)
+            data['sites'][site_name]['active'] = "True" if is_active else "False"
+
+            with file_lock:
+                with open(sites_json, 'w') as fichier:
+                    json.dump(data, fichier, indent=4)
+
+            VSlog(f"Site {site_name} status updated to {'active' if is_active else 'inactive'}.")
+
+    except Exception as e:
+        VSlog(f"Error while checking site {site_name}: {e}")
 
 class cUpdate:
 
