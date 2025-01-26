@@ -1236,39 +1236,45 @@ file_lock = threading.Lock()
 
 def check_all_sites():
     """Check the status of all sites in parallel and update their 'active' state in sites.json."""
-    sites_json = VSPath('special://home/addons/plugin.video.vstream/resources/sites.json')
+    sites_json = VSPath('special://home/addons/plugin.video.vstream/resources/sites.json').replace('\\', '/')
 
     try:
         with file_lock:
             with open(sites_json, 'r') as fichier:
                 data = json.load(fichier)
+
+        # Validate the structure of the loaded JSON data
+        if 'sites' not in data or not isinstance(data['sites'], dict):
+            VSlog("Invalid JSON structure: 'sites' key is missing or is not a dictionary.")
+            return
 
         sites_to_check = list(data['sites'].keys())
 
         # Limit the number of threads with max_workers
         with concurrent.futures.ThreadPoolExecutor(max_workers=10) as executor:
-            executor.map(lambda site: check_site(site, sites_json), sites_to_check)
+            executor.map(lambda site: check_site(site, data), sites_to_check)
+
+        # Write all updates to the file at once
+        with file_lock:
+            with open(sites_json, 'w') as fichier:
+                json.dump(data, fichier, indent=4)
 
     except Exception as e:
         VSlog(f"Error while checking all sites: {e}")
 
-def check_site(site_name, sites_json):
-    """Check the status of a site and update its 'active' state in sites.json."""
+def check_site(site_name, data):
+    """Check the status of a site and update its 'active' state in the data structure."""
     VSlog(f"Checking status of site: {site_name}.")
 
     try:
-        with file_lock:
-            with open(sites_json, 'r') as fichier:
-                data = json.load(fichier)
-
         if site_name in data['sites']:
-            site_url = data['sites'][site_name]['url']
+            site_url = data['sites'][site_name].get('url')
+            if not site_url:
+                VSlog(f"Site {site_name} is missing a 'url' key.")
+                return
+
             is_active = ping_server(site_url) and not cloudflare_protected(site_url)
             data['sites'][site_name]['active'] = "True" if is_active else "False"
-
-            with file_lock:
-                with open(sites_json, 'w') as fichier:
-                    json.dump(data, fichier, indent=4)
 
             VSlog(f"Site {site_name} status updated to {'active' if is_active else 'inactive'}.")
 
