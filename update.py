@@ -1282,6 +1282,7 @@ class cUpdate:
         addons = addon()
 
         try:
+            check_all_sites()
             # Update URLs for sites
             VSlog("Updating site URLs.")
             set_wiflix_url(get_wiflix_url())
@@ -1310,8 +1311,6 @@ class cUpdate:
 
             if time_now - time_service > time_sleep:
                 VSlog("More than 24 hours since last update; proceeding with site.json update.")
-
-                check_all_sites()
 
                 # Fetch new properties
                 sUrl = 'https://raw.githubusercontent.com/Kodi-vStream/venom-xbmc-addons/Beta/plugin.video.vstream/resources/sites.json'
