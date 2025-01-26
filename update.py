@@ -22,7 +22,6 @@ import string
 import glob
 import concurrent.futures
 import threading
-import validators  # Optional: For URL validation
 from requests.exceptions import RequestException, SSLError
 
 
