@@ -22,6 +22,9 @@ import string
 import glob
 import concurrent.futures
 import threading
+import validators  # Optional: For URL validation
+from requests.exceptions import RequestException, SSLError
+
 
 #from resources.lib.monitor import VStreamMonitor
 
@@ -565,23 +568,48 @@ def add_parameter_to_function(file_path, function_name, parameter):
     except Exception as e:
         VSlog(f"Error while modifying file '{file_path}': {str(e)}")
 
-def ping_server(server: str, timeout=10):
-    """Ping server to check if it's reachable."""
-    if not server.startswith("http://") and not server.startswith("https://"):
+def ping_server(server: str, timeout=10, retries=1, backoff_factor=2, verify_ssl=True):
+    """
+    Ping server to check if it's reachable, with retry mechanism and optional SSL verification.
+
+    Args:
+        server (str): Server URL to ping.
+        timeout (int): Timeout for each request in seconds.
+        retries (int): Number of retry attempts on failure.
+        backoff_factor (int): Exponential backoff multiplier for retry delays.
+        verify_ssl (bool): Whether to verify SSL certificates. Default is True.
+        
+    Returns:
+        bool: True if the server is reachable, False otherwise.
+    """
+    if not server.startswith(("http://", "https://")):
         server = "https://" + server
 
-    try:
-        response = requests.get(server, timeout=timeout)
-        if response.status_code == 200:
-            VSlog(f"Ping succeeded for {server}. Status code: {response.status_code}")
-            return True
-        else:
-            VSlog(f"Ping failed for {server}. Status code: {response.status_code}")
-            return False
-    except requests.exceptions.RequestException as error:
-        VSlog(f"Ping failed for {server}. Error: {error}")
-        return False
+    for attempt in range(1, retries + 1):
+        try:
+            response = requests.get(server, timeout=timeout, verify=verify_ssl)
+            if response.status_code == 200:
+                VSlog(f"Ping succeeded for {server}. Status code: {response.status_code}")
+                return True
+            else:
+                VSlog(f"Ping failed for {server}. Status code: {response.status_code}")
+                return False
+        except SSLError as ssl_error:
+            if verify_ssl:
+                VSlog(f"Ping failed for {server}. SSL Error: {ssl_error}")
+                return ping_server(server, timeout, retries, backoff_factor, False)  # SSL errors are critical if SSL verification is enabled
+            else:
+                VSlog(f"Ping attempt {attempt} failed for {server}. Ignoring SSL Error due to verify_ssl=False.")
+        except RequestException as error:
+            VSlog(f"Ping attempt {attempt} failed for {server}. Error: {error}")
 
+            if attempt < retries:
+                delay = backoff_factor * (2 ** (attempt - 1))
+                VSlog(f"Retrying in {delay} seconds...")
+                time.sleep(delay)
+            else:
+                VSlog(f"All {retries} attempts failed for {server}.")
+                return False
 
 def cloudflare_protected(url):
     """Check if a URL is protected by Cloudflare."""
