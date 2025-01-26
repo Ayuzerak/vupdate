@@ -1263,10 +1263,10 @@ def check_all_sites():
         sites = data['sites']
         results = []
 
-        # Use threading to check sites in parallel
-        with ThreadPoolExecutor(max_workers=10) as executor:
+        # Use ThreadPoolExecutor to check sites in parallel
+        with concurrent.futures.ThreadPoolExecutor(max_workers=10) as executor:
             futures = {executor.submit(check_site_status, name, info): name for name, info in sites.items()}
-            for future in threading.as_completed(futures):
+            for future in concurrent.futures.as_completed(futures):
                 site_name, active = future.result()
                 sites[site_name]['active'] = "True" if active else "False"
                 results.append((site_name, active))
@@ -1282,7 +1282,6 @@ def check_all_sites():
 
     except Exception as e:
         VSlog(f"Error while processing sites.json: {e}")
-
 
 class cUpdate:
 
