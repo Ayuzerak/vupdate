@@ -1257,35 +1257,23 @@ def check_all_sites():
             data['sites'][site_name]['active'] = active
 
         # Write updated JSON back to file
-        with open(sites_json_path, 'w') as file:
+        with open(sites_json, 'w') as file:
             json.dump(data, file, indent=4)
 
         VSlog("All sites checked and updated.")
     except FileNotFoundError:
-        VSlog(f"Error: File not found at {sites_json_path}.")
+        VSlog(f"Error: File not found at {sites_json}.")
     except json.JSONDecodeError:
-        VSlog(f"Error: Invalid JSON format in {sites_json_path}.")
+        VSlog(f"Error: Invalid JSON format in {sites_json}.")
     except Exception as e:
         VSlog(f"Unexpected error: {e}")
 
-def check_site_status(site_name, url):
-    """Check the status of a site."""
-    VSlog(f"Checking status of site: {site_name}.")
-    try:
-        active = ping_server(url) and not cloudflare_protected(url)
-        VSlog(f"Site {site_name} status: {'active' if active else 'inactive'}.")
-        return active
-    except Exception as e:
-        VSlog(f"Error checking site {site_name}: {e}")
-        return False
-
-
 def check_site(site_name):
     """Check the status of a site and update its 'active' state in sites.json."""
-    sites_json_path = VSPath('special://home/addons/plugin.video.vstream/resources/sites.json').replace('\\', '/')
+    sites_json = VSPath('special://home/addons/plugin.video.vstream/resources/sites.json').replace('\\', '/')
     try:
         # Load JSON data
-        with open(sites_json_path, 'r') as file:
+        with open(sites_json, 'r') as file:
             data = json.load(file)
 
         if site_name in data['sites']:
@@ -1301,12 +1289,22 @@ def check_site(site_name):
         else:
             VSlog(f"Site {site_name} not found in sites.json.")
     except FileNotFoundError:
-        VSlog(f"Error: File not found at {sites_json_path}.")
+        VSlog(f"Error: File not found at {sites_json}.")
     except json.JSONDecodeError:
-        VSlog(f"Error: Invalid JSON format in {sites_json_path}.")
+        VSlog(f"Error: Invalid JSON format in {sites_json}.")
     except Exception as e:
         VSlog(f"Error while checking site {site_name}: {e}")
 
+def check_site_status(site_name, url):
+    """Check the status of a site."""
+    VSlog(f"Checking status of site: {site_name}.")
+    try:
+        active = ping_server(url) and not cloudflare_protected(url)
+        VSlog(f"Site {site_name} status: {'active' if active else 'inactive'}.")
+        return active
+    except Exception as e:
+        VSlog(f"Error checking site {site_name}: {e}")
+        return False
 
 class cUpdate:
 
