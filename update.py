@@ -1236,7 +1236,7 @@ file_lock = threading.Lock()
 
 def check_all_sites():
     """Check the status of all sites in parallel and update their 'active' state in sites.json."""
-    sites_json = VSlog('special://home/addons/plugin.video.vstream/resources/sites.json').as_posix()
+    sites_json = VSPath('special://home/addons/plugin.video.vstream/resources/sites.json')
 
     try:
         with file_lock:
