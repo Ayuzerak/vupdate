@@ -1248,7 +1248,7 @@ def check_site_status(site_name, site_info):
         VSlog(f"Error checking site {site_name}: {e}")
         return site_name, False  # Mark as inactive if an error occurs
 
-def check_all_site():
+def check_all_sites():
     """Check the status of all sites and update their 'active' state."""
     VSlog("Checking the status of all sites.")
     sites_json = VSPath('special://home/addons/plugin.video.vstream/resources/sites.json').replace('\\', '/')
