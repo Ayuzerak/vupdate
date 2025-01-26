@@ -1282,7 +1282,7 @@ def check_site_status(site_name, url):
 
 def check_site(site_name):
     """Check the status of a site and update its 'active' state in sites.json."""
-    sites_json_path = Path('special://home/addons/plugin.video.vstream/resources/sites.json').as_posix()
+    sites_json_path = VSPath('special://home/addons/plugin.video.vstream/resources/sites.json').replace('\\', '/')
     try:
         # Load JSON data
         with open(sites_json_path, 'r') as file:
