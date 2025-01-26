@@ -21,6 +21,7 @@ import random
 import string
 import glob
 import concurrent.futures
+import threading
 
 #from resources.lib.monitor import VStreamMonitor
 
@@ -1229,9 +1230,6 @@ def set_elitegol_url(url):
     
     except Exception as e:
         VSlog(f"Error while setting EliteGol URL: {e}")
-
-import threading  # For parallel execution
-from concurrent.futures import ThreadPoolExecutor
 
 def check_site_status(site_name, site_info):
     """Check the status of a single site."""
