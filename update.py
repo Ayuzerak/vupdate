@@ -1234,13 +1234,14 @@ def check_all_sites():
     """Check the status of all sites in parallel and update their 'active' state in sites.json."""
     sites_json = VSPath('special://home/addons/plugin.video.vstream/resources/sites.json').replace('\\', '/')
     try:
-        # Load JSON data once
+        VSlog("Loading JSON data from file.")
         with open(sites_json, 'r') as file:
             data = json.load(file)
 
         sites_to_check = list(data['sites'].keys())
         results = {}
 
+        VSlog(f"Sites to check: {sites_to_check}")
         # Use thread-safe update of results
         with concurrent.futures.ThreadPoolExecutor() as executor:
             futures = {executor.submit(check_site_status, site_name, data['sites'][site_name]['url']): site_name for site_name in sites_to_check}
@@ -1248,6 +1249,7 @@ def check_all_sites():
                 site_name = futures[future]
                 try:
                     results[site_name] = future.result()
+                    VSlog(f"Site {site_name} checked successfully.")
                 except Exception as e:
                     VSlog(f"Error checking site {site_name}: {e}")
                     results[site_name] = False
@@ -1255,6 +1257,7 @@ def check_all_sites():
         # Update JSON data
         for site_name, active in results.items():
             data['sites'][site_name]['active'] = active
+            VSlog(f"Site {site_name} active status updated to {active}.")
 
         # Write updated JSON back to file
         with open(sites_json, 'w') as file:
