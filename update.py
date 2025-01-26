@@ -1263,7 +1263,7 @@ def get_darkiworld_url():
         content_after_target = content[target_position:]
         web_addresses = re.findall('href="(https?://[\\w.-]+(?:\\.[\\w\\.-]+)+(?:/[\\w\\.-]*)*)', content_after_target) 
         if web_addresses:
-            url = web_addresses[0].replace("http", "https").replace("httpss", "https") + "/"
+            url = web_addresses[0].replace("http", "https").replace("httpss", "https")
             VSlog(f"Darkiworld URL found: {url}")
             return url
         VSlog("No web addresses found after 'Darkiworld'.")
