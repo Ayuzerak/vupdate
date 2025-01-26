@@ -1245,6 +1245,33 @@ def set_elitegol_url(url):
     except Exception as e:
         VSlog(f"Error while setting EliteGol URL: {e}")
 
+def check_all_sites():
+    """Check the status of all sites in parallel and update their 'active' state in sites.json."""
+    sites_json = VSPath('special://home/addons/plugin.video.vstream/resources/sites.json').replace('\\', '/')
+    try:
+        with open(sites_json, 'r') as fichier:
+            data = json.load(fichier)
+        sites_to_check = list(data['sites'].keys())
+        with concurrent.futures.ThreadPoolExecutor() as executor:
+            executor.map(check_site, sites_to_check)
+    except Exception as e:
+        VSlog(f"Error while checking all sites: {e}")
+
+def check_site(site_name):
+    """Check the status of a site and update its 'active' state in sites.json."""
+    VSlog(f"Checking status of site: {site_name}.")
+    sites_json = VSPath('special://home/addons/plugin.video.vstream/resources/sites.json').replace('\\', '/')
+    try:
+        with open(sites_json, 'r') as fichier:
+            data = json.load(fichier)
+        if site_name in data['sites']:
+            active = ping_server(data['sites'][site_name]['url']) and not cloudflare_protected(data['sites'][site_name]['url'])
+            data['sites'][site_name]['active'] = "True" if active else "False"
+            with open(sites_json, 'w') as fichier:
+                json.dump(data, fichier, indent=4)
+            VSlog(f"Site {site_name} status updated to {'active' if active else 'inactive'}.")
+    except Exception as e:
+        VSlog(f"Error while checking site {site_name}: {e}")
 
 class cUpdate:
 
@@ -1260,12 +1287,6 @@ class cUpdate:
             set_frenchstream_url(get_frenchstream_url())
             set_papadustream_url(get_papadustream_url())
             set_elitegol_url(get_elitegol_url())
-
-            # Check site status
-            sites_to_check = ["ianime", "wiflix", "french_stream_com", "o1streaming", "cinemay_cc", "free_telechargement_org"]
-            for site in sites_to_check:
-                VSlog(f"Checking site: {site}")
-                check_site(site)
 
             # Add new site if necessary
             VSlog("Adding PapaDuStream if not present.")
@@ -1288,6 +1309,8 @@ class cUpdate:
 
             if time_now - time_service > time_sleep:
                 VSlog("More than 24 hours since last update; proceeding with site.json update.")
+
+                check_all_sites()
 
                 # Fetch new properties
                 sUrl = 'https://raw.githubusercontent.com/Kodi-vStream/venom-xbmc-addons/Beta/plugin.video.vstream/resources/sites.json'
@@ -1319,4 +1342,3 @@ class cUpdate:
             return datetime.datetime.strptime(date, date_format)
         except TypeError:
             return datetime.datetime(*(time.strptime(date, date_format)[0:6]))
-
