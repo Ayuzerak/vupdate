@@ -1232,13 +1232,6 @@ def set_elitegol_url(url):
         with open(sites_json, 'r') as fichier:
             data = json.load(fichier)
         
-        # Ensure the 'elitegol' entry exists
-        if 'elitegol' not in data['sites']:
-            VSlog("EliteGol entry not found. Adding it.")
-            ajouter_elitegol()
-            with open(sites_json, 'r') as fichier:
-                data = json.load(fichier)  # Reload data after modification
-        
         # Update the URL and cloudflare status
         if 'elitegol' in data['sites']:
             data['sites']['elitegol']['url'] = url
@@ -1256,6 +1249,56 @@ def set_elitegol_url(url):
     
     except Exception as e:
         VSlog(f"Error while setting EliteGol URL: {e}")
+
+def get_darkiworld_url():
+    """Retrieve the Darkiworld URL from its website."""
+    VSlog("Retrieving Darkiworld URL from its website.")
+    try:
+        response = requests.get("https://www.julsa.fr/darkiworld-la-nouvelle-adresse-url-pour-acceder-au-site/")
+        content = response.text
+        target_position = content.find("Darkiworld, rendez-vous sur")
+        if target_position == -1:
+            VSlog("Target position 'Darkiworld, rendez-vous sur' not found in the response.")
+            return None
+        content_after_target = content[target_position:]
+        web_addresses = re.findall('href="(https?://[\\w.-]+(?:\\.[\\w\\.-]+)+(?:/[\\w\\.-]*)*)', content_after_target) 
+        if web_addresses:
+            url = web_addresses[0].replace("http", "https").replace("httpss", "https") + "/"
+            VSlog(f"Darkiworld URL found: {url}")
+            return url
+        VSlog("No web addresses found after 'Darkiworld'.")
+        return None
+    except requests.RequestException as e:
+        VSlog(f"Error while retrieving Darkiworld URL: {e}")
+        return None
+    
+def set_darkiworld_url(url):
+    """Set a new URL for Darkworld in the sites.json file."""
+    VSlog(f"Setting new Darkiworld URL to {url}.")
+    sites_json = VSPath('special://home/addons/plugin.video.vstream/resources/sites.json').replace('\\', '/')
+    
+    try:
+        # Load the JSON file
+        with open(sites_json, 'r') as fichier:
+            data = json.load(fichier)
+        
+        # Update the URL and cloudflare status
+        if 'darkiworld' in data['sites']:
+            data['sites']['darkiworld']['url'] = url
+            cloudflare_status = is_using_cloudflare(url)
+            data['sites']['darkiworld']['cloudflare'] = "False" if not cloudflare_status else "True"
+            VSlog(f"Updated Darkiworld URL to {url} with Cloudflare status: {'Enabled' if cloudflare_status else 'Disabled'}.")
+        else:
+            VSlog("Failed to find or add the Darkiworld entry.")
+            return
+        
+        # Save changes to the JSON file
+        with open(sites_json, 'w') as fichier:
+            json.dump(data, fichier, indent=4)
+        VSlog("Darkiworld URL updated successfully.")
+    
+    except Exception as e:
+        VSlog(f"Error while setting Darkiworld URL: {e}")
 
 # Thread lock to ensure thread-safe file access
 file_lock = threading.Lock()
@@ -1321,6 +1364,7 @@ class cUpdate:
             set_frenchstream_url(get_frenchstream_url())
             set_papadustream_url(get_papadustream_url())
             set_elitegol_url(get_elitegol_url())
+            set_darkiworld_url(get_darkiworld_url())
 
             check_all_sites()
 
