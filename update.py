@@ -789,7 +789,7 @@ def ajouter_papadustream():
         VSlog("Checking if papadustream.py exists...")
         if not os.path.exists(papadustream_py):
             VSlog("papadustream.py not found. Creating file...")
-            with open(papadustream_py, 'w') as fichier:
+            with open(papadustream_py, 'w', encoding='utf-8') as fichier:
                 script_content = """# -*- coding: utf-8 -*-
 # vStream https://github.com/Kodi-vStream/venom-xbmc-addons.
 import re
