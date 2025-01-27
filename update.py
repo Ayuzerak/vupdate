@@ -1293,7 +1293,7 @@ def set_darkiworld_url(url):
             data['sites']['darkiworld']['cloudflare'] = "False" if not cloudflare_status else "True"
             VSlog(f"Updated Darkiworld URL to {url} with Cloudflare status: {'Enabled' if cloudflare_status else 'Disabled'}.")
         else:
-            VSlog("Failed to find or add the Darkiworld entry.")
+            VSlog("Failed to find the Darkiworld entry.")
             return
         
         # Save changes to the JSON file
