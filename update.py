@@ -1140,11 +1140,9 @@ def ping_server(server: str, timeout=10, retries=1, backoff_factor=2, verify_ssl
         'Accept-Language': 'en-US,en;q=0.9'
     }
 
-    cookies = {'session': '123456789'}
-
     for attempt in range(1, retries + 1):
         try:
-            response = requests.get(server, headers=headers, timeout=timeout, cookies=cookies, verify=verify_ssl)
+            response = requests.get(server, headers=headers, timeout=timeout, verify=verify_ssl)
             if response.status_code == 200:
                 VSlog(f"Ping succeeded for {server}. Status code: {response.status_code}")
                 return True
