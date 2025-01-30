@@ -577,8 +577,8 @@ def add_get_recommendations_method_for_netflix_like_recommandations():
 def modify_files():
     VSlog("Starting file modification process")
 
-    # VSlog("add_netflix_like_recommandations")
-    # add_netflix_like_recommandations()
+    VSlog("add_netflix_like_recommandations")
+    #add_netflix_like_recommandations()
 
     file_path = VSPath('special://home/addons/plugin.video.vstream/resources/lib/gui/hoster.py').replace('\\', '/')
     VSlog(f"Modifying file: {file_path}")
@@ -1135,9 +1135,7 @@ def ping_server(server: str, timeout=10, retries=1, backoff_factor=2, verify_ssl
         server = "https://" + server
 
     headers = {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/58.0.3029.110 Safari/537.3',
-        'Referer': 'https://google.com',
-        'Accept-Language': 'en-US,en;q=0.9'
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/58.0.3029.110 Safari/537.3'
     }
 
     for attempt in range(1, retries + 1):
