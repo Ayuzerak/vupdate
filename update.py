@@ -1274,6 +1274,14 @@ def get_livetv_url():
         # Extraire l'URL après le texte clé
         content_after_target = content[target_position:]
         web_addresses = re.findall(r'<strong>([\w.-]+\.me)</strong>', content_after_target)
+
+        if web_addresses:
+            url = web_addresses[0]
+            if not url.startswith("http"):
+                url = "https://" + url
+            url += "/"
+            VSlog(f"URL de LiveTV trouvée : {url}")
+            return url
         
         if web_addresses:
             url = web_addresses[0].replace("http", "https").replace("httpss", "https") + "/"
