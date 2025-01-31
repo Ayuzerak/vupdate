@@ -1265,7 +1265,7 @@ def get_livetv_url():
         content = response.text
         
         # Trouver la position du texte clé
-        target_position = content.find("l’adresse actuelle de LiveTV est")
+        target_position = content.find("adresse actuelle de LiveTV est")
         VSlog(content)
         if target_position == -1:
             VSlog("Texte clé non trouvé dans la page.")
