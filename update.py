@@ -1254,6 +1254,60 @@ def set_elitegol_url(url):
     except Exception as e:
         VSlog(f"Error while setting EliteGol URL: {e}")
 
+def get_livetv_url():
+    """Récupère l'URL actuelle de LiveTV depuis son site référent."""
+    VSlog("Récupération de l'URL de LiveTV.")
+    try:
+        response = requests.get("https://www.vpnclub.fr/livetv-nouvelle-adresse/", headers={
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36"
+        }, timeout=10)
+        content = response.text
+        
+        # Trouver la position du texte clé
+        target_position = content.find("À l’heure où est écrit cet article, l’adresse actuelle de LiveTV est :")
+        if target_position == -1:
+            VSlog("Texte clé non trouvé dans la page.")
+            return None
+        
+        # Extraire l'URL après le texte clé
+        content_after_target = content[target_position:]
+        web_addresses = re.findall(r'href="(https?://[^"]+)"', content_after_target)
+        
+        if web_addresses:
+            url = web_addresses[0].replace("http", "https").replace("httpss", "https") + "/"
+            VSlog(f"URL de LiveTV trouvée : {url}")
+            return url
+
+        VSlog("Aucune adresse trouvée après le texte clé.")
+        return None
+    except requests.RequestException as e:
+        VSlog(f"Erreur lors de la récupération de l'URL de LiveTV : {e}")
+        return None
+
+def set_livetv_url(url):
+    """Met à jour l'URL de LiveTV dans le fichier sites.json."""
+    VSlog(f"Mise à jour de l'URL de LiveTV vers {url}.")
+    sites_json = VSPath('special://home/addons/plugin.video.vstream/resources/sites.json').replace('\\', '/')
+    
+    try:
+        with open(sites_json, 'r') as fichier:
+            data = json.load(fichier)
+        
+        if 'livetv' in data['sites']:
+            data['sites']['livetv']['url'] = url
+            cloudflare_status = is_using_cloudflare(url)
+            data['sites']['livetv']['cloudflare'] = "False" if not cloudflare_status else "True"
+            VSlog(f"URL de LiveTV mise à jour : {url}, Cloudflare : {'Activé' if cloudflare_status else 'Désactivé'}.")
+        else:
+            VSlog("Entrée LiveTV non trouvée dans sites.json.")
+            return
+        
+        with open(sites_json, 'w') as fichier:
+            json.dump(data, fichier, indent=4)
+        VSlog("Mise à jour réussie de l'URL de LiveTV.")
+    except Exception as e:
+        VSlog(f"Erreur lors de la mise à jour de l'URL de LiveTV : {e}")
+
 def get_darkiworld_url():
     """Retrieve the Darkiworld URL from its website."""
     VSlog("Retrieving Darkiworld URL from its website.")
@@ -1368,6 +1422,7 @@ class cUpdate:
             set_frenchstream_url(get_frenchstream_url())
             set_papadustream_url(get_papadustream_url())
             set_elitegol_url(get_elitegol_url())
+            set_livetv_url(get_livetv_url())
             set_darkiworld_url(get_darkiworld_url())
 
             check_all_sites()
