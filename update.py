@@ -1258,7 +1258,10 @@ def get_livetv_url():
     """Récupère l'URL actuelle de LiveTV depuis son site référent."""
     VSlog("Récupération de l'URL de LiveTV.")
     try:
-        response = requests.get("https://www.vpnclub.fr/livetv-nouvelle-adresse/", timeout=10)
+        response = requests.get("https://www.vpnclub.fr/livetv-nouvelle-adresse/", headers={
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36"
+        }, timeout=10)
+
         content = response.text
         
         # Trouver la position du texte clé
@@ -1270,7 +1273,7 @@ def get_livetv_url():
         
         # Extraire l'URL après le texte clé
         content_after_target = content[target_position:]
-        web_addresses = re.findall('href="(https?://[\\w.-]+(?:\\.[\\w\\.-]+)+(?:/[\\w\\.-]*)*)', content_after_target)
+        web_addresses = re.findall(r'<strong>([\w.-]+\.me)</strong>', content_after_target)
         
         if web_addresses:
             url = web_addresses[0].replace("http", "https").replace("httpss", "https") + "/"
