@@ -1260,7 +1260,7 @@ def get_livetv_url():
     try:
         response = requests.get("https://www.vpnclub.fr/livetv-nouvelle-adresse/", headers={
             "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36"
-        }, timeout=10)
+        }, timeout=10, allow_redirects=True)
 
         content = response.text
         
