@@ -1260,7 +1260,7 @@ def get_livetv_url():
     try:
         response = requests.get("https://www.vpnclub.fr/livetv-nouvelle-adresse/", headers={
             "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36"
-        }, timeout=10, allow_redirects=True)
+        }, timeout=10)
 
         content = response.text
         
@@ -1280,6 +1280,12 @@ def get_livetv_url():
             if not url.startswith("http"):
                 url = "https://" + url
             VSlog(f"URL de LiveTV trouvée : {url}")
+            # Vérifier si l'URL récupérée redirige ailleurs
+            final_response = requests.get(url, headers={
+                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36"
+            }, timeout=10, allow_redirects=True)
+            
+            final_url = final_response.url
             return url
 
         VSlog("Aucune adresse trouvée après le texte clé.")
