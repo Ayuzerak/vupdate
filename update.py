@@ -1264,14 +1264,14 @@ def get_livetv_url():
         content = response.text
         
         # Trouver la position du texte clé
-        target_position = content.find("À l’heure où est écrit cet article, l’adresse actuelle de LiveTV est :")
+        target_position = content.find("l’adresse actuelle de LiveTV est")
         if target_position == -1:
             VSlog("Texte clé non trouvé dans la page.")
             return None
         
         # Extraire l'URL après le texte clé
         content_after_target = content[target_position:]
-        web_addresses = re.findall(r'href="(https?://[^"]+)"', content_after_target)
+        web_addresses = re.findall('href="(https?://[\\w.-]+(?:\\.[\\w\\.-]+)+(?:/[\\w\\.-]*)*)', content_after_target)
         
         if web_addresses:
             url = web_addresses[0].replace("http", "https").replace("httpss", "https") + "/"
