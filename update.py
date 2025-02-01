@@ -1264,7 +1264,7 @@ def get_livetv_url():
 
         content = response.text
 
-        default_url = "https://livetv.sx"
+        default_url = "https://livetv.sx/"
 
         # Trouver la position du texte clé
         target_position = content.find("LiveTV est accessible via")
