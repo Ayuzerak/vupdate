@@ -1264,7 +1264,14 @@ def get_livetv_url():
 
         content = response.text
 
-        default_url = "https://livetv.sx/"
+        current_url = "https://livetv819.me"
+        bypass_url = "https://livetv774.me"
+        default_url = "https://livetv.sx"
+
+        if ping_server(current_url):
+            default_url = current_url
+        elif ping_server(bypass_url):
+            default_url = bypass_url
 
         # Trouver la position du texte clé
         target_position = content.find("LiveTV est accessible via")
@@ -1274,7 +1281,7 @@ def get_livetv_url():
         
         # Extraire l'URL après le texte clé
         content_after_target = content[target_position:]
-        web_addresses = re.findall(r'https?://[\w.-]+(?:\.[\w.-]+)+(?:/[\w.-]*)*', content_after_target)
+        web_addresses = re.findall(r'https?://[\w.-]+(?:\.[\w.-]+)+(?::\d+)?(?:/[\w.-]*)*(?:\?[\w&=.-]*)?(?:#[\w.-]*)?', content_after_target)
         
         if web_addresses:
             if web_addresses[1] and "livetv" in web_addresses[1]:
