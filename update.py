@@ -1289,7 +1289,8 @@ def get_livetv_url():
             }, timeout=10, allow_redirects=True)
             
             final_url = final_response.url
-            return url
+            VSlog(f"Mise à jour de l'URL de LiveTV vers {final_url}.")
+            return final_url
 
         VSlog("Aucune adresse trouvée après le texte clé.")
         return None
