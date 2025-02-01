@@ -1272,7 +1272,7 @@ def get_livetv_url():
         
         # Extraire l'URL après le texte clé
         content_after_target = content[target_position:]
-        web_addresses = re.findall(r'href="(https?://[\\w.-]+(?:\\.[\\w\\.-]+)+(?:/[\\w\\.-]*)*)', content_after_target)
+        web_addresses = re.findall(r'https?://[\\w.-]+(?:\\.[\\w\\.-]+)+(?:/[\\w\\.-]*)*)', content_after_target)
         
         if web_addresses:
             if web_addresses[1] and "livetv" in web_addresses[1]:
@@ -1289,7 +1289,7 @@ def get_livetv_url():
             }, timeout=10, allow_redirects=True)
             
             final_url = final_response.url
-            VSlog(f"URL de LiveTV: {final_url}.")
+            VSlog(f"URL finale de LiveTV: {final_url}.")
             return final_url
 
         VSlog("Aucune adresse trouvée après le texte clé.")
