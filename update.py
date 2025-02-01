@@ -1264,12 +1264,13 @@ def get_livetv_url():
 
         content = response.text
 
-        
+        default_url = "https://livetv.sx"
+
         # Trouver la position du texte clé
         target_position = content.find("LiveTV est accessible via")
         if target_position == -1:
             VSlog("Texte clé non trouvé dans la page.")
-            return "https://livetv.sx"
+            return default_url
         
         # Extraire l'URL après le texte clé
         content_after_target = content[target_position:]
@@ -1294,10 +1295,10 @@ def get_livetv_url():
             return final_url
 
         VSlog("Aucune adresse trouvée après le texte clé.")
-        return "https://livetv.sx"
+        return default_url
     except requests.RequestException as e:
         VSlog(f"Erreur lors de la récupération de l'URL de LiveTV : {e}")
-        return "https://livetv.sx"
+        return default_url
 
 def set_livetv_url(url):
     """Met à jour l'URL de LiveTV dans le fichier sites.json."""
