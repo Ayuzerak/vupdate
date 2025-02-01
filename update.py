@@ -1274,10 +1274,7 @@ def get_livetv_url():
         # Extraire l'URL après le texte clé
         content_after_target = content[target_position:]
         web_addresses = re.findall(r'(https?://[\\w.-]+(?:\\.[\\w\\.-]+)+(?:/[\\w\\.-]*)*)', content_after_target)
-
-        VSlog(f"Web address : {web_addresses[0]}")
-        VSlog(f"Content after target : {content_after_target}")
-
+        
         if web_addresses:
             if web_addresses[1] and "livetv" in web_addresses[1]:
                 url = web_addresses[1].replace("/frx/", "").replace("httpss", "https") + "/"
@@ -1297,10 +1294,10 @@ def get_livetv_url():
             return final_url
 
         VSlog("Aucune adresse trouvée après le texte clé.")
-        return None
+        return "https://livetv.sx"
     except requests.RequestException as e:
         VSlog(f"Erreur lors de la récupération de l'URL de LiveTV : {e}")
-        return None
+        return "https://livetv.sx"
 
 def set_livetv_url(url):
     """Met à jour l'URL de LiveTV dans le fichier sites.json."""
