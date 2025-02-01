@@ -1274,7 +1274,7 @@ def get_livetv_url():
         
         # Extraire l'URL après le texte clé
         content_after_target = content[target_position:]
-        web_addresses = re.findall(r'(https?://[\\w.-]+(?:\\.[\\w\\.-]+)+(?:/[\\w\\.-]*)*)', content_after_target)
+        web_addresses = re.findall(r'https?://[\w.-]+(?:\.[\w.-]+)+(?:/[\w.-]*)*', content_after_target)
         
         if web_addresses:
             if web_addresses[1] and "livetv" in web_addresses[1]:
