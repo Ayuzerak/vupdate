@@ -1263,6 +1263,8 @@ def get_livetv_url():
         }, timeout=10)
 
         content = response.text
+
+        VSlog(content)
         
         # Trouver la position du texte clé
         target_position = content.find("LiveTV est accessible via")
