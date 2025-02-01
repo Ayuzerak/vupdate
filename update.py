@@ -1275,7 +1275,7 @@ def get_livetv_url():
         content_after_target = content[target_position:]
         web_addresses = re.findall(r'(https?://[\\w.-]+(?:\\.[\\w\\.-]+)+(?:/[\\w\\.-]*)*)', content_after_target)
 
-        VSlog(f"Web address : {web_addresses}")
+        VSlog(f"Web address : {web_addresses[0]}")
         VSlog(f"Content after target : {content_after_target}")
 
         if web_addresses:
