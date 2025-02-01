@@ -1265,7 +1265,7 @@ def get_livetv_url():
         content = response.text
         
         # Trouver la position du texte clé
-        target_position = content.find("LiveTV est accessible")
+        target_position = content.find("LiveTV est accessible via")
         if target_position == -1:
             VSlog("Texte clé non trouvé dans la page.")
             return "https://livetv.sx"
@@ -1289,7 +1289,7 @@ def get_livetv_url():
             }, timeout=10, allow_redirects=True)
             
             final_url = final_response.url
-            VSlog(f"Mise à jour de l'URL de LiveTV vers {final_url}.")
+            VSlog(f"URL de LiveTV: {final_url}.")
             return final_url
 
         VSlog("Aucune adresse trouvée après le texte clé.")
