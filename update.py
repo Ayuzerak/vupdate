@@ -1264,7 +1264,7 @@ def get_livetv_url():
 
         content = response.text
 
-        VSlog(content)
+        VSlog(f"Content URL : {content}")
         
         # Trouver la position du texte clé
         target_position = content.find("LiveTV est accessible via")
