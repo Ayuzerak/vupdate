@@ -1277,7 +1277,7 @@ def get_livetv_url():
         if web_addresses:
             if web_addresses[1] and "livetv" in web_addresses[1]:
                 url = web_addresses[1].replace("/frx/", "").replace("http", "https").replace("httpss", "https") + "/"
-            else
+            else:
                 url = web_addresses[0].replace("/frx/", "").replace("http", "https").replace("httpss", "https") + "/"
 
             if not url.startswith("http"):
