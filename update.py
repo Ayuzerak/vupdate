@@ -22,6 +22,7 @@ import string
 import glob
 import concurrent.futures
 import threading
+from urllib.parse import urlparse
 from requests.exceptions import RequestException, SSLError
 
 #from resources.lib.monitor import VStreamMonitor
@@ -1255,46 +1256,68 @@ def set_elitegol_url(url):
         VSlog(f"Error while setting EliteGol URL: {e}")
 
 def get_livetv_url():
-    """Récupère l'URL actuelle de LiveTV depuis son site référent."""
+    """
+    Récupère l'URL actuelle de LiveTV en analysant une page web référente.
+
+    Returns:
+        str: L'URL de LiveTV, ou None en cas d'erreur.
+    """
     VSlog("Récupération de l'URL de LiveTV.")
     try:
-        response = requests.get("https://top-infos.com/live-tv-sx-nouvelle-adresse/", headers={
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36"
-        }, timeout=10)
-
+        # Envoyer une requête HTTP pour récupérer le contenu de la page
+        response = requests.get(
+            "https://top-infos.com/live-tv-sx-nouvelle-adresse/",
+            headers={
+                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36"
+            },
+            timeout=10
+        )
+        response.raise_for_status()  # Lève une exception si le statut HTTP n'est pas 200
         content = response.text
 
-        VSlog(f"Content URL : {content}")
-        
         # Trouver la position du texte clé
         target_position = content.find("LiveTV est accessible via")
         if target_position == -1:
             VSlog("Texte clé non trouvé dans la page.")
-            return "https://livetv.sx"
-        
-        # Extraire l'URL après le texte clé
+            return "https://livetv.sx"  # URL par défaut
+
+        # Extraire les URLs après le texte clé
         content_after_target = content[target_position:]
-        web_addresses = re.findall(r'(https?://[\\w.-]+(?:\\.[\\w\\.-]+)+(?:/[\\w\\.-]*)*)', content_after_target)
-        
-        if web_addresses:
-            if web_addresses[1] and "livetv" in web_addresses[1]:
-                url = web_addresses[1].replace("/frx/", "").replace("http", "https").replace("httpss", "https") + "/"
-            else:
-                url = web_addresses[0].replace("/frx/", "").replace("http", "https").replace("httpss", "https") + "/"
+        web_addresses = re.findall(r'(https?://[^\s/$.?#].[^\s]*)', content_after_target)
 
-            if not url.startswith("http"):
-                url = "https://" + url
-            VSlog(f"URL de LiveTV trouvée : {url}")
-            # Vérifier si l'URL récupérée redirige ailleurs
-            final_response = requests.get(url, headers={
+        if not web_addresses:
+            VSlog("Aucune adresse trouvée après le texte clé.")
+            return None
+
+        # Nettoyer et valider l'URL
+        url = web_addresses[0].replace("/frx/", "").replace("httpss", "https")
+        if not url.startswith("http"):
+            url = "https://" + url
+
+        # Vérifier si l'URL est valide
+        parsed_url = urlparse(url)
+        if not parsed_url.scheme or not parsed_url.netloc:
+            VSlog(f"URL invalide : {url}")
+            return None
+
+        # Suivre les redirections pour obtenir l'URL finale
+        final_response = requests.get(
+            url,
+            headers={
                 "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36"
-            }, timeout=10, allow_redirects=True)
-            
-            final_url = final_response.url
-            VSlog(f"URL finale de LiveTV: {final_url}.")
-            return final_url
+            },
+            timeout=10,
+            allow_redirects=True
+        )
+        final_url = final_response.url
+        VSlog(f"URL finale de LiveTV: {final_url}.")
+        return final_url
 
-        VSlog("Aucune adresse trouvée après le texte clé.")
+    except requests.Timeout:
+        VSlog("Erreur : La requête a expiré.")
+        return None
+    except requests.ConnectionError:
+        VSlog("Erreur : Impossible de se connecter au serveur.")
         return None
     except requests.RequestException as e:
         VSlog(f"Erreur lors de la récupération de l'URL de LiveTV : {e}")
