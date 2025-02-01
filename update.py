@@ -1258,25 +1258,28 @@ def get_livetv_url():
     """Récupère l'URL actuelle de LiveTV depuis son site référent."""
     VSlog("Récupération de l'URL de LiveTV.")
     try:
-        response = requests.get("https://www.vpnclub.fr/livetv-nouvelle-adresse/", headers={
+        response = requests.get("https://top-infos.com/live-tv-sx-nouvelle-adresse/", headers={
             "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36"
         }, timeout=10)
 
         content = response.text
         
         # Trouver la position du texte clé
-        target_position = content.find("adresse actuelle de LiveTV est")
-        VSlog(content)
+        target_position = content.find("LiveTV est accessible")
         if target_position == -1:
             VSlog("Texte clé non trouvé dans la page.")
-            return None
+            return "https://livetv.sx"
         
         # Extraire l'URL après le texte clé
         content_after_target = content[target_position:]
-        web_addresses = re.findall(r'<strong>([\w.-]+\.me)</strong>', content_after_target)
+        web_addresses = re.findall(r'href="(https?://[\\w.-]+(?:\\.[\\w\\.-]+)+(?:/[\\w\\.-]*)*)', content_after_target)
         
         if web_addresses:
-            url = web_addresses[0].replace("http", "https").replace("httpss", "https") + "/"
+            if web_addresses[1] and "livetv" in web_addresses[1]:
+                url = web_addresses[1].replace("/frx/", "").replace("http", "https").replace("httpss", "https") + "/"
+            else
+                url = web_addresses[0].replace("/frx/", "").replace("http", "https").replace("httpss", "https") + "/"
+
             if not url.startswith("http"):
                 url = "https://" + url
             VSlog(f"URL de LiveTV trouvée : {url}")
