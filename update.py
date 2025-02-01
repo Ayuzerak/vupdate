@@ -1257,16 +1257,17 @@ def set_elitegol_url(url):
 def get_livetv_url():
     """Récupère l'URL actuelle de LiveTV depuis son site référent."""
     VSlog("Récupération de l'URL de LiveTV.")
+
+    current_url = "https://livetv819.me"
+    bypass_url = "https://livetv774.me"
+    default_url = "https://livetv.sx"
+
     try:
         response = requests.get("https://top-infos.com/live-tv-sx-nouvelle-adresse/", headers={
             "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36"
         }, timeout=10)
 
         content = response.text
-
-        current_url = "https://livetv819.me"
-        bypass_url = "https://livetv774.me"
-        default_url = "https://livetv.sx"
 
         if ping_server(current_url):
             default_url = current_url
