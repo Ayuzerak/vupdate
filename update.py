@@ -1277,7 +1277,7 @@ def get_livetv_url():
 
     try:
         response = requests.get("https://top-infos.com/live-tv-sx-nouvelle-adresse/", headers={
-            "User-Agent": "Mozilla/5.0"
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36"
         }, timeout=10)
 
         content = response.text
@@ -1290,7 +1290,7 @@ def get_livetv_url():
 
         # Vérifier la redirection de l'URL sélectionnée
         final_response = requests.get(default_url, headers={
-            "User-Agent": "Mozilla/5.0"
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36"
         }, timeout=10, allow_redirects=True)
 
         final_url = final_response.url
@@ -1318,7 +1318,7 @@ def get_livetv_url():
             VSlog(f"URL de LiveTV trouvée : {url}")
 
             # Vérifier la redirection
-            final_response = requests.get(url, headers={"User-Agent": "Mozilla/5.0"}, timeout=10, allow_redirects=True)
+            final_response = requests.get(url, headers={"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36"}, timeout=10, allow_redirects=True)
             final_url = final_response.url
 
             # Mise à jour du fichier si nécessaire
