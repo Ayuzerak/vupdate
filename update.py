@@ -1562,8 +1562,6 @@ class cUpdate:
 
             check_all_sites()
 
-            activate_site("channelstream", False)
-
             # Add new site if necessary
             VSlog("Adding PapaDuStream if not present.")
             ajouter_papadustream()
