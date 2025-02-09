@@ -43,7 +43,7 @@ def update_service_addon():
     backup_path = os.path.join(addons_dir, backup_name)
     
     # Vérification si la mise à jour a déjà été effectuée en cherchant le fichier 'updated'
-    updated_flag_path = os.path.join(addon_path, "updated")
+    updated_flag_path = os.path.join(addon_path, "updateded")
     if os.path.exists(updated_flag_path):
         print("La mise à jour a déjà été effectuée. Aucune action supplémentaire n'est nécessaire.")
         return
