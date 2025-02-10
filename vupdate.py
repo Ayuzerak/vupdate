@@ -29,51 +29,104 @@ from resources.lib.logger import VSlog, VSPath
 
 def insert_update_service_addon():
     """
-    Opens the update.py file at the given path, inserts the update_service_addon
-    method into the cUpdate class (if not already present) and adds a call to it
-    at the end of getUpdateSetting. Also, ensures that all required imports are present.
-    
-    Logging is done using VSlog("message") calls.
+    Opens the file at
+    special://home/addons/plugin.video.vstream/resources/lib/update.py
+    and makes the following changes:
+      1. If the required_imports list contains the tokens "VSlog" and/or "VSPath" (uncommented),
+         ensures that an import from resources.lib.comaddon includes addon and the required tokens.
+      2. Ensures required imports (os, requests, zipfile, shutil, datetime) are present.
+      3. Inserts the update_service_addon method into class cUpdate (if missing).
+      4. Inserts a call to self.update_service_addon() at the end of getUpdateSetting().
+
+    All logging uses VSlog("message") calls.
     """
     # Path to the file to modify
-    file_path = VSPath("special://home/addons/plugin.video.vstream/resources/lib/update.py")
+    file_path = "special://home/addons/plugin.video.vstream/resources/lib/update.py"
     
-    # Read the original file lines.
+    # Read the file lines
     with open(file_path, 'r', encoding='utf-8') as f:
         lines = f.readlines()
     
-    # ---- STEP 1: Ensure required imports are present ----
-    # List the required import lines. Adjust the VSPath and VSlog imports as needed.
+    # ---------------------------------------------------------------------------
+    # Define the required imports.
+    # For controlling the conditional import from resources.lib.comaddon,
+    # include the tokens "VSlog" and/or "VSPath" (as plain strings) in the list.
+    # Uncomment the token if you want it imported.
+    # ---------------------------------------------------------------------------
     required_imports = [
         "import os",
         "import requests",
         "import zipfile",
         "import shutil",
         "import datetime",
-        "from resources.lib.comaddon import VSPath  # TODO: Replace 'yourmodule' with the actual module for VSPath",
-        "from resources.lib.comaddon import VSlog   # TODO: Replace 'yourmodule' with the actual module for VSlog"
+        "VSlog",      # Uncomment to require VSlog from comaddon
+        "VSPath"   # Uncomment to require VSPath from comaddon
     ]
-    missing_imports = []
+    
+    # ---------------------------------------------------------------------------
+    # STEP 1: Conditionally ensure that the import from resources.lib.comaddon
+    # includes the tokens for VSlog and/or VSPath if they are uncommented.
+    # ---------------------------------------------------------------------------
+    comaddon_required = []
+    for token in ["VSlog", "VSPath"]:
+        # If token is present and not commented out, add it.
+        if any(imp.strip() == token for imp in required_imports if not imp.strip().startswith("#")):
+            comaddon_required.append(token)
+    
+    if comaddon_required:
+        found_comaddon_import = False
+        for i, line in enumerate(lines):
+            if line.strip().startswith("from resources.lib.comaddon import"):
+                found_comaddon_import = True
+                # Split the line into the "from ... import" parts.
+                parts = line.split("import", 1)
+                if len(parts) < 2:
+                    continue
+                # Get current imported tokens.
+                tokens = [t.strip() for t in parts[1].split(",") if t.strip()]
+                changed = False
+                # Ensure each required token is present.
+                for token in comaddon_required:
+                    if token not in tokens:
+                        tokens.append(token)
+                        changed = True
+                # Optionally, ensure "addon" is included.
+                if "addon" not in tokens:
+                    tokens.insert(0, "addon")
+                    changed = True
+                if changed:
+                    new_line = "from resources.lib.comaddon import " + ", ".join(tokens) + "\n"
+                    lines[i] = new_line
+                break
+        # If no import from resources.lib.comaddon was found, insert one.
+        if not found_comaddon_import:
+            new_import_line = "from resources.lib.comaddon import " + ", ".join(["addon"] + comaddon_required) + "\n"
+            # Insert after any initial comment or import block.
+            insert_index = 0
+            for i, line in enumerate(lines):
+                if not (line.strip() == "" or
+                        line.lstrip().startswith("#") or
+                        line.lstrip().startswith("import") or
+                        line.lstrip().startswith("from")):
+                    insert_index = i
+                    break
+            lines.insert(insert_index, new_import_line)
+    
+    # ---------------------------------------------------------------------------
+    # STEP 2: Ensure other required imports are present.
+    # Only check lines starting with "import" (skip tokens like "VSlog" or "VSPath").
+    # ---------------------------------------------------------------------------
     for req in required_imports:
-        token = req.split()[0]
-        if not any(token in line and req.split()[1] in line for line in lines if line.strip().startswith(("import", "from"))):
-            missing_imports.append(req + "\n")
+        if not req.startswith("import"):
+            continue
+        token = req.split()[1]  # e.g., 'os' for "import os"
+        if not any(line.strip().startswith(req.split()[0]) and token in line 
+                   for line in lines if line.strip().startswith(("import", "from"))):
+            lines.insert(0, req + "\n")
     
-    # Determine where the import block ends (we assume imports occur at the beginning).
-    insert_index = 0
-    for i, line in enumerate(lines):
-        if (line.strip() == "" or 
-            line.lstrip().startswith("#") or 
-            line.lstrip().startswith("import") or 
-            line.lstrip().startswith("from")):
-            insert_index = i + 1
-        else:
-            break
-    if missing_imports:
-        lines = lines[:insert_index] + missing_imports + lines[insert_index:]
-    
-    # ---- STEP 2: Insert update_service_addon method into class cUpdate if missing ----
-    # Locate the "class cUpdate:" declaration.
+    # ---------------------------------------------------------------------------
+    # STEP 3: Insert update_service_addon method into class cUpdate if missing.
+    # ---------------------------------------------------------------------------
     class_start_index = None
     class_indent = ""
     for i, line in enumerate(lines):
@@ -85,11 +138,11 @@ def insert_update_service_addon():
         VSlog("Error: Could not find 'class cUpdate:' in the file.")
         return
     
-    # Check if the update_service_addon method is already defined in cUpdate.
+    # Check if update_service_addon is already defined in cUpdate.
     method_defined = any(re.search(r'^\s*def\s+update_service_addon\s*\(', line)
                          for line in lines[class_start_index:])
     if not method_defined:
-        # Find the end of the class block.
+        # Find where the class block ends (first line with indent less than or equal to class_indent).
         insert_class_index = None
         for i in range(class_start_index + 1, len(lines)):
             if lines[i].strip() and (len(lines[i]) - len(lines[i].lstrip())) <= len(class_indent):
@@ -98,8 +151,7 @@ def insert_update_service_addon():
         if insert_class_index is None:
             insert_class_index = len(lines)
         
-        # Prepare the new method block with proper indentation.
-        method_indent = class_indent + "    "  # one level more than the class
+        method_indent = class_indent + "    "  # one level deeper than the class
         new_method = [
             "\n",
             f"{method_indent}def update_service_addon(self):\n",
@@ -225,16 +277,17 @@ def insert_update_service_addon():
             f"{method_indent}            VSlog(\"Aucun backup disponible pour restauration!\")\n",
             f"{method_indent}        return\n"
         ]
-        # Insert the new method block into the class.
         lines = lines[:insert_class_index] + new_method + lines[insert_class_index:]
     
-    # ---- STEP 3: Insert call to self.update_service_addon() at end of getUpdateSetting ----
+    # ---------------------------------------------------------------------------
+    # STEP 4: Insert call to self.update_service_addon() at the end of getUpdateSetting()
+    # ---------------------------------------------------------------------------
     new_lines = []
     in_get_update = False
     get_update_body_indent = ""
     call_inserted = False
-    for idx, line in enumerate(lines):
-        # Detect the beginning of the getUpdateSetting method.
+    for line in lines:
+        # Detect the start of getUpdateSetting
         if re.search(r'^\s*def\s+getUpdateSetting\s*\(self\)\s*:', line):
             in_get_update = True
             get_update_body_indent = ""
@@ -245,7 +298,7 @@ def insert_update_service_addon():
             # Determine the method body indent on the first non-empty line.
             if get_update_body_indent == "" and line.strip():
                 get_update_body_indent = line[:len(line) - len(line.lstrip())]
-            # If a line appears with an indent lower than the method body, assume the method ends.
+            # If a line appears with less indent than the method body, assume the method ended.
             if line.strip() and (len(line) - len(line.lstrip())) < len(get_update_body_indent):
                 if not call_inserted:
                     new_lines.append(get_update_body_indent + "self.update_service_addon()\n")
@@ -257,14 +310,15 @@ def insert_update_service_addon():
         else:
             new_lines.append(line)
     
-    # In case getUpdateSetting is the last method in the file and we never left its block.
+    # In case getUpdateSetting is the last method and its block never ended:
     if in_get_update and not call_inserted:
         new_lines.append(get_update_body_indent + "self.update_service_addon()\n")
     
-    # Write the modified file back.
+    # Write the modified lines back to the file.
     with open(file_path, 'w', encoding='utf-8') as f:
         f.writelines(new_lines)
     
+    # Assuming VSlog is now available from the import, log completion.
     VSlog("Insertion complete. The update_service_addon method and its call have been added to " + file_path)
     
 def add_vstreammonitor_import():
