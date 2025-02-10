@@ -41,7 +41,7 @@ def insert_update_service_addon():
     All logging uses VSlog("message") calls.
     """
     # Path to the file to modify
-    file_path = "special://home/addons/plugin.video.vstream/resources/lib/update.py"
+    file_path = VSPath("special://home/addons/plugin.video.vstream/resources/lib/update.py")
     
     # Read the file lines
     with open(file_path, 'r', encoding='utf-8') as f:
