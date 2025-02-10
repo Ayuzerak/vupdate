@@ -6,7 +6,7 @@ import xbmc
 import xbmcvfs
 import shutil
 import os
-
+import traceback
 import json
 import requests
 import re
@@ -17,6 +17,7 @@ import textwrap
 
 import random
 import string
+from string import Template
 import glob
 import concurrent.futures
 import threading
@@ -865,45 +866,45 @@ def add_recommendations_for_netflix_like_recommandations(recommendations_num):
             VSlog(f"Error writing file: {str(e)}")
     else:
         VSlog("No changes needed.")
-
-def create_recommandations_file_for_netflix_like_recommandations(because_num):
+        
+def create_recommendations_file_for_netflix_like_recommendations(because_num):
     """
-    Vérifie si le fichier recommandations.py existe dans le chemin cible.
+    Vérifie si le fichier recommendations.py existe dans le chemin cible.
     S'il n'existe pas, le fichier est créé avec le contenu prédéfini.
     """
-
-    VSlog("create_recommandations_file_for_netflix_like_recommandations()")
+    VSlog("create_recommendations_file_for_netflix_like_recommendations()")
 
     # Chemin vers le répertoire cible
-    file_path = VSPath('special://home/addons/plugin.video.vstream/resources/lib/recommandations.py').replace('\\', '/')
+    file_path = VSPath('special://home/addons/plugin.video.vstream/resources/lib/recommendations.py').replace('\\', '/')
 
     try:
         # Vérification de l'existence du fichier
         if not os.path.exists(file_path):
             VSlog(f"Fichier {file_path} non trouvé. Création en cours.")
 
-            # Contenu prédéfini pour recommandations.py
-            file_content = f"""from resources.lib.comaddon import dialog, addon, VSlog
+            # Template du contenu prédéfini pour recommendations.py.
+            # Utilisation de triple quotes avec des quotes simples pour éviter d'échapper les docstrings.
+            file_content_template = Template(r'''from resources.lib.comaddon import dialog, addon, VSlog
 from resources.lib.gui.gui import cGui
 from resources.lib.handler.outputParameterHandler import cOutputParameterHandler
 from resources.lib.db import cDb
 from resources.sites.themoviedb_org import SITE_IDENTIFIER as SITE_TMDB
 
-SITE_IDENTIFIER = 'cRecommandations'
-SITE_NAME = 'Recommandations'
+SITE_IDENTIFIER = 'cRecommendations'
+SITE_NAME = 'Recommendations'
 
-class cRecommandations:
+class cRecommendations:
     DIALOG = dialog()
     ADDON = addon()
 
-    def showRecommandations(self, category, content_type, icon):
-        \"""
+    def showRecommendations(self, category, content_type, icon):
+        """
         Generic method to fetch and display recommendations.
 
         :param category: The category ID for the type of content ('1' for movies, '4' for shows).
         :param content_type: The type of content ('showMovies' or 'showSeries').
         :param icon: The icon file to use ('films.png' or 'series.png').
-        \"""
+        """
         oGui = cGui()
         try:
             VSlog(f"Fetching recommendations for category {category}")
@@ -921,25 +922,28 @@ class cRecommandations:
                     oOutputParameterHandler.addParameter(
                         'siteUrl', f"{'movie' if category == '1' else 'tv'}/{data['tmdb_id']}/recommendations"
                     )
-                    title = self.ADDON.VSlang({because_num}) + ' ' + data['title']
-                    VSlog(f"Title {title} recommanded from views.")
+                    title = self.ADDON.VSlang(${because_num}) + ' ' + data['title']
+                    VSlog(f"Title {title} recommended from views.")
                     oGui.addMovie(SITE_TMDB, content_type, title, icon, '', '', oOutputParameterHandler)
 
         except Exception as e:
-            VSlog(f"Error fetching recommendations: {e}")
+            VSlog(f"Error fetching recommendations: {e}\n{traceback.format_exc()}")
         finally:
             # Force the 'files' view for better clarity
             cGui.CONTENT = 'files'
             oGui.setEndOfDirectory()
 
-    def showMoviesRecommandations(self):
-        \"""Fetch and display movie recommendations.\"""
-        self.showRecommandations('1', 'showMovies', 'films.png')
+    def showMoviesRecommendations(self):
+        """Fetch and display movie recommendations."""
+        self.showRecommendations('1', 'showMovies', 'films.png')
 
-    def showShowsRecommandations(self):
-        \"""Fetch and display TV show recommendations.\"""
-        self.showRecommandations('4', 'showSeries', 'series.png')
-"""
+    def showShowsRecommendations(self):
+        """Fetch and display TV show recommendations."""
+        self.showRecommendations('4', 'showSeries', 'series.png')
+''')
+
+            # Substituer la variable dynamique dans le template
+            file_content = file_content_template.substitute(because_num=because_num)
 
             # Création du fichier avec le contenu prédéfini
             with open(file_path, 'w', encoding='utf-8') as file:
@@ -950,7 +954,7 @@ class cRecommandations:
             VSlog(f"Fichier {file_path} déjà existant. Aucune action requise.")
 
     except Exception as e:
-        VSlog(f"Erreur lors de la création du fichier recommandations.py : {e}")
+        VSlog(f"Erreur lors de la création du fichier recommendations.py : {e}\n{traceback.format_exc()}")
 
 def add_get_recommendations_method_for_netflix_like_recommandations():
     """
