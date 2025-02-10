@@ -422,19 +422,19 @@ def add_is_recommendations_for_netflix_like_recommendations():
     # Chemin vers le fichier default.py
     file_path = VSPath('special://home/addons/plugin.video.vstream/default.py').replace('\\', '/')
 
-    # Contenu de la méthode `isrecommendations` à ajouter dans la classe `main`
+    # Contenu de la méthode `isRecommendations` à ajouter dans la classe `main`
     method_content = """
     def isRecommendations(self, sSiteName, sFunction):
         return
     """
 
-    # Contenu de la fonction libre `isrecommendations` à ajouter
+    # Contenu de la fonction libre `isRecommendations` à ajouter
     function_content = """
-def isrecommendations(sSiteName, sFunction): 
+def isRecommendations(sSiteName, sFunction): 
     if sSiteName == 'crecommendations':
         print("HEHEHEHEHEHEHEHEHEHE COUCOU (fonction libre)")
 
-        plugins = __import__('resources.lib.recommendations', fromlist=['crecommendations']).crecommendations()
+        plugins = __import__('resources.lib.recommendations', fromlist=['cRecommendations']).cRecommendations()
         function = getattr(plugins, sFunction)
         function()
         return True
@@ -455,8 +455,8 @@ def isrecommendations(sSiteName, sFunction):
         VSlog("La classe `main` est introuvable dans le fichier.")
         return
 
-    # Vérifier si la méthode isrecommendations existe dans la classe main
-    if not re.search(r"class main.*?def isrecommendations\(.*\):", content, re.DOTALL):
+    # Vérifier si la méthode isRecommendations existe dans la classe main
+    if not re.search(r"class main.*?def isRecommendations\(.*\):", content, re.DOTALL):
         # Ajouter la méthode dans la classe `main`
         content = re.sub(
             r"(class main\s*:\s*)\n",
@@ -465,19 +465,19 @@ def isrecommendations(sSiteName, sFunction):
             count=1,
             flags=re.DOTALL
         )
-        VSlog("La méthode `isrecommendations` a été ajoutée à la classe `main`.")
+        VSlog("La méthode `isRecommendations` a été ajoutée à la classe `main`.")
 
     else:
-        VSlog("La méthode `isrecommendations` existe déjà dans la classe `main`.")
+        VSlog("La méthode `isRecommendations` existe déjà dans la classe `main`.")
 
-    # Vérifier si une fonction libre `isrecommendations` existe déjà
-    if not re.search(r"^def isrecommendations\(.*\):", content, re.MULTILINE):
+    # Vérifier si une fonction libre `isRecommendations` existe déjà
+    if not re.search(r"^def isRecommendations\(.*\):", content, re.MULTILINE):
         # Ajouter la fonction libre à la fin du fichier
         content += function_content
-        VSlog("La fonction libre `isrecommendations` a été ajoutée.")
+        VSlog("La fonction libre `isRecommendations` a été ajoutée.")
 
     else:
-        VSlog("La fonction libre `isrecommendations` existe déjà.")
+        VSlog("La fonction libre `isRecommendations` existe déjà.")
 
     # Écrire les modifications dans le fichier
     with open(file_path, 'w', encoding='utf-8') as file:
@@ -914,12 +914,12 @@ def add_recommendations_for_netflix_like_recommendations(recommendations_num):
 
     # Code blocks to insert
     movies_recommendations_code = f"""
-        #recommendations
+        #Recommendations
         oOutputParameterHandler.addParameter('siteUrl', 'movies/recommendations')
         oGui.addDir('crecommendations', 'showMoviesrecommendations', self.addons.VSlang({recommendations_num}), 'listes.png', oOutputParameterHandler)
 """
     series_recommendations_code = f"""
-        #recommendations
+        #Recommendations
         oOutputParameterHandler.addParameter('siteUrl', 'shows/recommendations')
         oGui.addDir('crecommendations', 'showShowsrecommendations', self.addons.VSlang({recommendations_num}), 'listes.png', oOutputParameterHandler)
 """
