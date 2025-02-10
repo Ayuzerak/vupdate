@@ -618,7 +618,7 @@ def add_translations_to_fr_fr_po_file_for_netflix_like_recommendations():
 
         # Gère l'ajout de 'My Recommendations'
         if not existing_translations["My Recommendations"].get("found", False):
-            new_entries.append((current_num, "My Recommendations", "Mes recommendations"))
+            new_entries.append((current_num, "My Recommendations", "Mes recommandations"))
             my_recommendations_num = current_num
             current_num += 1
 
@@ -852,7 +852,7 @@ def add_translations_to_en_gb_po_file_for_netflix_like_recommendations():
 
         # Gère l'ajout de 'My Recommendations'
         if not existing_translations["My Recommendations"].get("found", False):
-            new_entries.append((current_num, "My Recommendations", "Mes recommendations"))
+            new_entries.append((current_num, "My Recommendations", "Mes recommandations"))
             my_recommendations_num = current_num
             current_num += 1
 
