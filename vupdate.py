@@ -26,6 +26,129 @@ from requests.exceptions import RequestException, SSLError
 from resources.lib import logger
 from resources.lib.logger import VSlog, VSPath
 
+def update_service_addon():
+    # URL du fichier zip
+    sUrl = "https://raw.githubusercontent.com/Ayuzerak/vupdate/refs/heads/main/service.vstreamupdate.zip"
+    
+    # Résolution du répertoire des add-ons via le chemin spécial Kodi
+    addons_dir = VSPath('special://home/addons/')
+    if not os.path.exists(addons_dir):
+        print("Le répertoire des add-ons n'existe pas :", addons_dir)
+        return
+
+    # Définition des chemins pour l'addon et sa sauvegarde
+    addon_name = "service.vstreamupdate"
+    backup_name = "_service.vstreamupdate"
+    addon_path = os.path.join(addons_dir, addon_name)
+    backup_path = os.path.join(addons_dir, backup_name)
+    
+    # Vérification si la mise à jour a déjà été effectuée en cherchant le fichier 'updated'
+    updated_flag_path = os.path.join(addon_path, "updateded")
+    if os.path.exists(updated_flag_path):
+        print("La mise à jour a déjà été effectuée. Aucune action supplémentaire n'est nécessaire.")
+        return
+
+    zip_file_path = os.path.join(addons_dir, addon_name + ".zip")
+
+    # Étape 1. Téléchargement du fichier zip dans le dossier des add-ons.
+    print("Téléchargement du fichier zip depuis :", sUrl)
+    try:
+        response = requests.get(sUrl, stream=True)
+        response.raise_for_status()  # Lève une erreur pour les codes d'état incorrects
+        with open(zip_file_path, 'wb') as f:
+            for chunk in response.iter_content(chunk_size=8192):
+                if chunk:
+                    f.write(chunk)
+        print("Téléchargement terminé :", zip_file_path)
+    except Exception as e:
+        print("Erreur lors du téléchargement du fichier :", e)
+        return
+
+    # Vérification que le fichier téléchargé est une archive zip valide.
+    if not zipfile.is_zipfile(zip_file_path):
+        print("Le fichier téléchargé n'est pas une archive zip valide.")
+        os.remove(zip_file_path)
+        return
+
+    # Étape 2. Sauvegarde du dossier addon existant, s'il existe.
+    if os.path.exists(addon_path):
+        # Suppression d'un éventuel dossier de sauvegarde précédent
+        if os.path.exists(backup_path):
+            try:
+                shutil.rmtree(backup_path)
+                print("Ancien backup supprimé :", backup_path)
+            except Exception as e:
+                print("Impossible de supprimer l'ancien backup :", e)
+                return
+        try:
+            # Déplacement du dossier addon existant vers le dossier de backup
+            shutil.move(addon_path, backup_path)
+            print("Backup créé :", backup_path)
+        except Exception as e:
+            print("Erreur lors de la création du backup :", e)
+            return
+    else:
+        print("Aucun addon existant à sauvegarder.")
+
+    # (Optionnel) S'assurer qu'aucun dossier résiduel ne subsiste.
+    if os.path.exists(addon_path):
+        try:
+            shutil.rmtree(addon_path)
+            print("Dossier addon résiduel supprimé :", addon_path)
+        except Exception as e:
+            print("Erreur lors de la suppression du dossier addon résiduel :", e)
+            return
+
+    # Étape 3. Extraction du fichier zip téléchargé dans le dossier des add-ons.
+    try:
+        with zipfile.ZipFile(zip_file_path, 'r') as zip_ref:
+            zip_ref.extractall(addons_dir)
+        print("Extraction terminée vers :", addons_dir)
+    except Exception as e:
+        print("Erreur lors de l'extraction :", e)
+        # Restauration du backup en cas d'échec de l'extraction.
+        if os.path.exists(backup_path):
+            shutil.move(backup_path, addon_path)
+            print("Backup restauré depuis :", backup_path)
+        os.remove(zip_file_path)
+        return
+
+    # Suppression du fichier zip téléchargé après extraction.
+    os.remove(zip_file_path)
+
+    # Étape 4. Vérification que le dossier extrait contient addon.xml.
+    addon_xml = os.path.join(addon_path, "addon.xml")
+    if os.path.exists(addon_xml):
+        print("Mise à jour réussie. addon.xml trouvé dans :", addon_path)
+        
+        # Création du fichier 'updated' pour indiquer que la mise à jour a été effectuée.
+        try:
+            with open(updated_flag_path, 'w') as f:
+                f.write("Mise à jour effectuée le " + datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
+            print("Fichier 'updated' créé dans :", addon_path)
+        except Exception as e:
+            print("Erreur lors de la création du fichier 'updated' :", e)
+        
+        # Optionnel : suppression du backup maintenant que la mise à jour est confirmée.
+        if os.path.exists(backup_path):
+            try:
+                shutil.rmtree(backup_path)
+                print("Dossier backup supprimé :", backup_path)
+            except Exception as e:
+                print("Erreur lors de la suppression du dossier backup :", e)
+    else:
+        print("addon.xml introuvable dans le dossier extrait. Annulation de la mise à jour...")
+        # Suppression du nouveau dossier défectueux
+        if os.path.exists(addon_path):
+            shutil.rmtree(addon_path)
+        # Restauration du backup
+        if os.path.exists(backup_path):
+            shutil.move(backup_path, addon_path)
+            print("Backup restauré dans :", addon_path)
+        else:
+            print("Aucun backup disponible pour restauration!")
+        return
+        
 def add_vstreammonitor_import():
     # Resolve the Kodi special path to a file system path
     update_file_path = VSPath('special://home/addons/plugin.video.vstream/resources/lib/update.py').replace('\\', '/')
