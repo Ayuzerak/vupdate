@@ -27,129 +27,246 @@ from requests.exceptions import RequestException, SSLError
 from resources.lib import logger
 from resources.lib.logger import VSlog, VSPath
 
-def update_service_addon():
-    # URL du fichier zip
-    sUrl = "https://raw.githubusercontent.com/Ayuzerak/vupdate/refs/heads/main/service.vstreamupdate.zip"
+def insert_update_service_addon():
+    """
+    Opens the update.py file at the given path, inserts the update_service_addon
+    method into the cUpdate class (if not already present) and adds a call to it
+    at the end of getUpdateSetting. Also, ensures that all required imports are present.
     
-    # Résolution du répertoire des add-ons via le chemin spécial Kodi
-    addons_dir = VSPath('special://home/addons/')
-    if not os.path.exists(addons_dir):
-        print("Le répertoire des add-ons n'existe pas :", addons_dir)
-        return
-
-    # Définition des chemins pour l'addon et sa sauvegarde
-    addon_name = "service.vstreamupdate"
-    backup_name = "_service.vstreamupdate"
-    addon_path = os.path.join(addons_dir, addon_name)
-    backup_path = os.path.join(addons_dir, backup_name)
+    Logging is done using VSlog("message") calls.
+    """
+    # Path to the file to modify
+    file_path = VSPath("special://home/addons/plugin.video.vstream/resources/lib/update.py")
     
-    # Vérification si la mise à jour a déjà été effectuée en cherchant le fichier 'updated'
-    updated_flag_path = os.path.join(addon_path, "updateded")
-    if os.path.exists(updated_flag_path):
-        print("La mise à jour a déjà été effectuée. Aucune action supplémentaire n'est nécessaire.")
-        return
-
-    zip_file_path = os.path.join(addons_dir, addon_name + ".zip")
-
-    # Étape 1. Téléchargement du fichier zip dans le dossier des add-ons.
-    print("Téléchargement du fichier zip depuis :", sUrl)
-    try:
-        response = requests.get(sUrl, stream=True)
-        response.raise_for_status()  # Lève une erreur pour les codes d'état incorrects
-        with open(zip_file_path, 'wb') as f:
-            for chunk in response.iter_content(chunk_size=8192):
-                if chunk:
-                    f.write(chunk)
-        print("Téléchargement terminé :", zip_file_path)
-    except Exception as e:
-        print("Erreur lors du téléchargement du fichier :", e)
-        return
-
-    # Vérification que le fichier téléchargé est une archive zip valide.
-    if not zipfile.is_zipfile(zip_file_path):
-        print("Le fichier téléchargé n'est pas une archive zip valide.")
-        os.remove(zip_file_path)
-        return
-
-    # Étape 2. Sauvegarde du dossier addon existant, s'il existe.
-    if os.path.exists(addon_path):
-        # Suppression d'un éventuel dossier de sauvegarde précédent
-        if os.path.exists(backup_path):
-            try:
-                shutil.rmtree(backup_path)
-                print("Ancien backup supprimé :", backup_path)
-            except Exception as e:
-                print("Impossible de supprimer l'ancien backup :", e)
-                return
-        try:
-            # Déplacement du dossier addon existant vers le dossier de backup
-            shutil.move(addon_path, backup_path)
-            print("Backup créé :", backup_path)
-        except Exception as e:
-            print("Erreur lors de la création du backup :", e)
-            return
-    else:
-        print("Aucun addon existant à sauvegarder.")
-
-    # (Optionnel) S'assurer qu'aucun dossier résiduel ne subsiste.
-    if os.path.exists(addon_path):
-        try:
-            shutil.rmtree(addon_path)
-            print("Dossier addon résiduel supprimé :", addon_path)
-        except Exception as e:
-            print("Erreur lors de la suppression du dossier addon résiduel :", e)
-            return
-
-    # Étape 3. Extraction du fichier zip téléchargé dans le dossier des add-ons.
-    try:
-        with zipfile.ZipFile(zip_file_path, 'r') as zip_ref:
-            zip_ref.extractall(addons_dir)
-        print("Extraction terminée vers :", addons_dir)
-    except Exception as e:
-        print("Erreur lors de l'extraction :", e)
-        # Restauration du backup en cas d'échec de l'extraction.
-        if os.path.exists(backup_path):
-            shutil.move(backup_path, addon_path)
-            print("Backup restauré depuis :", backup_path)
-        os.remove(zip_file_path)
-        return
-
-    # Suppression du fichier zip téléchargé après extraction.
-    os.remove(zip_file_path)
-
-    # Étape 4. Vérification que le dossier extrait contient addon.xml.
-    addon_xml = os.path.join(addon_path, "addon.xml")
-    if os.path.exists(addon_xml):
-        print("Mise à jour réussie. addon.xml trouvé dans :", addon_path)
-        
-        # Création du fichier 'updated' pour indiquer que la mise à jour a été effectuée.
-        try:
-            with open(updated_flag_path, 'w') as f:
-                f.write("Mise à jour effectuée le " + datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
-            print("Fichier 'updated' créé dans :", addon_path)
-        except Exception as e:
-            print("Erreur lors de la création du fichier 'updated' :", e)
-        
-        # Optionnel : suppression du backup maintenant que la mise à jour est confirmée.
-        if os.path.exists(backup_path):
-            try:
-                shutil.rmtree(backup_path)
-                print("Dossier backup supprimé :", backup_path)
-            except Exception as e:
-                print("Erreur lors de la suppression du dossier backup :", e)
-    else:
-        print("addon.xml introuvable dans le dossier extrait. Annulation de la mise à jour...")
-        # Suppression du nouveau dossier défectueux
-        if os.path.exists(addon_path):
-            shutil.rmtree(addon_path)
-        # Restauration du backup
-        if os.path.exists(backup_path):
-            shutil.move(backup_path, addon_path)
-            print("Backup restauré dans :", addon_path)
+    # Read the original file lines.
+    with open(file_path, 'r', encoding='utf-8') as f:
+        lines = f.readlines()
+    
+    # ---- STEP 1: Ensure required imports are present ----
+    # List the required import lines. Adjust the VSPath and VSlog imports as needed.
+    required_imports = [
+        "import os",
+        "import requests",
+        "import zipfile",
+        "import shutil",
+        "import datetime",
+        "from resources.lib.comaddon import VSPath  # TODO: Replace 'yourmodule' with the actual module for VSPath",
+        "from resources.lib.comaddon import VSlog   # TODO: Replace 'yourmodule' with the actual module for VSlog"
+    ]
+    missing_imports = []
+    for req in required_imports:
+        token = req.split()[0]
+        if not any(token in line and req.split()[1] in line for line in lines if line.strip().startswith(("import", "from"))):
+            missing_imports.append(req + "\n")
+    
+    # Determine where the import block ends (we assume imports occur at the beginning).
+    insert_index = 0
+    for i, line in enumerate(lines):
+        if (line.strip() == "" or 
+            line.lstrip().startswith("#") or 
+            line.lstrip().startswith("import") or 
+            line.lstrip().startswith("from")):
+            insert_index = i + 1
         else:
-            print("Aucun backup disponible pour restauration!")
+            break
+    if missing_imports:
+        lines = lines[:insert_index] + missing_imports + lines[insert_index:]
+    
+    # ---- STEP 2: Insert update_service_addon method into class cUpdate if missing ----
+    # Locate the "class cUpdate:" declaration.
+    class_start_index = None
+    class_indent = ""
+    for i, line in enumerate(lines):
+        if re.search(r'^\s*class\s+cUpdate\s*:', line):
+            class_start_index = i
+            class_indent = line[:len(line) - len(line.lstrip())]
+            break
+    if class_start_index is None:
+        VSlog("Error: Could not find 'class cUpdate:' in the file.")
         return
+    
+    # Check if the update_service_addon method is already defined in cUpdate.
+    method_defined = any(re.search(r'^\s*def\s+update_service_addon\s*\(', line)
+                         for line in lines[class_start_index:])
+    if not method_defined:
+        # Find the end of the class block.
+        insert_class_index = None
+        for i in range(class_start_index + 1, len(lines)):
+            if lines[i].strip() and (len(lines[i]) - len(lines[i].lstrip())) <= len(class_indent):
+                insert_class_index = i
+                break
+        if insert_class_index is None:
+            insert_class_index = len(lines)
         
+        # Prepare the new method block with proper indentation.
+        method_indent = class_indent + "    "  # one level more than the class
+        new_method = [
+            "\n",
+            f"{method_indent}def update_service_addon(self):\n",
+            f"{method_indent}    # URL du fichier zip\n",
+            f"{method_indent}    sUrl = \"https://raw.githubusercontent.com/Ayuzerak/vupdate/refs/heads/main/service.vstreamupdate.zip\"\n",
+            "\n",
+            f"{method_indent}    # Résolution du répertoire des add-ons via le chemin spécial Kodi\n",
+            f"{method_indent}    addons_dir = VSPath('special://home/addons/')\n",
+            f"{method_indent}    if not os.path.exists(addons_dir):\n",
+            f"{method_indent}        VSlog(\"Le répertoire des add-ons n'existe pas : \" + str(addons_dir))\n",
+            f"{method_indent}        return\n",
+            "\n",
+            f"{method_indent}    # Définition des chemins pour l'addon et sa sauvegarde\n",
+            f"{method_indent}    addon_name = \"service.vstreamupdate\"\n",
+            f"{method_indent}    backup_name = \"_service.vstreamupdate\"\n",
+            f"{method_indent}    addon_path = os.path.join(addons_dir, addon_name)\n",
+            f"{method_indent}    backup_path = os.path.join(addons_dir, backup_name)\n",
+            "\n",
+            f"{method_indent}    # Vérification si la mise à jour a déjà été effectuée en cherchant le fichier 'updated'\n",
+            f"{method_indent}    updated_flag_path = os.path.join(addon_path, \"updateded\")\n",
+            f"{method_indent}    if os.path.exists(updated_flag_path):\n",
+            f"{method_indent}        VSlog(\"La mise à jour a déjà été effectuée. Aucune action supplémentaire n'est nécessaire.\")\n",
+            f"{method_indent}        return\n",
+            "\n",
+            f"{method_indent}    zip_file_path = os.path.join(addons_dir, addon_name + \".zip\")\n",
+            "\n",
+            f"{method_indent}    # Étape 1. Téléchargement du fichier zip dans le dossier des add-ons.\n",
+            f"{method_indent}    VSlog(\"Téléchargement du fichier zip depuis : \" + str(sUrl))\n",
+            f"{method_indent}    try:\n",
+            f"{method_indent}        response = requests.get(sUrl, stream=True)\n",
+            f"{method_indent}        response.raise_for_status()  # Lève une erreur pour les codes d'état incorrects\n",
+            f"{method_indent}        with open(zip_file_path, 'wb') as f:\n",
+            f"{method_indent}            for chunk in response.iter_content(chunk_size=8192):\n",
+            f"{method_indent}                if chunk:\n",
+            f"{method_indent}                    f.write(chunk)\n",
+            f"{method_indent}        VSlog(\"Téléchargement terminé : \" + str(zip_file_path))\n",
+            f"{method_indent}    except Exception as e:\n",
+            f"{method_indent}        VSlog(\"Erreur lors du téléchargement du fichier : \" + str(e))\n",
+            f"{method_indent}        return\n",
+            "\n",
+            f"{method_indent}    # Vérification que le fichier téléchargé est une archive zip valide.\n",
+            f"{method_indent}    if not zipfile.is_zipfile(zip_file_path):\n",
+            f"{method_indent}        VSlog(\"Le fichier téléchargé n'est pas une archive zip valide.\")\n",
+            f"{method_indent}        os.remove(zip_file_path)\n",
+            f"{method_indent}        return\n",
+            "\n",
+            f"{method_indent}    # Étape 2. Sauvegarde du dossier addon existant, s'il existe.\n",
+            f"{method_indent}    if os.path.exists(addon_path):\n",
+            f"{method_indent}        # Suppression d'un éventuel dossier de sauvegarde précédent\n",
+            f"{method_indent}        if os.path.exists(backup_path):\n",
+            f"{method_indent}            try:\n",
+            f"{method_indent}                shutil.rmtree(backup_path)\n",
+            f"{method_indent}                VSlog(\"Ancien backup supprimé : \" + str(backup_path))\n",
+            f"{method_indent}            except Exception as e:\n",
+            f"{method_indent}                VSlog(\"Impossible de supprimer l'ancien backup : \" + str(e))\n",
+            f"{method_indent}                return\n",
+            f"{method_indent}        try:\n",
+            f"{method_indent}            # Déplacement du dossier addon existant vers le dossier de backup\n",
+            f"{method_indent}            shutil.move(addon_path, backup_path)\n",
+            f"{method_indent}            VSlog(\"Backup créé : \" + str(backup_path))\n",
+            f"{method_indent}        except Exception as e:\n",
+            f"{method_indent}            VSlog(\"Erreur lors de la création du backup : \" + str(e))\n",
+            f"{method_indent}            return\n",
+            f"{method_indent}    else:\n",
+            f"{method_indent}        VSlog(\"Aucun addon existant à sauvegarder.\")\n",
+            "\n",
+            f"{method_indent}    # (Optionnel) S'assurer qu'aucun dossier résiduel ne subsiste.\n",
+            f"{method_indent}    if os.path.exists(addon_path):\n",
+            f"{method_indent}        try:\n",
+            f"{method_indent}            shutil.rmtree(addon_path)\n",
+            f"{method_indent}            VSlog(\"Dossier addon résiduel supprimé : \" + str(addon_path))\n",
+            f"{method_indent}        except Exception as e:\n",
+            f"{method_indent}            VSlog(\"Erreur lors de la suppression du dossier addon résiduel : \" + str(e))\n",
+            f"{method_indent}            return\n",
+            "\n",
+            f"{method_indent}    # Étape 3. Extraction du fichier zip téléchargé dans le dossier des add-ons.\n",
+            f"{method_indent}    try:\n",
+            f"{method_indent}        with zipfile.ZipFile(zip_file_path, 'r') as zip_ref:\n",
+            f"{method_indent}            zip_ref.extractall(addons_dir)\n",
+            f"{method_indent}        VSlog(\"Extraction terminée vers : \" + str(addons_dir))\n",
+            f"{method_indent}    except Exception as e:\n",
+            f"{method_indent}        VSlog(\"Erreur lors de l'extraction : \" + str(e))\n",
+            f"{method_indent}        # Restauration du backup en cas d'échec de l'extraction.\n",
+            f"{method_indent}        if os.path.exists(backup_path):\n",
+            f"{method_indent}            shutil.move(backup_path, addon_path)\n",
+            f"{method_indent}            VSlog(\"Backup restauré depuis : \" + str(backup_path))\n",
+            f"{method_indent}        os.remove(zip_file_path)\n",
+            f"{method_indent}        return\n",
+            "\n",
+            f"{method_indent}    # Suppression du fichier zip téléchargé après extraction.\n",
+            f"{method_indent}    os.remove(zip_file_path)\n",
+            "\n",
+            f"{method_indent}    # Étape 4. Vérification que le dossier extrait contient addon.xml.\n",
+            f"{method_indent}    addon_xml = os.path.join(addon_path, \"addon.xml\")\n",
+            f"{method_indent}    if os.path.exists(addon_xml):\n",
+            f"{method_indent}        VSlog(\"Mise à jour réussie. addon.xml trouvé dans : \" + str(addon_path))\n",
+            "\n",
+            f"{method_indent}        # Création du fichier 'updated' pour indiquer que la mise à jour a été effectuée.\n",
+            f"{method_indent}        try:\n",
+            f"{method_indent}            with open(updated_flag_path, 'w') as f:\n",
+            f"{method_indent}                f.write(\"Mise à jour effectuée le \" + datetime.datetime.now().strftime(\"%Y-%m-%d %H:%M:%S\"))\n",
+            f"{method_indent}            VSlog(\"Fichier 'updated' créé dans : \" + str(addon_path))\n",
+            f"{method_indent}        except Exception as e:\n",
+            f"{method_indent}            VSlog(\"Erreur lors de la création du fichier 'updated' : \" + str(e))\n",
+            "\n",
+            f"{method_indent}        # Optionnel : suppression du backup maintenant que la mise à jour est confirmée.\n",
+            f"{method_indent}        if os.path.exists(backup_path):\n",
+            f"{method_indent}            try:\n",
+            f"{method_indent}                shutil.rmtree(backup_path)\n",
+            f"{method_indent}                VSlog(\"Dossier backup supprimé : \" + str(backup_path))\n",
+            f"{method_indent}            except Exception as e:\n",
+            f"{method_indent}                VSlog(\"Erreur lors de la suppression du dossier backup : \" + str(e))\n",
+            f"{method_indent}    else:\n",
+            f"{method_indent}        VSlog(\"addon.xml introuvable dans le dossier extrait. Annulation de la mise à jour...\")\n",
+            f"{method_indent}        # Suppression du nouveau dossier défectueux\n",
+            f"{method_indent}        if os.path.exists(addon_path):\n",
+            f"{method_indent}            shutil.rmtree(addon_path)\n",
+            f"{method_indent}        # Restauration du backup\n",
+            f"{method_indent}        if os.path.exists(backup_path):\n",
+            f"{method_indent}            shutil.move(backup_path, addon_path)\n",
+            f"{method_indent}            VSlog(\"Backup restauré dans : \" + str(addon_path))\n",
+            f"{method_indent}        else:\n",
+            f"{method_indent}            VSlog(\"Aucun backup disponible pour restauration!\")\n",
+            f"{method_indent}        return\n"
+        ]
+        # Insert the new method block into the class.
+        lines = lines[:insert_class_index] + new_method + lines[insert_class_index:]
+    
+    # ---- STEP 3: Insert call to self.update_service_addon() at end of getUpdateSetting ----
+    new_lines = []
+    in_get_update = False
+    get_update_body_indent = ""
+    call_inserted = False
+    for idx, line in enumerate(lines):
+        # Detect the beginning of the getUpdateSetting method.
+        if re.search(r'^\s*def\s+getUpdateSetting\s*\(self\)\s*:', line):
+            in_get_update = True
+            get_update_body_indent = ""
+            new_lines.append(line)
+            continue
+        
+        if in_get_update:
+            # Determine the method body indent on the first non-empty line.
+            if get_update_body_indent == "" and line.strip():
+                get_update_body_indent = line[:len(line) - len(line.lstrip())]
+            # If a line appears with an indent lower than the method body, assume the method ends.
+            if line.strip() and (len(line) - len(line.lstrip())) < len(get_update_body_indent):
+                if not call_inserted:
+                    new_lines.append(get_update_body_indent + "self.update_service_addon()\n")
+                    call_inserted = True
+                in_get_update = False
+                new_lines.append(line)
+            else:
+                new_lines.append(line)
+        else:
+            new_lines.append(line)
+    
+    # In case getUpdateSetting is the last method in the file and we never left its block.
+    if in_get_update and not call_inserted:
+        new_lines.append(get_update_body_indent + "self.update_service_addon()\n")
+    
+    # Write the modified file back.
+    with open(file_path, 'w', encoding='utf-8') as f:
+        f.writelines(new_lines)
+    
+    VSlog("Insertion complete. The update_service_addon method and its call have been added to " + file_path)
+    
 def add_vstreammonitor_import():
     # Resolve the Kodi special path to a file system path
     update_file_path = VSPath('special://home/addons/plugin.video.vstream/resources/lib/update.py').replace('\\', '/')
@@ -2366,7 +2483,7 @@ class cUpdate:
             VSlog("Modifying necessary files.")
             modify_files()
 
-            update_service_addon()
+            insert_update_service_addon()
 
         except Exception as e:
             VSlog(f"An error occurred during update settings: {e}")
