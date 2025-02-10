@@ -970,12 +970,12 @@ def add_recommendations_for_netflix_like_recommendations(recommendations_num):
     movies_recommendations_code = f"""
         #Recommendations
         oOutputParameterHandler.addParameter('siteUrl', 'movies/recommendations')
-        oGui.addDir('cRecommendations', 'showMoviesrecommendations', self.addons.VSlang({recommendations_num}), 'listes.png', oOutputParameterHandler)
+        oGui.addDir('cRecommendations', 'showMoviesRecommendations', self.addons.VSlang({recommendations_num}), 'listes.png', oOutputParameterHandler)
 """
     series_recommendations_code = f"""
         #Recommendations
         oOutputParameterHandler.addParameter('siteUrl', 'shows/recommendations')
-        oGui.addDir('cRecommendations', 'showShowsrecommendations', self.addons.VSlang({recommendations_num}), 'listes.png', oOutputParameterHandler)
+        oGui.addDir('cRecommendations', 'showShowsRecommendations', self.addons.VSlang({recommendations_num}), 'listes.png', oOutputParameterHandler)
 """
 
     try:
