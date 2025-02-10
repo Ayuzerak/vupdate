@@ -485,7 +485,7 @@ def add_is_recommendations_for_netflix_like_recommendations():
     # Contenu de la fonction libre `isRecommendations` à ajouter
     function_content = """
 def isRecommendations(sSiteName, sFunction): 
-    if sSiteName == 'crecommendations':
+    if sSiteName == 'cRecommendations':
         print("HEHEHEHEHEHEHEHEHEHE COUCOU (fonction libre)")
 
         plugins = __import__('resources.lib.recommendations', fromlist=['cRecommendations']).cRecommendations()
@@ -569,7 +569,7 @@ def add_translations_to_fr_fr_po_file_for_netflix_like_recommendations():
 
         existing_translations = {
             "Because you watched": {"translated": "Parce que vous avez regardé", "msgctxt_num": None},
-            "My Recommendations": {"translated": "Mes recommendations", "msgctxt_num": None}
+            "My Recommendations": {"translated": "Mes recommandations", "msgctxt_num": None}
         }
 
         # Recherche des traductions existantes et de leurs numéros
@@ -686,7 +686,7 @@ def add_translations_to_fr_ca_po_file_for_netflix_like_recommendations():
 
         existing_translations = {
             "Because you watched": {"translated": "Parce que vous avez regardé", "msgctxt_num": None},
-            "My Recommendations": {"translated": "Mes recommendations", "msgctxt_num": None}
+            "My Recommendations": {"translated": "Mes recommandations", "msgctxt_num": None}
         }
 
         # Recherche des traductions existantes et de leurs numéros
@@ -735,7 +735,7 @@ def add_translations_to_fr_ca_po_file_for_netflix_like_recommendations():
 
         # Gère l'ajout de 'My Recommendations'
         if not existing_translations["My Recommendations"].get("found", False):
-            new_entries.append((current_num, "My Recommendations", "Mes recommendations"))
+            new_entries.append((current_num, "My Recommendations", "Mes Recommandations"))
             my_recommendations_num = current_num
             current_num += 1
 
@@ -970,12 +970,12 @@ def add_recommendations_for_netflix_like_recommendations(recommendations_num):
     movies_recommendations_code = f"""
         #Recommendations
         oOutputParameterHandler.addParameter('siteUrl', 'movies/recommendations')
-        oGui.addDir('crecommendations', 'showMoviesrecommendations', self.addons.VSlang({recommendations_num}), 'listes.png', oOutputParameterHandler)
+        oGui.addDir('cRecommendations', 'showMoviesrecommendations', self.addons.VSlang({recommendations_num}), 'listes.png', oOutputParameterHandler)
 """
     series_recommendations_code = f"""
         #Recommendations
         oOutputParameterHandler.addParameter('siteUrl', 'shows/recommendations')
-        oGui.addDir('crecommendations', 'showShowsrecommendations', self.addons.VSlang({recommendations_num}), 'listes.png', oOutputParameterHandler)
+        oGui.addDir('cRecommendations', 'showShowsrecommendations', self.addons.VSlang({recommendations_num}), 'listes.png', oOutputParameterHandler)
 """
 
     try:
