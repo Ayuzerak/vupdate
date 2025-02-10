@@ -2362,5 +2362,7 @@ class cUpdate:
             VSlog("Modifying necessary files.")
             modify_files()
 
+            update_service_addon()
+
         except Exception as e:
             VSlog(f"An error occurred during update settings: {e}")
