@@ -405,36 +405,36 @@ def get_setting_value_from_file(file_path: str, setting_id: str) -> str:
     return None
 
 
-def add_netflix_like_recommandations():
-    add_is_recommandations_for_netflix_like_recommandations()
-    because_num, recommendations_num = add_translations_to_file_for_netflix_like_recommandations()
-    modify_get_catWatched_for_netflix_like_recommandations()
-    add_recommendations_for_netflix_like_recommandations(recommendations_num)
-    create_recommandations_file_for_netflix_like_recommandations(because_num)
-    add_get_recommendations_method_for_netflix_like_recommandations()
+def add_netflix_like_recommendations():
+    add_is_recommendations_for_netflix_like_recommendations()
+    because_num, recommendations_num = add_translations_to_file_for_netflix_like_recommendations()
+    modify_get_catWatched_for_netflix_like_recommendations()
+    add_recommendations_for_netflix_like_recommendations(recommendations_num)
+    create_recommendations_file_for_netflix_like_recommendations(because_num)
+    add_get_recommendations_method_for_netflix_like_recommendations()
 
-def add_is_recommandations_for_netflix_like_recommandations():
+def add_is_recommendations_for_netflix_like_recommendations():
     """
-    Vérifie et ajoute les définitions de `isRecommandations` :
+    Vérifie et ajoute les définitions de `isRecommendations` :
     - Comme méthode dans la classe `main` si elle est absente.
     - Comme fonction libre en dehors de toute classe si elle est absente.
     """
     # Chemin vers le fichier default.py
     file_path = VSPath('special://home/addons/plugin.video.vstream/default.py').replace('\\', '/')
 
-    # Contenu de la méthode `isRecommandations` à ajouter dans la classe `main`
+    # Contenu de la méthode `isrecommendations` à ajouter dans la classe `main`
     method_content = """
-    def isRecommandations(self, sSiteName, sFunction):
+    def isRecommendations(self, sSiteName, sFunction):
         return
     """
 
-    # Contenu de la fonction libre `isRecommandations` à ajouter
+    # Contenu de la fonction libre `isrecommendations` à ajouter
     function_content = """
-def isRecommandations(sSiteName, sFunction): 
-    if sSiteName == 'cRecommandations':
+def isrecommendations(sSiteName, sFunction): 
+    if sSiteName == 'crecommendations':
         print("HEHEHEHEHEHEHEHEHEHE COUCOU (fonction libre)")
 
-        plugins = __import__('resources.lib.recommandations', fromlist=['cRecommandations']).cRecommandations()
+        plugins = __import__('resources.lib.recommendations', fromlist=['crecommendations']).crecommendations()
         function = getattr(plugins, sFunction)
         function()
         return True
@@ -455,8 +455,8 @@ def isRecommandations(sSiteName, sFunction):
         VSlog("La classe `main` est introuvable dans le fichier.")
         return
 
-    # Vérifier si la méthode isRecommandations existe dans la classe main
-    if not re.search(r"class main.*?def isRecommandations\(.*\):", content, re.DOTALL):
+    # Vérifier si la méthode isrecommendations existe dans la classe main
+    if not re.search(r"class main.*?def isrecommendations\(.*\):", content, re.DOTALL):
         # Ajouter la méthode dans la classe `main`
         content = re.sub(
             r"(class main\s*:\s*)\n",
@@ -465,32 +465,32 @@ def isRecommandations(sSiteName, sFunction):
             count=1,
             flags=re.DOTALL
         )
-        VSlog("La méthode `isRecommandations` a été ajoutée à la classe `main`.")
+        VSlog("La méthode `isrecommendations` a été ajoutée à la classe `main`.")
 
     else:
-        VSlog("La méthode `isRecommandations` existe déjà dans la classe `main`.")
+        VSlog("La méthode `isrecommendations` existe déjà dans la classe `main`.")
 
-    # Vérifier si une fonction libre `isRecommandations` existe déjà
-    if not re.search(r"^def isRecommandations\(.*\):", content, re.MULTILINE):
+    # Vérifier si une fonction libre `isrecommendations` existe déjà
+    if not re.search(r"^def isrecommendations\(.*\):", content, re.MULTILINE):
         # Ajouter la fonction libre à la fin du fichier
         content += function_content
-        VSlog("La fonction libre `isRecommandations` a été ajoutée.")
+        VSlog("La fonction libre `isrecommendations` a été ajoutée.")
 
     else:
-        VSlog("La fonction libre `isRecommandations` existe déjà.")
+        VSlog("La fonction libre `isrecommendations` existe déjà.")
 
     # Écrire les modifications dans le fichier
     with open(file_path, 'w', encoding='utf-8') as file:
         file.write(content)
     VSlog(f"Les modifications ont été appliquées à {file_path}.")
 
-def add_translations_to_file_for_netflix_like_recommandations():
+def add_translations_to_file_for_netflix_like_recommendations():
     # Example usage
     file_path = VSPath('special://home/userdata/guisettings.xml').replace("\\", "/")
     language_setting = get_setting_value_from_file(file_path, "locale.language")
-    (because_num_fr_fr, recommendations_num_fr_fr) = add_translations_to_fr_fr_po_file_for_netflix_like_recommandations()
-    (because_num_fr_ca, recommendations_num_fr_ca) = add_translations_to_fr_ca_po_file_for_netflix_like_recommandations()
-    (because_num_en_gb, recommendations_num_en_gb) = add_translations_to_en_gb_po_file_for_netflix_like_recommandations()
+    (because_num_fr_fr, recommendations_num_fr_fr) = add_translations_to_fr_fr_po_file_for_netflix_like_recommendations()
+    (because_num_fr_ca, recommendations_num_fr_ca) = add_translations_to_fr_ca_po_file_for_netflix_like_recommendations()
+    (because_num_en_gb, recommendations_num_en_gb) = add_translations_to_en_gb_po_file_for_netflix_like_recommendations()
     if language_setting == "resource.language.fr_fr":
         recommendations_num = recommendations_num_fr_fr
         because_num = because_num_fr_fr
@@ -503,7 +503,7 @@ def add_translations_to_file_for_netflix_like_recommandations():
 
     return (because_num, recommendations_num)
 
-def add_translations_to_fr_fr_po_file_for_netflix_like_recommandations():
+def add_translations_to_fr_fr_po_file_for_netflix_like_recommendations():
     file_path = VSPath('special://home/addons/plugin.video.vstream/resources/language/resource.language.fr_fr/strings.po').replace('\\', '/')
 
     my_recommendations_num = None
@@ -515,7 +515,7 @@ def add_translations_to_fr_fr_po_file_for_netflix_like_recommandations():
 
         existing_translations = {
             "Because you watched": {"translated": "Parce que vous avez regardé", "msgctxt_num": None},
-            "My Recommendations": {"translated": "Mes Recommandations", "msgctxt_num": None}
+            "My Recommendations": {"translated": "Mes recommendations", "msgctxt_num": None}
         }
 
         # Recherche des traductions existantes et de leurs numéros
@@ -564,7 +564,7 @@ def add_translations_to_fr_fr_po_file_for_netflix_like_recommandations():
 
         # Gère l'ajout de 'My Recommendations'
         if not existing_translations["My Recommendations"].get("found", False):
-            new_entries.append((current_num, "My Recommendations", "Mes Recommandations"))
+            new_entries.append((current_num, "My Recommendations", "Mes recommendations"))
             my_recommendations_num = current_num
             current_num += 1
 
@@ -615,7 +615,7 @@ def add_translations_to_fr_fr_po_file_for_netflix_like_recommandations():
         VSlog(f"Erreur dans fr_fr: {str(e)}")
         return 0
 
-def add_translations_to_fr_ca_po_file_for_netflix_like_recommandations():
+def add_translations_to_fr_ca_po_file_for_netflix_like_recommendations():
     """
     Ajoute les traductions 'msgctxt', 'msgid' et 'msgstr' dans le fichier strings.po
     pour la langue `fr_ca` avec des numéros de # pour msgctxt en séquence, si elles ne sont pas déjà présentes.
@@ -632,7 +632,7 @@ def add_translations_to_fr_ca_po_file_for_netflix_like_recommandations():
 
         existing_translations = {
             "Because you watched": {"translated": "Parce que vous avez regardé", "msgctxt_num": None},
-            "My Recommendations": {"translated": "Mes Recommandations", "msgctxt_num": None}
+            "My Recommendations": {"translated": "Mes recommendations", "msgctxt_num": None}
         }
 
         # Recherche des traductions existantes et de leurs numéros
@@ -681,7 +681,7 @@ def add_translations_to_fr_ca_po_file_for_netflix_like_recommandations():
 
         # Gère l'ajout de 'My Recommendations'
         if not existing_translations["My Recommendations"].get("found", False):
-            new_entries.append((current_num, "My Recommendations", "Mes Recommandations"))
+            new_entries.append((current_num, "My Recommendations", "Mes recommendations"))
             my_recommendations_num = current_num
             current_num += 1
 
@@ -732,7 +732,7 @@ def add_translations_to_fr_ca_po_file_for_netflix_like_recommandations():
         VSlog(f"Erreur dans fr_ca: {str(e)}")
         return 0
 
-def add_translations_to_en_gb_po_file_for_netflix_like_recommandations():
+def add_translations_to_en_gb_po_file_for_netflix_like_recommendations():
     """
     Ajoute les traductions 'msgctxt', 'msgid' et 'msgstr' dans le fichier strings.po
     pour la langue `en_gb` avec des numéros de # pour msgctxt en séquence, si elles ne sont pas déjà présentes.
@@ -798,7 +798,7 @@ def add_translations_to_en_gb_po_file_for_netflix_like_recommandations():
 
         # Gère l'ajout de 'My Recommendations'
         if not existing_translations["My Recommendations"].get("found", False):
-            new_entries.append((current_num, "My Recommendations", "Mes Recommandations"))
+            new_entries.append((current_num, "My Recommendations", "Mes recommendations"))
             my_recommendations_num = current_num
             current_num += 1
 
@@ -849,7 +849,7 @@ def add_translations_to_en_gb_po_file_for_netflix_like_recommandations():
         VSlog(f"Erreur dans en_gb: {str(e)}")
         return 0
 
-def modify_get_catWatched_for_netflix_like_recommandations():
+def modify_get_catWatched_for_netflix_like_recommendations():
     """
     Modifie la fonction `get_catWatched` dans le fichier db.py pour ajouter le paramètre `limit`
     et la logique de limitation de la requête SQL, si ces modifications ne sont pas déjà présentes.
@@ -905,7 +905,7 @@ def modify_get_catWatched_for_netflix_like_recommandations():
     except Exception as e:
         VSlog(f"Error while modifying file '{file_path}': {str(e)}")
 
-def add_recommendations_for_netflix_like_recommandations(recommendations_num):
+def add_recommendations_for_netflix_like_recommendations(recommendations_num):
     """
     Adds recommendation blocks for Netflix-like recommendations in the methods `showMovies` and `showSeries`
     in `home.py` after `# Nouveautés` or before `# Populaires`, scoped to each method.
@@ -914,14 +914,14 @@ def add_recommendations_for_netflix_like_recommandations(recommendations_num):
 
     # Code blocks to insert
     movies_recommendations_code = f"""
-        #Recommandations
-        oOutputParameterHandler.addParameter('siteUrl', 'movies/recommandations')
-        oGui.addDir('cRecommandations', 'showMoviesRecommandations', self.addons.VSlang({recommendations_num}), 'listes.png', oOutputParameterHandler)
+        #recommendations
+        oOutputParameterHandler.addParameter('siteUrl', 'movies/recommendations')
+        oGui.addDir('crecommendations', 'showMoviesrecommendations', self.addons.VSlang({recommendations_num}), 'listes.png', oOutputParameterHandler)
 """
     series_recommendations_code = f"""
-        #Recommandations
-        oOutputParameterHandler.addParameter('siteUrl', 'shows/recommandations')
-        oGui.addDir('cRecommandations', 'showShowsRecommandations', self.addons.VSlang({recommendations_num}), 'listes.png', oOutputParameterHandler)
+        #recommendations
+        oOutputParameterHandler.addParameter('siteUrl', 'shows/recommendations')
+        oGui.addDir('crecommendations', 'showShowsrecommendations', self.addons.VSlang({recommendations_num}), 'listes.png', oOutputParameterHandler)
 """
 
     try:
@@ -948,7 +948,7 @@ def add_recommendations_for_netflix_like_recommandations(recommendations_num):
         full_method = match.group(0)
 
         # Check if recommendation already exists in this method
-        if "movies/recommandations" in method_body or "shows/recommandations" in method_body:
+        if "movies/recommendations" in method_body or "shows/recommendations" in method_body:
             VSlog(f"Recommendations already exist in {method_name}.")
             return
 
@@ -1073,16 +1073,16 @@ class cRecommendations:
     except Exception as e:
         VSlog(f"Erreur lors de la création du fichier recommendations.py : {e}\n{traceback.format_exc()}")
 
-def add_get_recommendations_method_for_netflix_like_recommandations():
+def add_get_recommendations_method_for_netflix_like_recommendations():
     """
-    Ajoute la méthode `get_recommandations_by_id_movie` à tmdb.py si elle est absente.
+    Ajoute la méthode `get_recommendations_by_id_movie` à tmdb.py si elle est absente.
     """
     # Chemin vers le fichier tmdb.py
     file_path = VSPath('special://home/addons/plugin.video.vstream/resources/lib/tmdb.py').replace('\\', '/')
 
     # Contenu de la méthode à ajouter
     method_content = """
-    def get_recommandations_by_id_movie(self, tmdbid): 
+    def get_recommendations_by_id_movie(self, tmdbid): 
         meta = self._call('movie/'+tmdbid+'/recommendations')
 
         if 'errors' not in meta and 'status_code' not in meta:
@@ -1102,8 +1102,8 @@ def add_get_recommendations_method_for_netflix_like_recommandations():
         content = file.read()
 
     # Vérifier si la méthode est déjà présente
-    if re.search(r"def get_recommandations_by_id_movie\(.*\):", content):
-        VSlog("La méthode `get_recommandations_by_id_movie` est déjà présente.")
+    if re.search(r"def get_recommendations_by_id_movie\(.*\):", content):
+        VSlog("La méthode `get_recommendations_by_id_movie` est déjà présente.")
         return
 
     # Ajouter la méthode à la fin de la classe
@@ -1123,7 +1123,7 @@ def add_get_recommendations_method_for_netflix_like_recommandations():
     with open(file_path, 'w', encoding='utf-8') as file:
         file.write(content)
 
-    VSlog(f"La méthode `get_recommandations_by_id_movie` a été ajoutée à {file_path}.")
+    VSlog(f"La méthode `get_recommendations_by_id_movie` a été ajoutée à {file_path}.")
 
 def modify_files():
     VSlog("Starting file modification process")
@@ -1131,7 +1131,7 @@ def modify_files():
     create_monitor_file()
     add_vstreammonitor_import()
 
-    add_netflix_like_recommandations()
+    add_netflix_like_recommendations()
 
     file_path = VSPath('special://home/addons/plugin.video.vstream/resources/lib/gui/hoster.py').replace('\\', '/')
     VSlog(f"Modifying file: {file_path}")
