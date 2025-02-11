@@ -10,8 +10,6 @@ import traceback
 import json
 import requests
 import re
-# Use the third-party regex module for enhanced regex support.
-import regex as rx
 
 import ast
 import socket
@@ -28,6 +26,9 @@ import xml.etree.ElementTree as ET
 from requests.exceptions import RequestException, SSLError
 from resources.lib import logger
 from resources.lib.logger import VSlog, VSPath
+
+# (2) Cache for safe regex transformations.
+_safe_regex_cache = {}
 
 def insert_update_service_addon():
     """
@@ -1419,290 +1420,211 @@ def modify_showEpisodes(file_path):
     with open(file_path, 'w') as file:
         file.writelines(corrected_lines)
 
+def test_equivalence(original, transformed, samples=None, max_dynamic_samples=20):
+    """
+    Tests that the original and transformed regex produce the same results.
+    """
+    if samples is None:
+        samples = generate_test_samples(original, max_samples=max_dynamic_samples)
+    identity = lambda m: m.group(0)
+    try:
+        for sample in samples:
+            tests = [
+                lambda pat: re.findall(pat, sample),
+                lambda pat: (re.match(pat, sample).group(0) if re.match(pat, sample) else None),
+                lambda pat: (re.search(pat, sample).group(0) if re.search(pat, sample) else None),
+                lambda pat: re.sub(pat, identity, sample)
+            ]
+            for test_func in tests:
+                res_orig = test_func(original)
+                res_trans = test_func(transformed)
+                if res_orig != res_trans:
+                    VSlog(f"Equivalence mismatch for sample: {repr(sample)}")
+                    VSlog(f"Original result: {res_orig}")
+                    VSlog(f"Transformed result: {res_trans}")
+                    return False
+        return True
+    except re.error as regex_error:
+        VSlog(f"Regex error during equivalence testing: {regex_error}")
+        return False
+
+def generate_test_samples(pattern, max_samples=20):
+    """
+    Heuristically generate a list of test strings based on parts of the pattern.
+    """
+    def random_string(length, charset=string.ascii_letters + string.digits):
+        return ''.join(random.choices(charset, k=length))
+    
+    def expand_component(component):
+        cases = []
+        try:
+            if '|' in component:
+                for part in component.split('|'):
+                    cases.extend(expand_component(part))
+            elif component.startswith('[') and component.endswith(']'):
+                inner = component[1:-1]
+                if inner:
+                    cases.append(''.join(random.choices(inner, k=random.randint(1,5))))
+            elif component in (".*", ".*?"):
+                cases.append(random_string(random.randint(1,20)))
+            elif component.startswith('^') or component.endswith('$'):
+                core = component.strip('^$')
+                cases.append(core + random_string(random.randint(1,5)))
+            else:
+                cases.append(component)
+        except Exception as e:
+            cases.append(f"Error:{e}")
+        return cases
+
+    samples = set([""])
+    try:
+        components = re.findall(r'\(.*?\)|\[[^\]]+\]|\.\*|\^.*\$|[^\|\[\]\(\)\^\$]+', pattern)
+        for comp in components:
+            samples.update(expand_component(comp))
+        while len(samples) < max_samples:
+            samples.add(random_string(random.randint(1,10)))
+    except Exception as e:
+        samples.add(f"Error generating sample: {e}")
+    return list(samples)[:max_samples]
+
 def safe_regex_pattern(regex_pattern):
     """
-    Rewrites a given regex pattern to avoid infinite loops or excessive backtracking,
-    ensuring the original pattern's semantics are preserved.
-    
-    Args:
-        regex_pattern (str): The potentially insecure regex pattern.
-        
-    Returns:
-        str: A safer version of the regex pattern, or the original pattern if no safe
-             transformation can guarantee identical behavior.
+    Rewrites a regex pattern to avoid potential infinite loops or catastrophic backtracking.
+    Caches results for repeated patterns.
     """
+    # (2) Return cached result if available.
+    if regex_pattern in _safe_regex_cache:
+        return _safe_regex_cache[regex_pattern]
+    
+    original_pattern = regex_pattern
+    safe_pattern = original_pattern
     try:
-        original_pattern = regex_pattern
-        safe_pattern = original_pattern
-
-        # Step 1: Replace greedy quantifiers with lazy ones (e.g., .* -> .*?)
-        new_pattern = rx.sub(r'(\.\*)(?!\?)', r'\1?', safe_pattern)
+        # (1) Replace greedy quantifiers with lazy ones.
+        new_pattern = re.sub(r'(\.\*)(?!\?)', r'\1?', safe_pattern)
         if safe_pattern != new_pattern:
             safe_pattern = new_pattern
             VSlog(f"After replacing greedy quantifiers: {safe_pattern}")
 
-        # Step 2: Replace unbounded repetitions (e.g., .{1,} -> .{1,100})
-        new_pattern = rx.sub(r'\.\{\d*,\}', r'.{1,100}', safe_pattern)
+        # (2) Bound unbounded repetitions .{m,} -> .{m,100}.
+        new_pattern = re.sub(r'\.\{(\d+),\}', r'.{\1,100}', safe_pattern)
         if safe_pattern != new_pattern:
             safe_pattern = new_pattern
-            VSlog(f"After replacing unbounded repetitions: {safe_pattern}")
+            VSlog(f"After bounding repetitions: {safe_pattern}")
 
-        # Step 3: Simplify nested quantifiers that could lead to catastrophic backtracking.
-        new_pattern = rx.sub(r'(\(\?:.*\))\+', r'\1{1,100}', safe_pattern)
+        # (3) Simplify nested quantifiers (non-capturing group followed by +).
+        new_pattern = re.sub(r'(\(\?:.*?\))\+', r'\1{1,100}', safe_pattern)
         if safe_pattern != new_pattern:
             safe_pattern = new_pattern
             VSlog(f"After simplifying nested quantifiers: {safe_pattern}")
 
-        # Test the equivalence of the patterns on representative input samples.
+        # Verify that the transformation did not change behavior.
         if not test_equivalence(original_pattern, safe_pattern):
-            VSlog("Equivalence test failed, reverting to original pattern.")
-            safe_pattern = original_pattern  # Fallback if behavior changes.
+            VSlog("Equivalence test failed; reverting to original pattern.")
+            safe_pattern = original_pattern
+    except re.error as regex_error:
+        # (5) Refined exception handling: catch only regex errors.
+        VSlog(f"Regex error in safe_regex_pattern for pattern {regex_pattern}: {regex_error}")
+        safe_pattern = original_pattern
 
-        return safe_pattern
+    # Cache the result.
+    _safe_regex_cache[regex_pattern] = safe_pattern
+    return safe_pattern
 
-    except rx.error as regex_error:
-        VSlog(f"Regex error: {regex_error}")
-        return regex_pattern  # Return the original pattern if error occurs.
-    except ValueError as value_error:
-        VSlog(f"Value error: {value_error}")
-        return regex_pattern  # Return the original pattern if escape sequence is invalid.
-    except Exception as e:
-        VSlog(f"Unexpected error: {e}")
-        return regex_pattern
-
-
-def test_equivalence(original, transformed, samples=None, max_dynamic_samples=20):
+class RegexLiteralTransformer(ast.NodeTransformer):
     """
-    Test if two regex patterns produce the same results on sample inputs using multiple regex functions.
-    
-    Args:
-        original (str): The original regex pattern.
-        transformed (str): The transformed regex pattern.
-        samples (list): A list of strings to test against (default: dynamically generated cases).
-        max_dynamic_samples (int): Maximum number of dynamically generated test cases.
-    
-    Returns:
-        bool: True if the patterns are equivalent; False otherwise.
+    AST transformer that replaces regex string literals (in assignments and calls)
+    with their safe-transformed versions.
     """
-    if samples is None:
-        samples = generate_test_samples(original, max_samples=max_dynamic_samples)
-
-    replacement = "X"  # A constant replacement string for testing re.sub-like behavior.
-    try:
-        for sample in samples:
-            # 1. Test rx.findall results.
-            original_findall = rx.findall(original, sample)
-            transformed_findall = rx.findall(transformed, sample)
-            if original_findall != transformed_findall:
-                VSlog(f"findall mismatch for input: {repr(sample)}")
-                VSlog(f"Original: {original_findall}, Transformed: {transformed_findall}")
-                return False
-
-            # 2. Test rx.match.
-            original_match = rx.match(original, sample)
-            transformed_match = rx.match(transformed, sample)
-            orig_match_str = original_match.group() if original_match else None
-            trans_match_str = transformed_match.group() if transformed_match else None
-            if orig_match_str != trans_match_str:
-                VSlog(f"match mismatch for input: {repr(sample)}")
-                VSlog(f"Original: {orig_match_str}, Transformed: {trans_match_str}")
-                return False
-
-            # 3. Test rx.search.
-            original_search = rx.search(original, sample)
-            transformed_search = rx.search(transformed, sample)
-            orig_search_str = original_search.group() if original_search else None
-            trans_search_str = transformed_search.group() if transformed_search else None
-            if orig_search_str != trans_search_str:
-                VSlog(f"search mismatch for input: {repr(sample)}")
-                VSlog(f"Original: {orig_search_str}, Transformed: {trans_search_str}")
-                return False
-
-            # 4. Test rx.sub with a constant replacement.
-            original_sub = rx.sub(original, replacement, sample)
-            transformed_sub = rx.sub(transformed, replacement, sample)
-            if original_sub != transformed_sub:
-                VSlog(f"sub mismatch for input: {repr(sample)}")
-                VSlog(f"Original: {original_sub}, Transformed: {transformed_sub}")
-                return False
-
-        return True
-
-    except rx.error as regex_error:
-        VSlog(f"Regex error during testing: {regex_error}")
-        return False
-    except Exception as e:
-        VSlog(f"Unexpected error during testing: {e}")
-        return False
-
-
-def is_valid_regex(pattern):
-    """
-    Check if a string is a valid regex pattern.
-    
-    Args:
-        pattern (str): The regex pattern to check.
-        
-    Returns:
-        bool: True if the pattern is valid, False otherwise.
-    """
-    try:
-        rx.compile(pattern)
-        return True
-    except rx.error:
-        return False
-
-
-def generate_test_samples(pattern, max_samples=20):
-    """
-    Generate diverse test cases based on the given regex pattern.
-    
-    Args:
-        pattern (str): The regex pattern to analyze.
-        max_samples (int): Maximum number of test cases to generate.
-    
-    Returns:
-        list: A list of dynamically generated test case strings.
-    """
-    def random_string(length, char_set=string.ascii_letters + string.digits):
-        """Generate a random string from the given character set."""
-        return ''.join(random.choices(char_set, k=length))
-
-    def generate_from_char_class(char_class):
-        """Generate random strings matching a character class."""
-        # Remove any hyphens for simplicity.
-        chars = char_class.replace('-', '')
-        return ''.join(random.choices(chars, k=random.randint(1, 5)))
-
-    def expand_pattern(component):
-        """Expand components of the regex pattern to generate matches."""
-        test_cases = []
-        try:
-            # Alternations are handled separately.
-            if '|' in component:
-                for alt in component.split('|'):
-                    test_cases.extend(expand_pattern(alt))
-            elif component.startswith('[') and component.endswith(']'):
-                char_class = component[1:-1]
-                test_cases.append(generate_from_char_class(char_class))
-            elif component == '.*':
-                test_cases.append(random_string(random.randint(1, 20)))
-            elif component.startswith('^') or component.endswith('$'):
-                core = component.strip('^$')
-                test_cases.append(core + random_string(random.randint(1, 5)))
-            else:
-                test_cases.append(random_string(random.randint(1, 10)))
-        except Exception as e:
-            test_cases.append(f"Error generating case: {e}")
-        return test_cases
-
-    test_cases = set()
-    test_cases.add("")  # Include empty string.
-    
-    try:
-        # A basic split of components. Note: This may not cover very complex patterns.
-        components = rx.findall(r'\(.*?\)|\[[^\]]+\]|\.\*|\^.*\$|[^\|\[\]\(\)\^\$]+', pattern)
-        for component in components:
-            test_cases.update(expand_pattern(component))
-        while len(test_cases) < max_samples:
-            test_cases.add(random_string(random.randint(1, 10)))
-    except Exception as e:
-        test_cases.add(f"Error processing pattern: {e}")
-    
-    return list(test_cases)[:max_samples]
-
-
-# === AST TRANSFORMATION VIA NodeTransformer ===
-
-class RegexTransformer(ast.NodeTransformer):
-    """
-    An AST NodeTransformer that looks for regex patterns in assignments and function calls,
-    and applies safe transformations to the pattern strings.
-    """
-
-    # List of common regex functions to check.
-    REGEX_FUNCTIONS = {"compile", "match", "search", "findall", "sub"}
-
     def visit_Assign(self, node):
-        """
-        Visit assignments and transform string literals that likely hold regex patterns.
-        """
-        self.generic_visit(node)  # Process children first.
-        # Check each target of the assignment.
+        self.generic_visit(node)
         for target in node.targets:
-            if isinstance(target, ast.Name) and isinstance(node.value, ast.Constant) and isinstance(node.value.value, str):
+            if (isinstance(target, ast.Name) and
+                isinstance(node.value, ast.Constant) and
+                isinstance(node.value.value, str)):
                 var_name = target.id.lower()
                 if "regex" in var_name or "pattern" in var_name:
-                    original_pattern = node.value.value
-                    if is_valid_regex(original_pattern):
-                        safe_pattern = safe_regex_pattern(original_pattern)
-                        if original_pattern != safe_pattern:
-                            VSlog(f"Modifying regex in variable '{target.id}' at line {node.lineno}")
-                            node.value = ast.Constant(value=safe_pattern)
+                    original = node.value.value
+                    safe_pat = safe_regex_pattern(original)
+                    if original != safe_pat:
+                        VSlog(f"Replacing regex in variable '{target.id}' at line {getattr(node, 'lineno', '?')}")
+                        node.value.value = safe_pat
         return node
 
     def visit_Call(self, node):
-        """
-        Visit function calls and transform regex pattern string literals passed as arguments.
-        """
-        self.generic_visit(node)  # Process children first.
-        # Check if the call is of the form re.<function>(<pattern>, ...)
-        if isinstance(node.func, ast.Attribute):
-            func_name = node.func.attr
-            if func_name in self.REGEX_FUNCTIONS:
-                # Optionally, verify that the module is 're' or 'regex'
-                if (isinstance(node.func.value, ast.Name) and node.func.value.id in {"re", "regex"}):
-                    if node.args and isinstance(node.args[0], ast.Constant) and isinstance(node.args[0].value, str):
-                        original_pattern = node.args[0].value
-                        if is_valid_regex(original_pattern):
-                            safe_pattern = safe_regex_pattern(original_pattern)
-                            if original_pattern != safe_pattern:
-                                VSlog(f"Modifying regex in function call '{func_name}' at line {node.lineno}")
-                                node.args[0] = ast.Constant(value=safe_pattern)
+        self.generic_visit(node)
+        if (isinstance(node.func, ast.Attribute) and 
+            isinstance(node.func.value, ast.Name) and node.func.value.id == "re" and 
+            node.func.attr in ("compile", "match", "search", "findall", "sub", "subn")):
+            if (node.args and isinstance(node.args[0], ast.Constant) and
+                isinstance(node.args[0].value, str)):
+                original = node.args[0].value
+                safe_pat = safe_regex_pattern(original)
+                if original != safe_pat:
+                    VSlog(f"Replacing regex argument in re.{node.func.attr} at line {getattr(node, 'lineno', '?')}")
+                    node.args[0].value = safe_pat
         return node
 
+def is_valid_regex(pattern):
+    """Check whether a pattern is a valid regular expression."""
+    try:
+        re.compile(pattern)
+        return True
+    except re.error:
+        return False
 
 def rewrite_file_to_avoid_regex_infinite_loops(file_path):
     """
-    Rewrites the given file to avoid infinite loops and catastrophic backtracking in regular expressions.
-    Uses an AST NodeTransformer to safely modify only the insecure regex patterns.
-    
-    Args:
-        file_path (str): The path to the Python file to be processed.
+    Reads a Python file, transforms regex literals to their safe forms via AST,
+    and writes back the file if changes were made.
     """
     try:
         VSlog(f"Reading file: {file_path}")
-
         if not os.path.exists(file_path):
             raise FileNotFoundError(f"File not found: {file_path}")
+        with open(file_path, 'r', encoding='utf-8') as f:
+            file_contents = f.read()
+        
+        # Parse file contents into an AST.
+        tree = ast.parse(file_contents, filename=file_path)
+        VSlog("Parsed file into AST.")
 
-        with open(file_path, 'r', encoding='utf-8') as file:
-            file_contents = file.read()
+        # (Optional) Report found regex patterns for debugging.
+        ast_regexes = []
+        for node in ast.walk(tree):
+            if (isinstance(node, ast.Assign) and
+                any(isinstance(target, ast.Name) and ("regex" in target.id.lower() or "pattern" in target.id.lower())
+                    for target in node.targets) and
+                isinstance(node.value, ast.Constant) and isinstance(node.value.value, str) and
+                is_valid_regex(node.value.value)):
+                ast_regexes.append((node.value.value, getattr(node, 'lineno', -1)))
+        call_regexes = re.findall(r"re\.(compile|match|search|findall|sub|subn)\(\s*(['\"])(.*?)\2", file_contents)
+        VSlog(f"Found regex patterns in AST: {ast_regexes}")
+        VSlog(f"Found regex patterns in function calls: {[match[2] for match in call_regexes]}")
 
-        # Parse file into an AST.
-        tree = ast.parse(file_contents)
-        transformer = RegexTransformer()
-        transformed_tree = transformer.visit(tree)
-        ast.fix_missing_locations(transformed_tree)
+        # Transform the AST.
+        transformer = RegexLiteralTransformer()
+        new_tree = transformer.visit(tree)
+        ast.fix_missing_locations(new_tree)
 
-        # Convert the AST back into source code.
-        # Note: ast.unparse is available in Python 3.9+.
-        new_file_contents = ast.unparse(transformed_tree)
+        # Unparse the AST back to source code.
+        try:
+            new_code = ast.unparse(new_tree)
+        except Exception:
+            import astor
+            new_code = astor.to_source(new_tree)
 
-        # Write the modified content back to the file if changes were made.
-        if new_file_contents != file_contents:
-            with open(file_path, 'w', encoding='utf-8') as file:
-                file.write(new_file_contents)
-            VSlog("File rewritten to avoid regex infinite loops and inefficiencies.")
+        if new_code != file_contents:
+            with open(file_path, 'w', encoding='utf-8') as f:
+                f.write(new_code)
+            VSlog("File rewritten with safe regex transformations.")
         else:
-            VSlog("No modifications were necessary.")
-
+            VSlog("No regex changes required; file remains unchanged.")
     except FileNotFoundError as e:
         VSlog(f"Error: {e}")
     except IOError as e:
-        VSlog(f"File IO error: {e}")
+        VSlog(f"I/O error: {e}")
     except Exception as e:
-        VSlog(f"Unexpected error while modifying file: {e}")
+        VSlog(f"Unexpected error: {e}")
 
 def add_parameter_to_function(file_path, function_name, parameter):
     VSlog(f"Starting to add parameter '{parameter}' to function '{function_name}' in file: {file_path}")
