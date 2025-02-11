@@ -1729,6 +1729,17 @@ def my_unparse(node, depth=0, max_depth=50):
     
     If the recursion depth exceeds max_depth or an error occurs, ast.dump(node) is returned.
     """
+    def format_body(statements, current_depth):
+        """Helper to handle empty code blocks by adding 'pass' with proper indentation"""
+        body_lines = []
+        for stmt in statements:
+            unparsed = my_unparse(stmt, current_depth + 1, max_depth)
+            for line in unparsed.split('\n'):
+                body_lines.append('    ' * (current_depth + 1) + line)
+        if not body_lines:
+            body_lines.append('    ' * (current_depth + 1) + 'pass')
+        return '\n'.join(body_lines)
+
     try:
         if depth > max_depth:
             return ast.dump(node)
@@ -1742,20 +1753,26 @@ def my_unparse(node, depth=0, max_depth=50):
             decorators = [f"@{my_unparse(d, depth+1, max_depth)}" for d in node.decorator_list]
             decorator_str = "\n".join(decorators) + "\n" if decorators else ""
             args = my_unparse(node.args, depth+1, max_depth)
-            body = "\n".join("    " + my_unparse(s, depth+1, max_depth) for s in node.body)
+            body = format_body(node.body, depth)
             return f"{decorator_str}def {node.name}({args}):\n{body}"
+        
+        # Class definitions
+        elif isinstance(node, ast.ClassDef):
+            decorators = [f"@{my_unparse(d, depth+1, max_depth)}" for d in node.decorator_list]
+            bases = [my_unparse(b, depth+1, max_depth) for b in node.bases]
+            keywords = [my_unparse(kw, depth+1, max_depth) for kw in node.keywords]
+            body = format_body(node.body, depth)
+            return "\n".join(decorators) + f"\nclass {node.name}({', '.join(bases + keywords)}):\n{body}"
 
-        # Full parameter handling
+        # Parameter handling
         elif isinstance(node, ast.arguments):
             params = []
-            # Positional-only parameters
             pos_only = [my_unparse(arg, depth+1, max_depth) for arg in node.posonlyargs]
             if pos_only:
                 params.extend(pos_only)
                 if node.args or node.vararg or node.kwonlyargs or node.kwarg:
                     params.append('/')
                     
-            # Regular parameters with defaults
             args = node.args
             defaults = node.defaults
             num_defaults = len(defaults)
@@ -1766,7 +1783,6 @@ def my_unparse(node, depth=0, max_depth=50):
                     arg_str += f"={my_unparse(default, depth+1, max_depth)}"
                 params.append(arg_str)
 
-            # *args handling
             if node.vararg:
                 vararg = my_unparse(node.vararg, depth+1, max_depth)
                 if getattr(node.vararg, 'annotation', None):
@@ -1775,7 +1791,6 @@ def my_unparse(node, depth=0, max_depth=50):
             elif node.kwonlyargs:
                 params.append('*')
             
-            # Keyword-only parameters
             for i, kwarg in enumerate(node.kwonlyargs):
                 kwarg_str = my_unparse(kwarg, depth+1, max_depth)
                 if i < len(node.kw_defaults):
@@ -1784,7 +1799,6 @@ def my_unparse(node, depth=0, max_depth=50):
                         kwarg_str += f"={my_unparse(default, depth+1, max_depth)}"
                 params.append(kwarg_str)
             
-            # **kwargs handling
             if node.kwarg:
                 kwarg = my_unparse(node.kwarg, depth+1, max_depth)
                 if getattr(node.kwarg, 'annotation', None):
@@ -1819,11 +1833,11 @@ def my_unparse(node, depth=0, max_depth=50):
         elif isinstance(node, ast.Name):
             return node.id
 
-        # Constants (Python 3.8+)
+        # Constants
         elif isinstance(node, ast.Constant):
             return repr(node.value)
 
-        # String literals (Python <3.8 compatibility)
+        # String literals (Python <3.8)
         elif isinstance(node, ast.Str):
             return repr(node.s)
 
@@ -1844,8 +1858,11 @@ def my_unparse(node, depth=0, max_depth=50):
         elif isinstance(node, ast.Sub): return "-"
         elif isinstance(node, ast.Mult): return "*"
         elif isinstance(node, ast.Div): return "/"
+        elif isinstance(node, ast.FloorDiv): return "//"
+        elif isinstance(node, ast.Mod): return "%"
+        elif isinstance(node, ast.Pow): return "**"
 
-        # Import statements
+        # Imports
         elif isinstance(node, ast.Import):
             names = ", ".join(
                 f"{alias.name} as {alias.asname}" if alias.asname else alias.name
@@ -1861,47 +1878,52 @@ def my_unparse(node, depth=0, max_depth=50):
             )
             return f"from {module} import {names}"
 
-        # If/elif/else structure
+        # Control structures
         elif isinstance(node, ast.If):
             test = my_unparse(node.test, depth+1, max_depth)
-            body = "\n".join("    " + my_unparse(s, depth+1, max_depth) for s in node.body)
-            
+            body = format_body(node.body, depth)
             if node.orelse:
                 if len(node.orelse) == 1 and isinstance(node.orelse[0], ast.If):
                     elif_stmt = my_unparse(node.orelse[0], depth+1, max_depth).replace("if", "elif", 1)
                     return f"if {test}:\n{body}\n{elif_stmt}"
                 else:
-                    orelse = "\n".join("    " + my_unparse(s, depth+1, max_depth) for s in node.orelse)
+                    orelse = format_body(node.orelse, depth)
                     return f"if {test}:\n{body}\nelse:\n{orelse}"
             return f"if {test}:\n{body}"
 
-        # For loops with else clause
         elif isinstance(node, ast.For):
             target = my_unparse(node.target, depth+1, max_depth)
             iter_ = my_unparse(node.iter, depth+1, max_depth)
-            body = "\n".join("    " + my_unparse(s, depth+1, max_depth) for s in node.body)
+            body = format_body(node.body, depth)
             orelse = ""
             if node.orelse:
-                orelse = "\nelse:\n" + "\n".join("    " + my_unparse(s, depth+1, max_depth) for s in node.orelse)
+                orelse = f"\nelse:\n{format_body(node.orelse, depth)}"
             return f"for {target} in {iter_}:\n{body}{orelse}"
 
-        # While loops with else clause
         elif isinstance(node, ast.While):
             test = my_unparse(node.test, depth+1, max_depth)
-            body = "\n".join("    " + my_unparse(s, depth+1, max_depth) for s in node.body)
+            body = format_body(node.body, depth)
             orelse = ""
             if node.orelse:
-                orelse = "\nelse:\n" + "\n".join("    " + my_unparse(s, depth+1, max_depth) for s in node.orelse)
+                orelse = f"\nelse:\n{format_body(node.orelse, depth)}"
             return f"while {test}:\n{body}{orelse}"
 
-        # Comparison chains
+        elif isinstance(node, ast.With):
+            items = []
+            for item in node.items:
+                ctx_expr = my_unparse(item.context_expr, depth+1, max_depth)
+                var = f" as {my_unparse(item.optional_vars, depth+1, max_depth)}" if item.optional_vars else ""
+                items.append(f"{ctx_expr}{var}")
+            body = format_body(node.body, depth)
+            return f"with {', '.join(items)}:\n{body}"
+
+        # Comparisons
         elif isinstance(node, ast.Compare):
             left = my_unparse(node.left, depth+1, max_depth)
             ops = [my_unparse(op, depth+1, max_depth) for op in node.ops]
             comparators = [my_unparse(c, depth+1, max_depth) for c in node.comparators]
             return f"{left} {' '.join(f'{op} {comp}' for op, comp in zip(ops, comparators))}"
 
-        # Comparison operators
         elif isinstance(node, ast.Eq): return "=="
         elif isinstance(node, ast.NotEq): return "!="
         elif isinstance(node, ast.Lt): return "<"
@@ -1925,7 +1947,6 @@ def my_unparse(node, depth=0, max_depth=50):
             space = " " if op == "not" else ""
             return f"{op}{space}{operand}"
 
-        # Unary operators
         elif isinstance(node, ast.Not): return "not"
         elif isinstance(node, ast.USub): return "-"
         elif isinstance(node, ast.UAdd): return "+"
@@ -1988,56 +2009,38 @@ def my_unparse(node, depth=0, max_depth=50):
             ifs_str = " if " + " if ".join(ifs) if ifs else ""
             return f"for {target} in {iter_}{ifs_str}"
 
-        # Context managers
-        elif isinstance(node, ast.With):
-            items = []
-            for item in node.items:
-                ctx_expr = my_unparse(item.context_expr, depth+1, max_depth)
-                var = f" as {my_unparse(item.optional_vars, depth+1, max_depth)}" if item.optional_vars else ""
-                items.append(f"{ctx_expr}{var}")
-            body = "\n".join("    " + my_unparse(s, depth+1, max_depth) for s in node.body)
-            return f"with {', '.join(items)}:\n{body}"
-
         # Exception handling
         elif isinstance(node, ast.Try):
-            try_body = "\n".join("    " + my_unparse(s, depth+1, max_depth) for s in node.body)
+            try_body = format_body(node.body, depth)
             excepts = []
             for handler in node.handlers:
                 type_str = my_unparse(handler.type, depth+1, max_depth) if handler.type else ""
                 name = f" as {handler.name}" if handler.name else ""
-                handler_body = "\n".join("    " + my_unparse(s, depth+1, max_depth) for s in handler.body)
+                handler_body = format_body(handler.body, depth)
                 excepts.append(f"except {type_str}{name}:\n{handler_body}")
             else_body = ""
             if node.orelse:
-                else_body = "\nelse:\n" + "\n".join("    " + my_unparse(s, depth+1, max_depth) for s in node.orelse)
+                else_body = f"\nelse:\n{format_body(node.orelse, depth)}"
             finally_body = ""
             if node.finalbody:
-                finally_body = "\nfinally:\n" + "\n".join("    " + my_unparse(s, depth+1, max_depth) for s in node.finalbody)
+                finally_body = f"\nfinally:\n{format_body(node.finalbody, depth)}"
             return f"try:\n{try_body}\n" + "\n".join(excepts) + else_body + finally_body
 
-        # Class definitions
-        elif isinstance(node, ast.ClassDef):
-            decorators = [f"@{my_unparse(d, depth+1, max_depth)}" for d in node.decorator_list]
-            bases = [my_unparse(b, depth+1, max_depth) for b in node.bases]
-            keywords = [my_unparse(kw, depth+1, max_depth) for kw in node.keywords]
-            body = "\n".join("    " + my_unparse(s, depth+1, max_depth) for s in node.body)
-            return "\n".join(decorators) + f"\nclass {node.name}({', '.join(bases + keywords)}):\n{body}"
-
-        # Async/await syntax
+        # Async constructs
         elif isinstance(node, ast.AsyncFunctionDef):
             decorators = [f"@{my_unparse(d, depth+1, max_depth)}" for d in node.decorator_list]
             decorator_str = "\n".join(decorators) + "\n" if decorators else ""
             args = my_unparse(node.args, depth+1, max_depth)
-            body = "\n".join("    " + my_unparse(s, depth+1, max_depth) for s in node.body)
+            body = format_body(node.body, depth)
             return f"{decorator_str}async def {node.name}({args}):\n{body}"
 
         elif isinstance(node, ast.AsyncFor):
             target = my_unparse(node.target, depth+1, max_depth)
             iter_ = my_unparse(node.iter, depth+1, max_depth)
-            body = "\n".join("    " + my_unparse(s, depth+1, max_depth) for s in node.body)
+            body = format_body(node.body, depth)
             orelse = ""
             if node.orelse:
-                orelse = "\nelse:\n" + "\n".join("    " + my_unparse(s, depth+1, max_depth) for s in node.orelse)
+                orelse = f"\nelse:\n{format_body(node.orelse, depth)}"
             return f"async for {target} in {iter_}:\n{body}{orelse}"
 
         elif isinstance(node, ast.AsyncWith):
@@ -2046,20 +2049,21 @@ def my_unparse(node, depth=0, max_depth=50):
                 ctx_expr = my_unparse(item.context_expr, depth+1, max_depth)
                 var = f" as {my_unparse(item.optional_vars, depth+1, max_depth)}" if item.optional_vars else ""
                 items.append(f"{ctx_expr}{var}")
-            body = "\n".join("    " + my_unparse(s, depth+1, max_depth) for s in node.body)
+            body = format_body(node.body, depth)
             return f"async with {', '.join(items)}:\n{body}"
 
         elif isinstance(node, ast.Await):
             value = my_unparse(node.value, depth+1, max_depth)
             return f"await {value}"
 
-        # Type annotations and modern syntax
+        # Type annotations
         elif isinstance(node, ast.AnnAssign):
             target = my_unparse(node.target, depth+1, max_depth)
             annotation = my_unparse(node.annotation, depth+1, max_depth)
             value = f" = {my_unparse(node.value, depth+1, max_depth)}" if node.value else ""
             return f"{target}: {annotation}{value}"
 
+        # Walrus operator
         elif isinstance(node, ast.NamedExpr):
             target = my_unparse(node.target, depth+1, max_depth)
             value = my_unparse(node.value, depth+1, max_depth)
@@ -2125,7 +2129,7 @@ def my_unparse(node, depth=0, max_depth=50):
             value = my_unparse(node.value, depth+1, max_depth)
             return f"{target} {op}= {value}"
 
-        # Subscripting and slicing
+        # Subscripting
         elif isinstance(node, ast.Subscript):
             value = my_unparse(node.value, depth+1, max_depth)
             slice_part = my_unparse(node.slice, depth+1, max_depth)
@@ -2150,7 +2154,7 @@ def my_unparse(node, depth=0, max_depth=50):
             value = my_unparse(node.value, depth+1, max_depth)
             return f"{value}.{node.attr}"
 
-        # Pattern matching
+        # Pattern matching (Python 3.10+)
         elif isinstance(node, ast.Match):
             subject = my_unparse(node.subject, depth+1, max_depth)
             cases = "\n".join(my_unparse(c, depth+1, max_depth) for c in node.cases)
@@ -2159,7 +2163,7 @@ def my_unparse(node, depth=0, max_depth=50):
         elif isinstance(node, ast.match_case):
             pattern = my_unparse(node.pattern, depth+1, max_depth)
             guard = f" if {my_unparse(node.guard, depth+1, max_depth)}" if node.guard else ""
-            body = "\n".join("    " + my_unparse(s, depth+1, max_depth) for s in node.body)
+            body = format_body(node.body, depth)
             return f"case {pattern}{guard}:\n{body}"
 
         # Special constants
