@@ -10,11 +10,10 @@ import traceback
 import json
 import requests
 import re
-
 import ast
 import socket
 import textwrap
-
+import difflib
 import random
 import string
 from string import Template
@@ -1416,26 +1415,100 @@ def modify_showEpisodes(file_path):
     # Write the corrected lines back to the file
     with open(file_path, 'w') as file:
         file.writelines(corrected_lines)
+        
+# Try to import the resource module (works on Unix-like systems)
+try:
+    import resource
+except ImportError:
+    resource = None
 
-#############################
-# Regex Safety & Equivalence#
-#############################
+# Configuration constants
+MAX_REPETITION_BOUND = 100
+DEFAULT_TIMEOUT = 0.5
+MAX_INPUT_LENGTH = 10000  # Maximum length of input sample strings
+
+# Configuration for whitelist/blacklist constructs
+BLACKLIST_REGEX_CONSTRUCTS = [
+    # Example patterns that are known to be potentially dangerous
+    r'(\w+\s*)+',
+    r'(.+)+'
+]
+WHITELIST_REGEX_CONSTRUCTS = [
+    # For example, you might explicitly allow certain constructs.
+    # Currently left empty.
+]
+
+######################################
+# 2. OS-Level Resource Limits
+######################################
+
+def set_resource_limits():
+    """
+    Set OS-level resource limits for CPU time and memory usage, if possible.
+    """
+    if resource is not None:
+        try:
+            # Limit CPU time to 1 second
+            resource.setrlimit(resource.RLIMIT_CPU, (1, 1))
+            # Limit memory usage to 100MB
+            resource.setrlimit(resource.RLIMIT_AS, (100 * 1024 * 1024, 100 * 1024 * 1024))
+        except Exception as e:
+            VSlog(f"Resource limit setting failed: {e}")
+
+######################################
+# 7. Whitelist/Blacklist for Regex Constructs
+######################################
+
+def is_regex_blacklisted(pattern):
+    """
+    Check if a regex pattern matches any blacklisted constructs.
+    """
+    for black in BLACKLIST_REGEX_CONSTRUCTS:
+        if re.search(black, pattern):
+            return True
+    return False
+
+######################################
+# 3. Advanced Static Analysis for Regex Vulnerabilities
+######################################
+
+def is_vulnerable_regex(pattern):
+    """
+    Advanced heuristic check for potential catastrophic backtracking.
+    Checks for nested quantifiers and blacklisted constructs.
+    """
+    # Check for nested quantifiers such as (.+)+ or similar patterns.
+    if re.search(r'(\(.+?\))\s*[\*\+]\s*[\*\+]', pattern):
+        return True
+    # Check for multiple adjacent quantifiers
+    if re.search(r'[\*\+]{2,}', pattern):
+        return True
+    # Use blacklist check to catch explicitly dangerous constructs.
+    if is_regex_blacklisted(pattern):
+        return True
+    return False
+
+######################################
+# Regex Safety & Equivalence Functions
+######################################
 
 def safe_regex_pattern(regex_pattern):
     """
     Rewrites a given regex pattern to avoid infinite loops or excessive backtracking,
-    ensuring the original pattern's semantics are preserved.
-
-    Args:
-        regex_pattern (str): The potentially insecure regex pattern.
-
-    Returns:
-        str: A safer version of the regex pattern, or the original pattern if no safe
-             transformation can guarantee identical behavior.
+    preserving the original semantics when possible.
     """
     try:
         original_pattern = regex_pattern
         safe_pattern = original_pattern
+
+        # If the pattern is blacklisted, skip transformation.
+        if is_regex_blacklisted(safe_pattern):
+            VSlog("Regex pattern is blacklisted; skipping transformation.")
+            return safe_pattern
+
+        # Warn if the regex appears vulnerable.
+        if is_vulnerable_regex(safe_pattern):
+            VSlog("Warning: Detected potentially vulnerable regex pattern.")
 
         # Step 1: Replace greedy quantifiers with lazy ones (e.g., .* -> .*?)
         new_pattern = re.sub(r'(\.\*)(?!\?)', r'\1?', safe_pattern)
@@ -1443,14 +1516,14 @@ def safe_regex_pattern(regex_pattern):
             safe_pattern = new_pattern
             VSlog(f"After replacing greedy quantifiers: {safe_pattern}")
 
-        # Step 2: Replace unbounded repetitions (e.g., .{1,} -> .{1,100})
-        new_pattern = re.sub(r'\.\{(\d+),\}', r'.{\1,100}', safe_pattern)
+        # Step 2: Replace unbounded repetitions (e.g., .{1,} -> .{1,MAX_REPETITION_BOUND})
+        new_pattern = re.sub(r'\.\{(\d+),\}', rf'.{{\1,{MAX_REPETITION_BOUND}}}', safe_pattern)
         if safe_pattern != new_pattern:
             safe_pattern = new_pattern
             VSlog(f"After replacing unbounded repetitions: {safe_pattern}")
 
-        # Step 3: Simplify nested quantifiers (e.g., (?:...)+ -> (?:...){1,100})
-        new_pattern = re.sub(r'(\(\?:.*?\))\+', r'\1{1,100}', safe_pattern)
+        # Step 3: Simplify nested quantifiers (e.g., (?:...)+ -> (?:...){1,MAX_REPETITION_BOUND})
+        new_pattern = re.sub(r'(\(\?:.*?\))\+', rf'\1{{1,{MAX_REPETITION_BOUND}}}', safe_pattern)
         if safe_pattern != new_pattern:
             safe_pattern = new_pattern
             VSlog(f"After simplifying nested quantifiers: {safe_pattern}")
@@ -1471,20 +1544,18 @@ def safe_regex_pattern(regex_pattern):
         VSlog(f"Unexpected error: {e}")
         return regex_pattern
 
-def safe_findall(regex, sample, timeout=0.5):
+def safe_findall(regex, sample, timeout=DEFAULT_TIMEOUT):
     """
     Runs re.findall() in a separate thread with a timeout to avoid hangs.
-
-    Args:
-        regex (str): The regex pattern.
-        sample (str): The string to match against.
-        timeout (float): Timeout in seconds.
-
-    Returns:
-        list or None: The list of matches, or None if the operation times out.
+    Truncates the input sample if it exceeds MAX_INPUT_LENGTH.
     """
+    if len(sample) > MAX_INPUT_LENGTH:
+        sample = sample[:MAX_INPUT_LENGTH]
+
     def task():
         try:
+            if resource is not None:
+                set_resource_limits()
             return re.compile(regex).findall(sample)
         except Exception as e:
             VSlog(f"Error in safe_findall task: {e}")
@@ -1501,15 +1572,6 @@ def safe_findall(regex, sample, timeout=0.5):
 def test_equivalence(original, transformed, samples=None, max_dynamic_samples=20):
     """
     Test if two regex patterns produce the same results on sample inputs.
-
-    Args:
-        original (str): The original regex pattern.
-        transformed (str): The transformed regex pattern.
-        samples (list): A list of strings to test against (default: dynamically generated cases).
-        max_dynamic_samples (int): Maximum number of dynamically generated test cases.
-
-    Returns:
-        bool: True if the patterns are equivalent; False otherwise.
     """
     if samples is None:
         samples = generate_test_samples(original, max_samples=max_dynamic_samples)
@@ -1536,21 +1598,13 @@ def test_equivalence(original, transformed, samples=None, max_dynamic_samples=20
 def generate_test_samples(pattern, max_samples=20):
     """
     Generate diverse test cases based on the given regex pattern.
-
-    Args:
-        pattern (str): The regex pattern to analyze.
-        max_samples (int): Maximum number of test cases to generate.
-
-    Returns:
-        list: A list of dynamically generated test case strings.
     """
     def random_string(length, char_set=string.ascii_letters + string.digits):
         return ''.join(random.choices(char_set, k=length))
 
     def generate_from_char_class(char_class):
-        # Basic support for generating a random string from a char class.
+        # Generate a random string from a char class.
         chars = re.sub(r'\-', '', char_class)
-        # Handle ranges like a-z, 0-9
         ranges = re.findall(r'(\w)-(\w)', char_class)
         for start, end in ranges:
             chars += ''.join(chr(c) for c in range(ord(start), ord(end)+1))
@@ -1592,12 +1646,6 @@ def generate_test_samples(pattern, max_samples=20):
 def is_valid_regex(pattern):
     """
     Check if a string is a valid regex pattern.
-
-    Args:
-        pattern (str): The regex pattern to check.
-
-    Returns:
-        bool: True if the pattern is valid, False otherwise.
     """
     try:
         re.compile(pattern)
@@ -1605,9 +1653,9 @@ def is_valid_regex(pattern):
     except re.error:
         return False
 
-#############################
-# AST & Code Transformation #
-#############################
+######################################
+# AST & Code Transformation Functions
+######################################
 
 def check_for_regex_in_function_calls(code):
     """
@@ -1629,12 +1677,6 @@ def check_for_regex_in_function_calls(code):
 def find_regex_in_ast(tree):
     """
     Traverse the AST to find regex patterns assigned to variables.
-
-    Args:
-        tree: The AST tree of the Python code.
-
-    Returns:
-        list: A list of (regex_pattern, variable_name, line_number, column_offset) tuples.
     """
     VSlog("Searching for regex patterns in AST...")
     regex_patterns = []
@@ -1656,7 +1698,6 @@ class RegexTransformer(ast.NodeTransformer):
     """
     def visit_Constant(self, node):
         if isinstance(node.value, str):
-            # Heuristically decide if the string might be a regex.
             if any(token in node.value for token in ['\\', '.', '*', '+', '?', '^', '$', '[', ']', '(', ')']):
                 if is_valid_regex(node.value):
                     safe_pattern = safe_regex_pattern(node.value)
@@ -1673,19 +1714,207 @@ class RegexTransformer(ast.NodeTransformer):
                 return ast.copy_location(ast.Str(s=safe_pattern), node)
         return node
 
-#################################
-# File Rewriting & CLI Handling #
-#################################
+######################################
+# Fallback AST Unparser Function
+######################################
+
+def my_unparse(node, depth=0, max_depth=50):
+    """
+    A robust fallback AST unparser for AST nodes.
+    
+    This implementation covers many common node types with safe measures such as:
+      - Recursion depth control to prevent infinite recursion.
+      - Exception handling to fall back safely using ast.dump().
+      - Support for additional AST node types (e.g. lambda, lists, tuples, comprehensions).
+    
+    If the recursion depth exceeds max_depth or an error occurs, ast.dump(node) is returned.
+    """
+    try:
+        if depth > max_depth:
+            return ast.dump(node)
+        
+        if isinstance(node, ast.Module):
+            return "\n".join(my_unparse(stmt, depth+1, max_depth) for stmt in node.body)
+        
+        elif isinstance(node, ast.FunctionDef):
+            args = my_unparse(node.args, depth+1, max_depth)
+            body = "\n".join("    " + my_unparse(stmt, depth+1, max_depth) for stmt in node.body)
+            return f"def {node.name}({args}):\n{body}"
+        
+        elif isinstance(node, ast.arguments):
+            return ", ".join(my_unparse(arg, depth+1, max_depth) for arg in node.args)
+        
+        elif isinstance(node, ast.arg):
+            return node.arg
+        
+        elif isinstance(node, ast.Assign):
+            targets = " = ".join(my_unparse(t, depth+1, max_depth) for t in node.targets)
+            return f"{targets} = {my_unparse(node.value, depth+1, max_depth)}"
+        
+        elif isinstance(node, ast.Expr):
+            return my_unparse(node.value, depth+1, max_depth)
+        
+        elif isinstance(node, ast.Call):
+            func = my_unparse(node.func, depth+1, max_depth)
+            args = ", ".join(my_unparse(arg, depth+1, max_depth) for arg in node.args)
+            return f"{func}({args})"
+        
+        elif isinstance(node, ast.Name):
+            return node.id
+        
+        elif isinstance(node, ast.Constant):
+            return repr(node.value)
+        
+        elif isinstance(node, ast.Str):  # For Python versions prior to 3.8
+            return repr(node.s)
+        
+        elif isinstance(node, ast.Return):
+            return f"return {my_unparse(node.value, depth+1, max_depth)}"
+        
+        elif isinstance(node, ast.BinOp):
+            left = my_unparse(node.left, depth+1, max_depth)
+            op = my_unparse(node.op, depth+1, max_depth)
+            right = my_unparse(node.right, depth+1, max_depth)
+            return f"({left} {op} {right})"
+        
+        elif isinstance(node, ast.Add):
+            return "+"
+        elif isinstance(node, ast.Sub):
+            return "-"
+        elif isinstance(node, ast.Mult):
+            return "*"
+        elif isinstance(node, ast.Div):
+            return "/"
+        
+        elif isinstance(node, ast.Import):
+            names = ", ".join(alias.name for alias in node.names)
+            return f"import {names}"
+        
+        elif isinstance(node, ast.ImportFrom):
+            module = node.module if node.module else ""
+            names = ", ".join(alias.name for alias in node.names)
+            return f"from {module} import {names}"
+        
+        elif isinstance(node, ast.If):
+            test = my_unparse(node.test, depth+1, max_depth)
+            body = "\n".join("    " + my_unparse(stmt, depth+1, max_depth) for stmt in node.body)
+            if node.orelse:
+                orelse = "\n".join("    " + my_unparse(stmt, depth+1, max_depth) for stmt in node.orelse)
+                return f"if {test}:\n{body}\nelse:\n{orelse}"
+            return f"if {test}:\n{body}"
+        
+        elif isinstance(node, ast.For):
+            target = my_unparse(node.target, depth+1, max_depth)
+            iter_ = my_unparse(node.iter, depth+1, max_depth)
+            body = "\n".join("    " + my_unparse(stmt, depth+1, max_depth) for stmt in node.body)
+            return f"for {target} in {iter_}:\n{body}"
+        
+        elif isinstance(node, ast.While):
+            test = my_unparse(node.test, depth+1, max_depth)
+            body = "\n".join("    " + my_unparse(stmt, depth+1, max_depth) for stmt in node.body)
+            return f"while {test}:\n{body}"
+        
+        elif isinstance(node, ast.Compare):
+            left = my_unparse(node.left, depth+1, max_depth)
+            comparators = " ".join(
+                my_unparse(op, depth+1, max_depth) + " " + my_unparse(comp, depth+1, max_depth)
+                for op, comp in zip(node.ops, node.comparators)
+            )
+            return f"{left} {comparators}"
+        
+        elif isinstance(node, ast.Eq):
+            return "=="
+        elif isinstance(node, ast.NotEq):
+            return "!="
+        elif isinstance(node, ast.Lt):
+            return "<"
+        elif isinstance(node, ast.LtE):
+            return "<="
+        elif isinstance(node, ast.Gt):
+            return ">"
+        elif isinstance(node, ast.GtE):
+            return ">="
+        
+        elif isinstance(node, ast.BoolOp):
+            op_str = " and " if isinstance(node.op, ast.And) else " or "
+            return op_str.join(my_unparse(v, depth+1, max_depth) for v in node.values)
+        
+        elif isinstance(node, ast.UnaryOp):
+            op = my_unparse(node.op, depth+1, max_depth)
+            operand = my_unparse(node.operand, depth+1, max_depth)
+            return f"{op}{operand}"
+        
+        elif isinstance(node, ast.USub):
+            return "-"
+        elif isinstance(node, ast.UAdd):
+            return "+"
+        
+        elif isinstance(node, ast.Dict):
+            keys = [my_unparse(k, depth+1, max_depth) for k in node.keys]
+            values = [my_unparse(v, depth+1, max_depth) for v in node.values]
+            pairs = ", ".join(f"{k}: {v}" for k, v in zip(keys, values))
+            return f"{{{pairs}}}"
+        
+        elif isinstance(node, ast.List):
+            elements = ", ".join(my_unparse(elt, depth+1, max_depth) for elt in node.elts)
+            return f"[{elements}]"
+        
+        elif isinstance(node, ast.Tuple):
+            elements = ", ".join(my_unparse(elt, depth+1, max_depth) for elt in node.elts)
+            if len(node.elts) == 1:
+                elements += ","
+            return f"({elements})"
+        
+        elif isinstance(node, ast.Set):
+            elements = ", ".join(my_unparse(elt, depth+1, max_depth) for elt in node.elts)
+            return f"{{{elements}}}"
+        
+        elif isinstance(node, ast.Lambda):
+            args = my_unparse(node.args, depth+1, max_depth)
+            body = my_unparse(node.body, depth+1, max_depth)
+            return f"lambda {args}: {body}"
+        
+        # Minimal support for comprehensions:
+        elif isinstance(node, ast.ListComp):
+            elt = my_unparse(node.elt, depth+1, max_depth)
+            gens = " ".join(my_unparse(gen, depth+1, max_depth) for gen in node.generators)
+            return f"[{elt} {gens}]"
+        elif isinstance(node, ast.SetComp):
+            elt = my_unparse(node.elt, depth+1, max_depth)
+            gens = " ".join(my_unparse(gen, depth+1, max_depth) for gen in node.generators)
+            return f"{{{elt} {gens}}}"
+        elif isinstance(node, ast.DictComp):
+            key = my_unparse(node.key, depth+1, max_depth)
+            value = my_unparse(node.value, depth+1, max_depth)
+            gens = " ".join(my_unparse(gen, depth+1, max_depth) for gen in node.generators)
+            return f"{{{key}: {value} {gens}}}"
+        elif isinstance(node, ast.GeneratorExp):
+            elt = my_unparse(node.elt, depth+1, max_depth)
+            gens = " ".join(my_unparse(gen, depth+1, max_depth) for gen in node.generators)
+            return f"({elt} {gens})"
+        elif isinstance(node, ast.comprehension):
+            target = my_unparse(node.target, depth+1, max_depth)
+            iter_ = my_unparse(node.iter, depth+1, max_depth)
+            if node.ifs:
+                ifs = " ".join("if " + my_unparse(cond, depth+1, max_depth) for cond in node.ifs)
+                return f"for {target} in {iter_} {ifs}"
+            else:
+                return f"for {target} in {iter_}"
+        else:
+            # Fallback for unhandled nodes:
+            return ast.dump(node)
+    except Exception as e:
+        # In case of any error during unparsing, return a safe fallback.
+        return ast.dump(node)
+
+######################################
+# File Rewriting & CLI Handling
+######################################
 
 def rewrite_file_to_avoid_regex_infinite_loops(file_path, dry_run=False, backup=False):
     """
     Rewrites the given file to avoid infinite loops in regular expressions.
-    Ensures only insecure regex patterns are modified.
-
-    Args:
-        file_path (str): The path to the Python file to be processed.
-        dry_run (bool): If True, shows a diff of changes without modifying the file.
-        backup (bool): If True and changes are made, create a backup of the original file.
+    Only modifies insecure regex patterns.
     """
     try:
         VSlog(f"Reading file: {file_path}")
@@ -1700,16 +1929,17 @@ def rewrite_file_to_avoid_regex_infinite_loops(file_path, dry_run=False, backup=
         new_tree = transformer.visit(tree)
         ast.fix_missing_locations(new_tree)
 
-        try:
+        if hasattr(ast, "unparse"):
             new_code = ast.unparse(new_tree)
-        except AttributeError:
-            try:
-                import astor
-                new_code = astor.to_source(new_tree)
-            except ImportError:
-                VSlog("Error: ast.unparse() is not available and the 'astor' module is not installed. "
-                      "Please install astor (pip install astor) or upgrade to Python 3.9+.")
-                return
+        else:
+            VSlog("ast.unparse() not available; using custom unparser.")
+            new_code = my_unparse(new_tree)
+
+        try:
+            compile(new_code, file_path, 'exec')
+        except Exception as compile_error:
+            VSlog(f"Compilation error after AST transformation: {compile_error}")
+            return
 
         if new_code != file_contents:
             if dry_run:
