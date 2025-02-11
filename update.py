@@ -385,6 +385,10 @@ def modify_showEpisodes(file_path):
     with open(file_path, 'w') as file:
         file.writelines(corrected_lines)
 
+#############################
+# Regex Safety & Equivalence#
+#############################
+
 def safe_regex_pattern(regex_pattern):
     """
     Rewrites a given regex pattern to avoid infinite loops or excessive backtracking,
@@ -435,6 +439,33 @@ def safe_regex_pattern(regex_pattern):
         VSlog(f"Unexpected error: {e}")
         return regex_pattern
 
+def safe_findall(regex, sample, timeout=0.5):
+    """
+    Runs re.findall() in a separate thread with a timeout to avoid hangs.
+
+    Args:
+        regex (str): The regex pattern.
+        sample (str): The string to match against.
+        timeout (float): Timeout in seconds.
+
+    Returns:
+        list or None: The list of matches, or None if the operation times out.
+    """
+    def task():
+        try:
+            return re.compile(regex).findall(sample)
+        except Exception as e:
+            VSlog(f"Error in safe_findall task: {e}")
+            return None
+
+    with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
+        future = executor.submit(task)
+        try:
+            return future.result(timeout=timeout)
+        except concurrent.futures.TimeoutError:
+            VSlog(f"Timeout occurred for regex: {regex} on sample: {sample}")
+            return None
+
 def test_equivalence(original, transformed, samples=None, max_dynamic_samples=20):
     """
     Test if two regex patterns produce the same results on sample inputs.
@@ -452,11 +483,12 @@ def test_equivalence(original, transformed, samples=None, max_dynamic_samples=20
         samples = generate_test_samples(original, max_samples=max_dynamic_samples)
 
     try:
-        original_re = re.compile(original)
-        transformed_re = re.compile(transformed)
         for sample in samples:
-            original_matches = original_re.findall(sample)
-            transformed_matches = transformed_re.findall(sample)
+            original_matches = safe_findall(original, sample)
+            transformed_matches = safe_findall(transformed, sample)
+            if original_matches is None or transformed_matches is None:
+                VSlog(f"Skipping sample due to timeout: {repr(sample)}")
+                continue
             if original_matches != transformed_matches:
                 VSlog(f"Mismatch found for input: {repr(sample)}")
                 VSlog(f"Original: {original_matches}, Transformed: {transformed_matches}")
@@ -541,6 +573,10 @@ def is_valid_regex(pattern):
     except re.error:
         return False
 
+#############################
+# AST & Code Transformation #
+#############################
+
 def check_for_regex_in_function_calls(code):
     """
     Check for regex patterns used in function calls like re.compile() or re.search().
@@ -605,13 +641,19 @@ class RegexTransformer(ast.NodeTransformer):
                 return ast.copy_location(ast.Str(s=safe_pattern), node)
         return node
 
-def rewrite_file_to_avoid_regex_infinite_loops(file_path):
+#################################
+# File Rewriting & CLI Handling #
+#################################
+
+def rewrite_file_to_avoid_regex_infinite_loops(file_path, dry_run=False, backup=False):
     """
     Rewrites the given file to avoid infinite loops in regular expressions.
     Ensures only insecure regex patterns are modified.
 
     Args:
         file_path (str): The path to the Python file to be processed.
+        dry_run (bool): If True, shows a diff of changes without modifying the file.
+        backup (bool): If True and changes are made, create a backup of the original file.
     """
     try:
         VSlog(f"Reading file: {file_path}")
@@ -629,13 +671,31 @@ def rewrite_file_to_avoid_regex_infinite_loops(file_path):
         try:
             new_code = ast.unparse(new_tree)
         except AttributeError:
-            import astor
-            new_code = astor.to_source(new_tree)
+            try:
+                import astor
+                new_code = astor.to_source(new_tree)
+            except ImportError:
+                VSlog("Error: ast.unparse() is not available and the 'astor' module is not installed. "
+                      "Please install astor (pip install astor) or upgrade to Python 3.9+.")
+                return
 
         if new_code != file_contents:
-            with open(file_path, 'w', encoding='utf-8') as file:
-                file.write(new_code)
-            VSlog("File rewritten to avoid regex infinite loops and inefficiencies.")
+            if dry_run:
+                diff = difflib.unified_diff(
+                    file_contents.splitlines(), new_code.splitlines(),
+                    fromfile='original', tofile='modified', lineterm=''
+                )
+                VSlog("Dry run diff (no changes written):")
+                for line in diff:
+                    VSlog(line)
+            else:
+                if backup:
+                    backup_file = file_path + ".bak"
+                    shutil.copy2(file_path, backup_file)
+                    VSlog(f"Backup created at: {backup_file}")
+                with open(file_path, 'w', encoding='utf-8') as file:
+                    file.write(new_code)
+                VSlog("File rewritten to avoid regex infinite loops and inefficiencies.")
         else:
             VSlog("No changes made to the file.")
     except FileNotFoundError as e:
