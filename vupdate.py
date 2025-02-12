@@ -471,6 +471,8 @@ def add_is_recommendations_for_netflix_like_recommendations():
         """Extract leading spaces or tabs for indentation."""
         return line[:len(line) - len(line.lstrip())]
 
+    file_path = VSPath('special://home/addons/plugin.video.vstream/default.py').replace('\\', '/')
+    
     # Define the new function to insert
     new_function = """def isRecommendations(sSiteName, sFunction):
     if sSiteName == 'cRecommendations':
