@@ -505,16 +505,14 @@ def add_is_recommendations_for_netflix_like_recommendations():
 
         # Insert the isRecommendations function before `def _pluginSearch(...)`
         if not inserted_function and not is_recommendations_exists and stripped_line.startswith(insert_before_def):
-            modified_content.append('VSlog("Inserted isRecommendations function")\n')  # Logging
             modified_content.append(new_function)
             inserted_function = True
 
         # Insert the isRecommendations() check before `if sSiteName == 'globalRun':`
         if not inserted_if_check and not is_if_check_exists and stripped_line.startswith(insert_before_if):
             indent = extract_indent(line)
-            modified_content.append(f'VSlog("Inserted isRecommendations check")\n')  # Logging
             modified_content.append(f"{indent}if isRecommendations(sSiteName, sFunction):\n")
-            modified_content.append(f"{indent}    return\n")
+            modified_content.append(f"{indent}    return\n\n")
             inserted_if_check = True
 
         modified_content.append(line)
