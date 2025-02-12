@@ -951,22 +951,38 @@ def modify_get_catWatched_for_netflix_like_recommendations():
 def add_recommendations_for_netflix_like_recommendations(recommendations_num):
     """
     Adds recommendation blocks for Netflix-like recommendations in the methods `showMovies` and `showSeries`
-    in `home.py` after `# Nouveautés` or before `# Populaires`, scoped to each method.
+    in `home.py`.
+    
+    For `showMovies`, the recommendation block is inserted after the marker "# Populaires".
+
+    For `showSeries`, the recommendation block is inserted before the following code block:
+    
+        oOutputParameterHandler.addParameter('siteUrl', 'SERIE_VOSTFRS')
+        oGui.addDir(SITE_IDENTIFIER, 'callpluging', self.addons.VSlang(30108), 'vostfr.png', oOutputParameterHandler)
+    
+        oOutputParameterHandler.addParameter('siteUrl', 'SERIE_SERIES')
+        oGui.addDir(SITE_IDENTIFIER, 'callpluging', self.addons.VSlang(30138), 'host.png', oOutputParameterHandler)
+    
+        oGui.setEndOfDirectory()
+    
+    so that the recommendations appear before it.
     """
+    # Construct and normalize the file path
     file_path = VSPath('special://home/addons/plugin.video.vstream/resources/lib/home.py').replace('\\', '/')
 
-    # Code blocks to insert
+    # Define the code blocks to insert
     movies_recommendations_code = f"""
         #Recommendations
         oOutputParameterHandler.addParameter('siteUrl', 'movies/recommendations')
         oGui.addDir('cRecommendations', 'showMoviesRecommendations', self.addons.VSlang({recommendations_num}), 'listes.png', oOutputParameterHandler)
-"""
+    """
     series_recommendations_code = f"""
         #Recommendations
         oOutputParameterHandler.addParameter('siteUrl', 'shows/recommendations')
         oGui.addDir('cRecommendations', 'showShowsRecommendations', self.addons.VSlang({recommendations_num}), 'listes.png', oOutputParameterHandler)
-"""
+    """
 
+    # Read the file contents
     try:
         with open(file_path, 'r', encoding='utf-8') as file:
             content = file.read()
@@ -976,10 +992,9 @@ def add_recommendations_for_netflix_like_recommendations(recommendations_num):
 
     updated_content = content
 
-    # Helper function to check and insert recommendations
-    def process_method(method_name, recommendation_code, marker_name):
+    def process_method(method_name, recommendation_code):
         nonlocal updated_content
-        # Regex to find the method body
+        # Regex to find the method definition and its body
         method_pattern = re.compile(rf"(def {method_name}\(self\):)(\s+.*?)(?=\n\s*def|\Z)", re.DOTALL)
         match = method_pattern.search(updated_content)
         if not match:
@@ -990,33 +1005,33 @@ def add_recommendations_for_netflix_like_recommendations(recommendations_num):
         method_body = match.group(2)
         full_method = match.group(0)
 
-        # Check if recommendation already exists in this method
+        # Check if recommendations already exist in this method
         if "movies/recommendations" in method_body or "shows/recommendations" in method_body:
             VSlog(f"Recommendations already exist in {method_name}.")
             return
 
-        # Find insertion point
-        if "# Nouveautés" in method_body:
-            insertion_point = "# Nouveautés"
-            new_body = method_body.replace(insertion_point, insertion_point + recommendation_code, 1)
+        # Determine the insertion point:
+        # For showSeries, insert before the specific block if found.
+        if method_name == "showSeries" and "oGui.setEndOfDirectory()" in method_body:
+            marker = "oGui.setEndOfDirectory()"
+            new_body = method_body.replace(marker, recommendation_code + marker, 1)
+        # Otherwise, for showMovies or as fallback, use the "# Populaires" marker.
         elif "# Populaires" in method_body:
-            insertion_point = "# Populaires"
-            new_body = method_body.replace(insertion_point, recommendation_code + insertion_point, 1)
+            new_body = method_body.replace("# Populaires", recommendation_code + "# Populaires", 1)
         else:
-            VSlog(f"Markers not found in {method_name}.")
+            VSlog(f"Insertion marker not found in {method_name}.")
             return
 
+        # Replace the method with the new version
         new_method = method_header + new_body
         updated_content = updated_content.replace(full_method, new_method, 1)
         VSlog(f"Added recommendations to {method_name}.")
 
-    # Process showMovies for movies recommendations
-    process_method("showMovies", movies_recommendations_code, "movies")
+    # Process each method accordingly
+    process_method("showMovies", movies_recommendations_code)
+    process_method("showSeries", series_recommendations_code)
 
-    # Process showSeries for series recommendations
-    process_method("showSeries", series_recommendations_code, "series")
-
-    # Write changes if modified
+    # Write back the updated content if changes were made
     if updated_content != content:
         try:
             with open(file_path, 'w', encoding='utf-8') as file:
