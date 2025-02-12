@@ -459,8 +459,8 @@ def get_setting_value_from_file(file_path: str, setting_id: str) -> str:
 
 
 def add_netflix_like_recommendations():
-    add_is_recommendations_for_netflix_like_recommendations()
     because_num, recommendations_num = add_translations_to_file_for_netflix_like_recommendations()
+    add_is_recommendations_for_netflix_like_recommendations()
     modify_get_catWatched_for_netflix_like_recommendations()
     add_recommendations_for_netflix_like_recommendations(recommendations_num)
     create_recommendations_file_for_netflix_like_recommendations(because_num)
