@@ -467,169 +467,65 @@ def add_netflix_like_recommendations():
     add_get_recommendations_method_for_netflix_like_recommendations()
 
 def add_is_recommendations_for_netflix_like_recommendations():
-    """
-    Cette fonction modifie le fichier default.py du plugin vStream de la manière suivante :
-      1. Dans la classe main, elle insère une ligne de dispatch (appel à isRecommendations)
-         juste après la dernière ligne commençant par "if isXXX(sSiteName, sFunction):".
-      2. Elle ajoute la définition libre de la fonction isRecommendations juste AVANT
-         la ligne définissant "def _pluginSearch(plugin, sSearchText):". Si cette ligne n'est pas trouvée,
-         la fonction est ajoutée à la fin du fichier.
-    """
-    # Chemin vers le fichier default.py (normalisé)
-    file_path = VSPath('special://home/addons/plugin.video.vstream/default.py').replace('\\', '/')
-    
-    # Ligne de dispatch à insérer dans la classe main
-    dispatch_line = """
-    if isRecommendations(sSiteName, sFunction):
-        return
-    """
-    
-    # Définition libre de la fonction isRecommendations à ajouter
-    free_function = """
-def isRecommendations(sSiteName, sFunction): 
+    def extract_indent(line):
+        """Extract leading spaces or tabs for indentation."""
+        return line[:len(line) - len(line.lstrip())]
+
+    # Define the new function to insert
+    new_function = """def isRecommendations(sSiteName, sFunction):
     if sSiteName == 'cRecommendations':
-        print("HEHEHEHEHEHEHEHEHEHE COUCOU (fonction libre)")
         plugins = __import__('resources.lib.recommendations', fromlist=['cRecommendations']).cRecommendations()
         function = getattr(plugins, sFunction)
         function()
         return True
-    return False
-"""
-    
-    # Vérifier que le fichier existe
-    if not os.path.exists(file_path):
-        VSlog(f"Fichier introuvable : {file_path}")
-        return
-    
-    # Lire le contenu du fichier
-    with open(file_path, 'r', encoding='utf-8') as f:
-        content = f.read()
-    
-import re
+    return False\n\n"""  # Two newlines for separation
 
-def add_recommendations_condition(filename='default.py'):
-    """
-    This function finds the block inside default.py that is inside
-    "if oInputParameterHandler.exist('site'):" and then locates all lines
-    that begin with any "if is..." condition (using a generic regex). If the
-    recommendations condition is not already present, it inserts:
-    
-        if isRecommendations(sSiteName, sFunction):
-            return
-    
-    into that block.
-    """
-    
-    # Read in the file.
-    with open(filename, 'r', encoding='utf-8') as f:
-        lines = f.readlines()
-    
-    # Pattern to find the "if oInputParameterHandler.exist('site'):" line.
-    site_if_pattern = re.compile(r'^\s*if\s+oInputParameterHandler\.exist\([\'"]site[\'"]\):')
-    
-    # Pattern to match any condition line that starts with "if is..."
-    is_condition_pattern = re.compile(r'^\s*if\s+is[A-Za-z0-9_]+\s*\(')
-    
-    # Pattern to match the recommendations condition.
-    rec_condition_pattern = re.compile(r'^\s*if\s+isRecommendations\s*\(sSiteName,\s*sFunction\)\s*:')
-    
-    in_site_block = False
-    site_block_indent = ""
-    site_if_line_index = -1
-    last_is_condition_idx = -1
-    rec_condition_found = False
+    insert_before_if = "if sSiteName == 'globalRun':"
+    insert_before_def = "def _pluginSearch(plugin, sSearchText):"
 
-    # First pass: Walk through the file to find the block and record indices.
-    for i, line in enumerate(lines):
-        # Look for the "if oInputParameterHandler.exist('site'):" start.
-        if not in_site_block:
-            if site_if_pattern.search(line):
-                in_site_block = True
-                site_if_line_index = i
-                # Save its indentation (number of leading spaces).
-                site_block_indent = re.match(r'^(\s*)', line).group(1)
-        else:
-            # Once inside the block, check if we have left it.
-            # Compare indentation lengths (ignoring blank lines).
-            current_indent = len(re.match(r'^(\s*)', line).group(1))
-            if current_indent <= len(site_block_indent) and line.strip():
-                # End of the site block reached.
-                in_site_block = False
-            else:
-                # We are inside the block.
-                # If the line starts with an "if is..." condition, record its index.
-                if is_condition_pattern.search(line):
-                    last_is_condition_idx = i
-                    if rec_condition_pattern.search(line):
-                        rec_condition_found = True
+    with open(file_path, 'r', encoding='utf-8') as file:
+        content = file.readlines()
 
-    if rec_condition_found:
-        VSlog("The recommendations condition already exists. No changes made.")
-        return
+    # Check if modifications are already present
+    is_recommendations_exists = any("def isRecommendations(" in line for line in content)
+    is_if_check_exists = any("if isRecommendations(sSiteName, sFunction):" in line for line in content)
 
-    # Determine the insertion index.
-    # If we found any "if is..." condition, insert right after the last one and its block.
-    if last_is_condition_idx != -1:
-        # Get the indentation of the last "if is..." line.
-        if_line_indent = re.match(r'^(\s*)', lines[last_is_condition_idx]).group(1)
-        insert_index = last_is_condition_idx + 1
-        # Advance past any lines that are part of the last condition's block.
-        for j in range(last_is_condition_idx + 1, len(lines)):
-            line_indent = len(re.match(r'^(\s*)', lines[j]).group(1))
-            if line_indent <= len(if_line_indent) and lines[j].strip():
-                break
-            insert_index = j + 1
-    else:
-        # Otherwise, simply insert right after the "if oInputParameterHandler.exist('site'):" line.
-        insert_index = site_if_line_index + 1
+    if is_recommendations_exists and is_if_check_exists:
+        VSlog("No modifications needed: isRecommendations function and check already exist")
+        return False  # No changes needed
 
-    # Decide the proper indentation for the snippet.
-    # Use the indentation of the last "if is..." condition if available,
-    # or add one level (assumed 4 spaces) to the site's block indent.
-    if last_is_condition_idx != -1:
-        snippet_indent = re.match(r'^(\s*)', lines[last_is_condition_idx]).group(1)
-    else:
-        snippet_indent = site_block_indent + "    "
-    
-    # Define the snippet lines.
-    snippet = [
-        f"{snippet_indent}if isRecommendations(sSiteName, sFunction):\n",
-        f"{snippet_indent}    return\n"
-    ]
-    
-    # Insert the snippet into the lines.
-    new_lines = lines[:insert_index] + snippet + lines[insert_index:]
-    
-    # Write the modified content back to the file.
-    with open(filename, 'w', encoding='utf-8') as f:
-        f.writelines(new_lines)
-    
-    VSlog("Inserted the recommendations condition successfully.")
+    modified_content = []
+    inserted_if_check = False
+    inserted_function = False
 
-        # Read in the file.
-    with open(filename, 'r', encoding='utf-8') as f:
-        content = f.read()
-    
-    # === Insertion de la fonction libre isRecommendations ===
-    if not re.search(r"^def\s+isRecommendations\s*\(", content, re.MULTILINE):
-        # Recherche de la ligne définissant def _pluginSearch
-        plugin_search_match = re.search(r"^def\s+_pluginSearch\s*\(plugin,\s*sSearchText\):", content, re.MULTILINE)
-        if plugin_search_match:
-            index = plugin_search_match.start()
-            # Insérer la fonction libre juste avant la définition de def _pluginSearch
-            content = content[:index] + free_function + "\n" + content[index:]
-            VSlog("La fonction libre isRecommendations a été insérée avant 'def _pluginSearch(plugin, sSearchText):'.")
-        else:
-            # Si def _pluginSearch n'est pas trouvée, ajouter à la fin du fichier
-            content += free_function
-            VSlog("La fonction libre isRecommendations a été ajoutée à la fin du fichier (aucune occurrence de 'def _pluginSearch' trouvée).")
-    else:
-        VSlog("La fonction libre isRecommendations existe déjà.")
-    
-    # Écriture des modifications dans le fichier
-    with open(file_path, 'w', encoding='utf-8') as f:
-        f.write(content)
-    VSlog(f"Les modifications ont été appliquées à {file_path}.")
+    for line in content:
+        stripped_line = line.lstrip()
+
+        # Insert the isRecommendations function before `def _pluginSearch(...)`
+        if not inserted_function and not is_recommendations_exists and stripped_line.startswith(insert_before_def):
+            modified_content.append('VSlog("Inserted isRecommendations function")\n')  # Logging
+            modified_content.append(new_function)
+            inserted_function = True
+
+        # Insert the isRecommendations() check before `if sSiteName == 'globalRun':`
+        if not inserted_if_check and not is_if_check_exists and stripped_line.startswith(insert_before_if):
+            indent = extract_indent(line)
+            modified_content.append(f'VSlog("Inserted isRecommendations check")\n')  # Logging
+            modified_content.append(f"{indent}if isRecommendations(sSiteName, sFunction):\n")
+            modified_content.append(f"{indent}    return\n")
+            inserted_if_check = True
+
+        modified_content.append(line)
+
+    # Write only if changes were made
+    if inserted_if_check or inserted_function:
+        with open(file_path, 'w', encoding='utf-8') as file:
+            file.writelines(modified_content)
+        VSlog("File successfully modified")
+        return True  # Successfully modified
+
+    VSlog("No modifications made")
+    return False  # No modifications made
 
 def add_translations_to_file_for_netflix_like_recommendations():
     # Example usage
