@@ -959,8 +959,7 @@ def add_recommendations_for_netflix_like_recommendations(recommendations_num):
     in_show_movies = False
     in_show_series = False
     inserted_movies = False
-    inserted_series1 = False
-    inserted_series2 = False
+    inserted_series = False
 
     # Define the code blocks to insert
     movies_block = [
