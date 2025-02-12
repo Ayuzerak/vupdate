@@ -1060,7 +1060,8 @@ def create_recommendations_file_for_netflix_like_recommendations(because_num):
 
             # Template du contenu prédéfini pour recommendations.py.
             # Utilisation de triple quotes avec des quotes simples pour éviter d'échapper les docstrings.
-            file_content_template = Template(r'''from resources.lib.gui.gui import cGui
+            file_content_template = Template(r'''from resources.lib.comaddon import dialog, addon
+from resources.lib.gui.gui import cGui
 from resources.lib.handler.outputParameterHandler import cOutputParameterHandler
 from resources.lib.db import cDb
 from resources.sites.themoviedb_org import SITE_IDENTIFIER as SITE_TMDB
