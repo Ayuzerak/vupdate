@@ -1050,12 +1050,14 @@ from resources.lib.handler.outputParameterHandler import cOutputParameterHandler
 from resources.lib.db import cDb
 from resources.sites.themoviedb_org import SITE_IDENTIFIER as SITE_TMDB
 
-SITE_IDENTIFIER = 'cRecommendations'
-SITE_NAME = 'Recommendations'
-
 import requests
 import re
 import traceback
+import unicodedata
+
+SITE_IDENTIFIER = 'cRecommendations'
+SITE_NAME = 'Recommendations'
+
 
 def get_tmdb_id(title, media_type="movie"):
     search_url = f"https://www.themoviedb.org/search?query={title}&language=fr-FR"
@@ -1067,7 +1069,6 @@ def get_tmdb_id(title, media_type="movie"):
             pattern = r'href="/movie/(\d+)-'
         else:
             pattern = r'href="/tv/(\d+)-'
-
         match = re.search(pattern, content)
         if match:
             return int(match.group(1))
@@ -1077,29 +1078,25 @@ def get_tmdb_id(title, media_type="movie"):
         print(f"Erreur: {response.status_code}")
         return None
 
-def get_release_date(title, media_type="movie"):
-    tmdb_id = get_tmdb_id(title, media_type)
-    if not tmdb_id:
-        return None
-    
-    search_url = f"https://www.themoviedb.org/{'movie' if media_type == 'movie' else 'tv'}/{tmdb_id}?language=fr-FR"
-    response = requests.get(search_url)
-    
-    if response.status_code == 200:
-        content = response.content.decode('utf-8')
-        if media_type == "movie":
-            pattern = r'<span class="release">(.*?)</span>'
-        else:
-            pattern = r'Première diffusion:.*?<span>(.*?)</span>'
-        
-        match = re.search(pattern, content, re.DOTALL)
-        if match:
-            return match.group(1).strip()
-        else:
-            return None
-    else:
-        print(f"Erreur: {response.status_code}")
-        return None
+def remove_accents(input_str):
+    """Remove accents from a given string."""
+    nfkd_form = unicodedata.normalize('NFKD', input_str)
+    return "".join([c for c in nfkd_form if not unicodedata.combining(c)])
+
+def remove_normalise_doublon(lst):
+    """
+    Remove duplicates from a list of tuples (title, parameter_handler) based on title,
+    ignoring accents and case, while preserving order.
+    """
+    unique = []
+    seen = set()
+    for item in lst:
+        title = item[0]
+        normalized_title = remove_accents(title).lower()
+        if normalized_title not in seen:
+            unique.append(item)
+            seen.add(normalized_title)
+    return unique
 
 
 class cRecommendations:
@@ -1115,36 +1112,42 @@ class cRecommendations:
         :param icon: The icon file to use ('films.png' or 'series.png').
         """
         oGui = cGui()
+        recommendations = []  # List to store tuples of (title, outputParameterHandler)
         try:
-
             VSlog(f"Fetching recommendations for category {category}")
             
             with cDb() as DB:
-                row = DB.get_catWatched(category, 5)  # Fetch the last 5 watched items
-                if not row:
+                rows = DB.get_catWatched(category, 5)  # Fetch the last 5 watched items
+                if not rows:
                     VSlog("No watched items found in this category.")
                     oGui.setEndOfDirectory()
                     return
 
-                for data in row:
-                    # Afficher toutes les clés de data
+                for data in rows:
+                    # Log all keys in data
                     keys_list = list(data.keys())
                     VSlog("Clés de data: " + ", ".join(keys_list))
                     tmdb_id = data['tmdb_id']
-                    date = ""
-                    if not isinstance(data['tmdb_id'], int) or data['tmdb_id'] == 0:
-                        tmdb_id = get_tmdb_id(data['title'], f"{'movie' if category == '1' else 'tv'}")
-                        date = get_release_date(data['title'], f"{'movie' if category == '1' else 'tv'}")
 
                     oOutputParameterHandler = cOutputParameterHandler()
-                    oOutputParameterHandler.addParameter('sTmdbId', tmdb_id)
-                    oOutputParameterHandler.addParameter(
-                        'siteUrl', f"{'movie' if category == '1' else 'tv'}/{tmdb_id}/recommendations"
-                    )
                     title = self.ADDON.VSlang(0) + ' ' + data['title']
-                    VSlog(f"Title {title} to make recommendations")
+                    sTitle = re.sub(r'(Saison\s*\d+|\s*S\d+\s*|[Ee]pisode\s*\d+|\s*E\d+\s*)', '', title, flags=re.IGNORECASE).strip()
+
+                    if not isinstance(tmdb_id, int) or tmdb_id == 0:
+                        tmdb_id = get_tmdb_id(sTitle, 'movie' if category == '1' else 'tv')
+
+                    oOutputParameterHandler.addParameter('siteUrl', f"{'movie' if category == '1' else 'tv'}/{tmdb_id}/recommendations")
+                    oOutputParameterHandler.addParameter('sTmdbId', tmdb_id)
+
+                    recommendations.append((sTitle, oOutputParameterHandler))
+
+                    VSlog(f"Title {sTitle} to make recommendations")
                     VSlog(f"tmdb_id: {tmdb_id} recommended from views.")
-                    oGui.addMovie(SITE_TMDB, content_type, title, icon, '', '', oOutputParameterHandler)
+
+                recommendations = remove_normalise_doublon(recommendations)
+
+                for sTitle, param_handler in recommendations:
+                    oGui.addMovie(SITE_TMDB, content_type, sTitle, icon, '', '', param_handler)
 
         except Exception as e:
             VSlog(f"Error fetching recommendations: {e}\n{traceback.format_exc()}")
