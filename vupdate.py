@@ -949,161 +949,99 @@ def modify_get_catWatched_for_netflix_like_recommendations():
         VSlog(f"Error while modifying file '{file_path}': {str(e)}")
 
 def add_recommendations_for_netflix_like_recommendations(recommendations_num):
-    import os
-    import re
-    from shutil import copy2
+    """
+    Adds recommendation blocks for Netflix-like recommendations in the methods `showMovies` and `showSeries`
+    in `home.py`.
+    
+    For `showMovies`, the recommendation block is inserted after the marker "# Populaires".
 
-    # ========================
-    # CONFIGURATION
-    # ========================
-    TARGETS = {
-        'movies': {
-            'function': r'def showMovies\(self\):',
-            'markers': {
-                'after': r'# Nouveautés\s*\n\s*oOutputParameterHandler\.addParameter.*?\n\s*oGui\.addDir.*?showMoviesNews',
-                'before': r'# Populaires\s*\n\s*oOutputParameterHandler\.addParameter'
-            },
-            'code': [
-                '        # Recommendations',
-                '        oOutputParameterHandler.addParameter(\'siteUrl\', \'movies/recommendations\')',
-                '        oGui.addDir(\'cRecommendations\', \'showMoviesRecommendations\', "Mes Recommendations", \'listes.png\', oOutputParameterHandler)'
-            ]
-        },
-        'series': {
-            'function': r'def showSeries\(self\):',
-            'markers': {
-                'after': r'# Nouveautés\s*\n\s*oOutputParameterHandler\.addParameter.*?\n\s*oGui\.addDir.*?showSeriesNews',
-                'before': r'# Populaires trakt\s*\n\s*oOutputParameterHandler\.addParameter'
-            },
-            'code': [
-                '        # Recommendations',
-                '        oOutputParameterHandler.addParameter(\'siteUrl\', \'tv/recommendations\')',
-                '        oGui.addDir(\'cRecommendations\', \'showShowsRecommendations\', "Mes Recommendations", \'listes.png\', oOutputParameterHandler)'
-            ]
-        }
-    }
-    BACKUP_EXT = '.pre_recommendations_backup'
+    For `showSeries`, the recommendation block is inserted before the following code block:
+    
+        oOutputParameterHandler.addParameter('siteUrl', 'SERIE_VOSTFRS')
+        oGui.addDir(SITE_IDENTIFIER, 'callpluging', self.addons.VSlang(30108), 'vostfr.png', oOutputParameterHandler)
+    
+        oOutputParameterHandler.addParameter('siteUrl', 'SERIE_SERIES')
+        oGui.addDir(SITE_IDENTIFIER, 'callpluging', self.addons.VSlang(30138), 'host.png', oOutputParameterHandler)
+    
+        oGui.setEndOfDirectory()
+    
+    so that the recommendations appear before it.
+    """
+    # Construct and normalize the file path
+    file_path = VSPath('special://home/addons/plugin.video.vstream/resources/lib/home.py').replace('\\', '/')
 
-    # ========================
-    # CORE FUNCTIONS
-    # ========================
-    def log(message):
-        print(f'[DEBUG] {message}')
+    # Define the code blocks to insert
+    movies_recommendations_code = f"""
+        #Recommendations
+        oOutputParameterHandler.addParameter('siteUrl', 'movies/recommendations')
+        oGui.addDir('cRecommendations', 'showMoviesRecommendations', self.addons.VSlang({recommendations_num}), 'listes.png', oOutputParameterHandler)
+    """
+    series_recommendations_code = f"""
+        #Recommendations
+        oOutputParameterHandler.addParameter('siteUrl', 'shows/recommendations')
+        oGui.addDir('cRecommendations', 'showShowsRecommendations', self.addons.VSlang({recommendations_num}), 'listes.png', oOutputParameterHandler)
+    """
 
-    def create_backup(source):
-        backup_path = source + BACKUP_EXT
-        copy2(source, backup_path)
-        return backup_path
-
-    def validate_context(content, pattern):
-        return bool(re.search(pattern, content, re.DOTALL))
-
-    def method_regex_insert_after(content, config):
-        pattern = f'({config["function"]}.*?{config["markers"]["after"]})'
-        replacement = f'\\1\n\n' + '\n'.join(config['code']) + '\n'
-        return re.sub(pattern, replacement, content, 1, re.DOTALL)
-
-    def method_regex_insert_before(content, config):
-        pattern = f'({config["markers"]["before"]})'
-        replacement = '\n'.join(config['code']) + '\n\n\\1'
-        return re.sub(pattern, replacement, content, 1, re.DOTALL)
-
-    def method_line_by_line_scan(lines, config):
-        in_target = False
-        modified = False
-        output = []
-        
-        for i, line in enumerate(lines):
-            output.append(line)
-            
-            if re.match(config['function'], line.strip()):
-                in_target = True
-            elif in_target and re.search(config['markers']['after'], '\n'.join(lines[i-2:i+1])):
-                output.extend(['\n'] + config['code'] + ['\n'])
-                modified = True
-            elif in_target and re.search(config['markers']['before'], line):
-                output[-1:-1] = ['\n'] + config['code'] + ['\n']
-                modified = True
-                
-        return '\n'.join(output), modified
-
-    # ========================
-    # EXECUTION FLOW
-    # ========================
+    # Read the file contents
     try:
-        # Step 1: File Setup
-        file_path = VSPath('special://home/addons/plugin.video.vstream/resources//lib/home.py') # Adapt path as needed
-        backup_path = create_backup(file_path)
-        log(f'Backup created at {backup_path}')
+        with open(file_path, 'r', encoding='utf-8') as file:
+            content = file.read()
+    except FileNotFoundError:
+        VSlog(f"File not found: {file_path}")
+        return
 
-        with open(file_path, 'r+', encoding='utf-8') as f:
-            original_content = f.read()
-            content = original_content
+    updated_content = content
 
-            # Step 2: Pre-Validation
-            if validate_context(content, r'show(Movies|Shows)Recommendations'):
-                log('Recommendations already exist')
-                return
+    def process_method(method_name, recommendation_code):
+        nonlocal updated_content
+        # Regex to find the method definition and its body
+        method_pattern = re.compile(rf"(def {method_name}\(self\):)(\s+.*?)(?=\n\s*def|\Z)", re.DOTALL)
+        match = method_pattern.search(updated_content)
+        if not match:
+            VSlog(f"{method_name} method not found.")
+            return
 
-            # Step 3: Dry Run with Multiple Methods
-            success = False
-            methods = [
-                ('Regex After Insert', method_regex_insert_after),
-                ('Regex Before Insert', method_regex_insert_before),
-                ('Line-by-Line Scan', lambda c, conf: method_line_by_line_scan(c.split('\n'), conf))
-            ]
+        method_header = match.group(1)
+        method_body = match.group(2)
+        full_method = match.group(0)
 
-            for method_name, method in methods:
-                for media_type in ['movies', 'series']:
-                    new_content = method(content, TARGETS[media_type])
-                    content = new_content[0] if isinstance(new_content, tuple) else new_content
-                    
-                # Validation Check
-                if all(validate_context(content, pattern) for pattern in [
-                    r'# Recommendations.*?movies/recommendations',
-                    r'# Recommendations.*?tv/recommendations'
-                ]):
-                    log(f'Success with method: {method_name}')
-                    success = True
-                    break
+        # Check if recommendations already exist in this method
+        if "movies/recommendations" in method_body or "shows/recommendations" in method_body:
+            VSlog(f"Recommendations already exist in {method_name}.")
+            return
 
-            # Step 4: Final Simulation
-            if success:
-                # Structural Validation
-                validation_pattern = r'''(?x)
-                def\ showMovies\(.*?\):
-                (.*?\n)*?
-                    #\ Nouveautés.*?\n
-                    (.*?\n){3}
-                    #\ Recommendations.*?\n
-                    .*?movies/recommendations.*?\n
-                (.*?\n)*?
-                def\ showSeries\(.*?\):
-                (.*?\n)*?
-                    #\ Nouveautés.*?\n
-                    (.*?\n){3}
-                    #\ Recommendations.*?\n
-                    .*?tv/recommendations.*?\n
-                '''
-                
-                if not re.search(validation_pattern, content, re.DOTALL):
-                    raise Exception('Final structure validation failed')
+        # Determine the insertion point:
+        # For showSeries, insert before the specific block if found.
+        if method_name == "showSeries" and "oGui.setEndOfDirectory()" in method_body:
+            marker = "oGui.setEndOfDirectory()"
+            new_body = method_body.replace(marker, recommendation_code + marker, 1)
+        # Otherwise, for showMovies or as fallback, use the "# Populaires" marker.
+        elif "# Populaires" in method_body:
+            new_body = method_body.replace("# Populaires", recommendation_code + "# Populaires", 1)
+        else:
+            VSlog(f"Insertion marker not found in {method_name}.")
+            return
 
-                # Step 5: Write Changes
-                f.seek(0)
-                f.write(content)
-                f.truncate()
-                log('Write successful')
-            else:
-                log('All methods failed, restoring backup')
-                copy2(backup_path, file_path)
+        # Replace the method with the new version
+        new_method = method_header + new_body
+        updated_content = updated_content.replace(full_method, new_method, 1)
+        VSlog(f"Added recommendations to {method_name}.")
 
-    except Exception as e:
-        log(f'Error: {str(e)}')
-        if 'backup_path' in locals():
-            log(f'Restoring from backup {backup_path}')
-            copy2(backup_path, file_path)
-            
+    # Process each method accordingly
+    process_method("showMovies", movies_recommendations_code)
+    process_method("showSeries", series_recommendations_code)
+
+    # Write back the updated content if changes were made
+    if updated_content != content:
+        try:
+            with open(file_path, 'w', encoding='utf-8') as file:
+                file.write(updated_content)
+            VSlog(f"Successfully updated {file_path}.")
+        except Exception as e:
+            VSlog(f"Error writing file: {str(e)}")
+    else:
+        VSlog("No changes needed.")
+        
 def create_recommendations_file_for_netflix_like_recommendations(because_num):
     """
     Vérifie si le fichier recommendations.py existe dans le chemin cible.
