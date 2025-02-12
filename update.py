@@ -385,25 +385,99 @@ def modify_showEpisodes(file_path):
     with open(file_path, 'w') as file:
         file.writelines(corrected_lines)
 
-#############################
-# Regex Safety & Equivalence#
-#############################
+# Try to import the resource module (works on Unix-like systems)
+try:
+    import resource
+except ImportError:
+    resource = None
+
+# Configuration constants
+MAX_REPETITION_BOUND = 100
+DEFAULT_TIMEOUT = 0.5
+MAX_INPUT_LENGTH = 10000  # Maximum length of input sample strings
+
+# Configuration for whitelist/blacklist constructs
+BLACKLIST_REGEX_CONSTRUCTS = [
+    # Example patterns that are known to be potentially dangerous
+    # r'(\w+\s*)+',
+    # r'(.+)+'
+]
+WHITELIST_REGEX_CONSTRUCTS = [
+    # For example, you might explicitly allow certain constructs.
+    # Currently left empty.
+]
+
+######################################
+# 2. OS-Level Resource Limits
+######################################
+
+def set_resource_limits():
+    """
+    Set OS-level resource limits for CPU time and memory usage, if possible.
+    """
+    if resource is not None:
+        try:
+            # Limit CPU time to 1 second
+            resource.setrlimit(resource.RLIMIT_CPU, (1, 1))
+            # Limit memory usage to 100MB
+            resource.setrlimit(resource.RLIMIT_AS, (100 * 1024 * 1024, 100 * 1024 * 1024))
+        except Exception as e:
+            VSlog(f"Resource limit setting failed: {e}")
+
+######################################
+# 7. Whitelist/Blacklist for Regex Constructs
+######################################
+
+def is_regex_blacklisted(pattern):
+    """
+    Check if a regex pattern matches any blacklisted constructs.
+    """
+    for black in BLACKLIST_REGEX_CONSTRUCTS:
+        if re.search(black, pattern):
+            return True
+    return False
+
+######################################
+# 3. Advanced Static Analysis for Regex Vulnerabilities
+######################################
+
+def is_vulnerable_regex(pattern):
+    """
+    Advanced heuristic check for potential catastrophic backtracking.
+    Checks for nested quantifiers and blacklisted constructs.
+    """
+    # Check for nested quantifiers such as (.+)+ or similar patterns.
+    if re.search(r'(\(.+?\))\s*[\*\+]\s*[\*\+]', pattern):
+        return True
+    # Check for multiple adjacent quantifiers
+    if re.search(r'[\*\+]{2,}', pattern):
+        return True
+    # Use blacklist check to catch explicitly dangerous constructs.
+    if is_regex_blacklisted(pattern):
+        return True
+    return False
+
+######################################
+# Regex Safety & Equivalence Functions
+######################################
 
 def safe_regex_pattern(regex_pattern):
     """
     Rewrites a given regex pattern to avoid infinite loops or excessive backtracking,
-    ensuring the original pattern's semantics are preserved.
-
-    Args:
-        regex_pattern (str): The potentially insecure regex pattern.
-
-    Returns:
-        str: A safer version of the regex pattern, or the original pattern if no safe
-             transformation can guarantee identical behavior.
+    preserving the original semantics when possible.
     """
     try:
         original_pattern = regex_pattern
         safe_pattern = original_pattern
+
+        # If the pattern is blacklisted, skip transformation.
+        if is_regex_blacklisted(safe_pattern):
+            VSlog("Regex pattern is blacklisted; skipping transformation.")
+            return safe_pattern
+
+        # Warn if the regex appears vulnerable.
+        if is_vulnerable_regex(safe_pattern):
+            VSlog("Warning: Detected potentially vulnerable regex pattern.")
 
         # Step 1: Replace greedy quantifiers with lazy ones (e.g., .* -> .*?)
         new_pattern = re.sub(r'(\.\*)(?!\?)', r'\1?', safe_pattern)
@@ -411,14 +485,14 @@ def safe_regex_pattern(regex_pattern):
             safe_pattern = new_pattern
             VSlog(f"After replacing greedy quantifiers: {safe_pattern}")
 
-        # Step 2: Replace unbounded repetitions (e.g., .{1,} -> .{1,100})
-        new_pattern = re.sub(r'\.\{(\d+),\}', r'.{\1,100}', safe_pattern)
+        # Step 2: Replace unbounded repetitions (e.g., .{1,} -> .{1,MAX_REPETITION_BOUND})
+        new_pattern = re.sub(r'\.\{(\d+),\}', rf'.{{\1,{MAX_REPETITION_BOUND}}}', safe_pattern)
         if safe_pattern != new_pattern:
             safe_pattern = new_pattern
             VSlog(f"After replacing unbounded repetitions: {safe_pattern}")
 
-        # Step 3: Simplify nested quantifiers (e.g., (?:...)+ -> (?:...){1,100})
-        new_pattern = re.sub(r'(\(\?:.*?\))\+', r'\1{1,100}', safe_pattern)
+        # Step 3: Simplify nested quantifiers (e.g., (?:...)+ -> (?:...){1,MAX_REPETITION_BOUND})
+        new_pattern = re.sub(r'(\(\?:.*?\))\+', rf'\1{{1,{MAX_REPETITION_BOUND}}}', safe_pattern)
         if safe_pattern != new_pattern:
             safe_pattern = new_pattern
             VSlog(f"After simplifying nested quantifiers: {safe_pattern}")
@@ -439,20 +513,18 @@ def safe_regex_pattern(regex_pattern):
         VSlog(f"Unexpected error: {e}")
         return regex_pattern
 
-def safe_findall(regex, sample, timeout=0.5):
+def safe_findall(regex, sample, timeout=DEFAULT_TIMEOUT):
     """
     Runs re.findall() in a separate thread with a timeout to avoid hangs.
-
-    Args:
-        regex (str): The regex pattern.
-        sample (str): The string to match against.
-        timeout (float): Timeout in seconds.
-
-    Returns:
-        list or None: The list of matches, or None if the operation times out.
+    Truncates the input sample if it exceeds MAX_INPUT_LENGTH.
     """
+    if len(sample) > MAX_INPUT_LENGTH:
+        sample = sample[:MAX_INPUT_LENGTH]
+
     def task():
         try:
+            if resource is not None:
+                set_resource_limits()
             return re.compile(regex).findall(sample)
         except Exception as e:
             VSlog(f"Error in safe_findall task: {e}")
@@ -469,15 +541,6 @@ def safe_findall(regex, sample, timeout=0.5):
 def test_equivalence(original, transformed, samples=None, max_dynamic_samples=20):
     """
     Test if two regex patterns produce the same results on sample inputs.
-
-    Args:
-        original (str): The original regex pattern.
-        transformed (str): The transformed regex pattern.
-        samples (list): A list of strings to test against (default: dynamically generated cases).
-        max_dynamic_samples (int): Maximum number of dynamically generated test cases.
-
-    Returns:
-        bool: True if the patterns are equivalent; False otherwise.
     """
     if samples is None:
         samples = generate_test_samples(original, max_samples=max_dynamic_samples)
@@ -504,21 +567,13 @@ def test_equivalence(original, transformed, samples=None, max_dynamic_samples=20
 def generate_test_samples(pattern, max_samples=20):
     """
     Generate diverse test cases based on the given regex pattern.
-
-    Args:
-        pattern (str): The regex pattern to analyze.
-        max_samples (int): Maximum number of test cases to generate.
-
-    Returns:
-        list: A list of dynamically generated test case strings.
     """
     def random_string(length, char_set=string.ascii_letters + string.digits):
         return ''.join(random.choices(char_set, k=length))
 
     def generate_from_char_class(char_class):
-        # Basic support for generating a random string from a char class.
+        # Generate a random string from a char class.
         chars = re.sub(r'\-', '', char_class)
-        # Handle ranges like a-z, 0-9
         ranges = re.findall(r'(\w)-(\w)', char_class)
         for start, end in ranges:
             chars += ''.join(chr(c) for c in range(ord(start), ord(end)+1))
@@ -560,12 +615,6 @@ def generate_test_samples(pattern, max_samples=20):
 def is_valid_regex(pattern):
     """
     Check if a string is a valid regex pattern.
-
-    Args:
-        pattern (str): The regex pattern to check.
-
-    Returns:
-        bool: True if the pattern is valid, False otherwise.
     """
     try:
         re.compile(pattern)
@@ -573,9 +622,9 @@ def is_valid_regex(pattern):
     except re.error:
         return False
 
-#############################
-# AST & Code Transformation #
-#############################
+######################################
+# AST & Code Transformation Functions
+######################################
 
 def check_for_regex_in_function_calls(code):
     """
@@ -597,12 +646,6 @@ def check_for_regex_in_function_calls(code):
 def find_regex_in_ast(tree):
     """
     Traverse the AST to find regex patterns assigned to variables.
-
-    Args:
-        tree: The AST tree of the Python code.
-
-    Returns:
-        list: A list of (regex_pattern, variable_name, line_number, column_offset) tuples.
     """
     VSlog("Searching for regex patterns in AST...")
     regex_patterns = []
@@ -624,7 +667,6 @@ class RegexTransformer(ast.NodeTransformer):
     """
     def visit_Constant(self, node):
         if isinstance(node.value, str):
-            # Heuristically decide if the string might be a regex.
             if any(token in node.value for token in ['\\', '.', '*', '+', '?', '^', '$', '[', ']', '(', ')']):
                 if is_valid_regex(node.value):
                     safe_pattern = safe_regex_pattern(node.value)
@@ -641,19 +683,484 @@ class RegexTransformer(ast.NodeTransformer):
                 return ast.copy_location(ast.Str(s=safe_pattern), node)
         return node
 
-#################################
-# File Rewriting & CLI Handling #
-#################################
+######################################
+# Fallback AST Unparser Function
+######################################
+
+def my_unparse(node, depth=0, max_depth=50):
+    """
+    A robust fallback AST unparser for AST nodes.
+    
+    This implementation covers many common node types with safe measures such as:
+      - Recursion depth control to prevent infinite recursion.
+      - Exception handling to fall back safely using ast.dump().
+      - Support for additional AST node types (e.g. lambda, lists, tuples, comprehensions).
+    
+    If the recursion depth exceeds max_depth or an error occurs, ast.dump(node) is returned.
+    """
+    def format_body(statements, current_depth):
+        """Helper to handle empty code blocks by adding 'pass' with proper indentation"""
+        body_lines = []
+        for stmt in statements:
+            unparsed = my_unparse(stmt, current_depth + 1, max_depth)
+            for line in unparsed.split('\n'):
+                body_lines.append('    ' * (current_depth + 1) + line)
+        if not body_lines:
+            body_lines.append('    ' * (current_depth + 1) + 'pass')
+        return '\n'.join(body_lines)
+
+    try:
+        if depth > max_depth:
+            return ast.dump(node)
+
+        # Module-level structure
+        if isinstance(node, ast.Module):
+            return "\n".join(my_unparse(stmt, depth+1, max_depth) for stmt in node.body)
+        
+        # Function definitions
+        elif isinstance(node, ast.FunctionDef):
+            decorators = [f"@{my_unparse(d, depth+1, max_depth)}" for d in node.decorator_list]
+            decorator_str = "\n".join(decorators) + "\n" if decorators else ""
+            args = my_unparse(node.args, depth+1, max_depth)
+            body = format_body(node.body, depth)
+            return f"{decorator_str}def {node.name}({args}):\n{body}"
+        
+        # Class definitions
+        elif isinstance(node, ast.ClassDef):
+            decorators = [f"@{my_unparse(d, depth+1, max_depth)}" for d in node.decorator_list]
+            bases = [my_unparse(b, depth+1, max_depth) for b in node.bases]
+            keywords = [my_unparse(kw, depth+1, max_depth) for kw in node.keywords]
+            body = format_body(node.body, depth)
+            return "\n".join(decorators) + f"\nclass {node.name}({', '.join(bases + keywords)}):\n{body}"
+
+        # Parameter handling
+        elif isinstance(node, ast.arguments):
+            params = []
+            pos_only = [my_unparse(arg, depth+1, max_depth) for arg in node.posonlyargs]
+            if pos_only:
+                params.extend(pos_only)
+                if node.args or node.vararg or node.kwonlyargs or node.kwarg:
+                    params.append('/')
+                    
+            args = node.args
+            defaults = node.defaults
+            num_defaults = len(defaults)
+            for i, arg in enumerate(args):
+                arg_str = my_unparse(arg, depth+1, max_depth)
+                if i >= len(args) - num_defaults:
+                    default = defaults[i - (len(args) - num_defaults)]
+                    arg_str += f"={my_unparse(default, depth+1, max_depth)}"
+                params.append(arg_str)
+
+            if node.vararg:
+                vararg = my_unparse(node.vararg, depth+1, max_depth)
+                if getattr(node.vararg, 'annotation', None):
+                    vararg += f": {my_unparse(node.vararg.annotation, depth+1, max_depth)}"
+                params.append(f"*{vararg}")
+            elif node.kwonlyargs:
+                params.append('*')
+            
+            for i, kwarg in enumerate(node.kwonlyargs):
+                kwarg_str = my_unparse(kwarg, depth+1, max_depth)
+                if i < len(node.kw_defaults):
+                    default = node.kw_defaults[i]
+                    if default:
+                        kwarg_str += f"={my_unparse(default, depth+1, max_depth)}"
+                params.append(kwarg_str)
+            
+            if node.kwarg:
+                kwarg = my_unparse(node.kwarg, depth+1, max_depth)
+                if getattr(node.kwarg, 'annotation', None):
+                    kwarg += f": {my_unparse(node.kwarg.annotation, depth+1, max_depth)}"
+                params.append(f"**{kwarg}")
+            
+            return ", ".join(params)
+
+        # Parameter with type annotation
+        elif isinstance(node, ast.arg):
+            annotation = f": {my_unparse(node.annotation, depth+1, max_depth)}" if node.annotation else ""
+            return f"{node.arg}{annotation}"
+
+        # Assignment statements
+        elif isinstance(node, ast.Assign):
+            targets = " = ".join(my_unparse(t, depth+1, max_depth) for t in node.targets)
+            value = my_unparse(node.value, depth+1, max_depth)
+            return f"{targets} = {value}"
+
+        # Expression statements
+        elif isinstance(node, ast.Expr):
+            return my_unparse(node.value, depth+1, max_depth)
+
+        # Function/method calls
+        elif isinstance(node, ast.Call):
+            func = my_unparse(node.func, depth+1, max_depth)
+            args = [my_unparse(a, depth+1, max_depth) for a in node.args]
+            keywords = [my_unparse(k, depth+1, max_depth) for k in node.keywords]
+            return f"{func}({', '.join(args + keywords)})"
+
+        # Variable names
+        elif isinstance(node, ast.Name):
+            return node.id
+
+        # Constants
+        elif isinstance(node, ast.Constant):
+            return repr(node.value)
+
+        # String literals (Python <3.8)
+        elif isinstance(node, ast.Str):
+            return repr(node.s)
+
+        # Return statements
+        elif isinstance(node, ast.Return):
+            value = my_unparse(node.value, depth+1, max_depth) if node.value else ""
+            return f"return {value}"
+
+        # Binary operations
+        elif isinstance(node, ast.BinOp):
+            left = my_unparse(node.left, depth+1, max_depth)
+            op = my_unparse(node.op, depth+1, max_depth)
+            right = my_unparse(node.right, depth+1, max_depth)
+            return f"({left} {op} {right})"
+
+        # Math operators
+        elif isinstance(node, ast.Add): return "+"
+        elif isinstance(node, ast.Sub): return "-"
+        elif isinstance(node, ast.Mult): return "*"
+        elif isinstance(node, ast.Div): return "/"
+        elif isinstance(node, ast.FloorDiv): return "//"
+        elif isinstance(node, ast.Mod): return "%"
+        elif isinstance(node, ast.Pow): return "**"
+
+        # Imports
+        elif isinstance(node, ast.Import):
+            names = ", ".join(
+                f"{alias.name} as {alias.asname}" if alias.asname else alias.name
+                for alias in node.names
+            )
+            return f"import {names}"
+        
+        elif isinstance(node, ast.ImportFrom):
+            module = ("." * node.level) + (node.module or "")
+            names = ", ".join(
+                f"{alias.name} as {alias.asname}" if alias.asname else alias.name
+                for alias in node.names
+            )
+            return f"from {module} import {names}"
+
+        # Control structures
+        elif isinstance(node, ast.If):
+            test = my_unparse(node.test, depth+1, max_depth)
+            body = format_body(node.body, depth)
+            if node.orelse:
+                if len(node.orelse) == 1 and isinstance(node.orelse[0], ast.If):
+                    elif_stmt = my_unparse(node.orelse[0], depth+1, max_depth).replace("if", "elif", 1)
+                    return f"if {test}:\n{body}\n{elif_stmt}"
+                else:
+                    orelse = format_body(node.orelse, depth)
+                    return f"if {test}:\n{body}\nelse:\n{orelse}"
+            return f"if {test}:\n{body}"
+
+        elif isinstance(node, ast.For):
+            target = my_unparse(node.target, depth+1, max_depth)
+            iter_ = my_unparse(node.iter, depth+1, max_depth)
+            body = format_body(node.body, depth)
+            orelse = ""
+            if node.orelse:
+                orelse = f"\nelse:\n{format_body(node.orelse, depth)}"
+            return f"for {target} in {iter_}:\n{body}{orelse}"
+
+        elif isinstance(node, ast.While):
+            test = my_unparse(node.test, depth+1, max_depth)
+            body = format_body(node.body, depth)
+            orelse = ""
+            if node.orelse:
+                orelse = f"\nelse:\n{format_body(node.orelse, depth)}"
+            return f"while {test}:\n{body}{orelse}"
+
+        elif isinstance(node, ast.With):
+            items = []
+            for item in node.items:
+                ctx_expr = my_unparse(item.context_expr, depth+1, max_depth)
+                var = f" as {my_unparse(item.optional_vars, depth+1, max_depth)}" if item.optional_vars else ""
+                items.append(f"{ctx_expr}{var}")
+            body = format_body(node.body, depth)
+            return f"with {', '.join(items)}:\n{body}"
+
+        # Comparisons
+        elif isinstance(node, ast.Compare):
+            left = my_unparse(node.left, depth+1, max_depth)
+            ops = [my_unparse(op, depth+1, max_depth) for op in node.ops]
+            comparators = [my_unparse(c, depth+1, max_depth) for c in node.comparators]
+            return f"{left} {' '.join(f'{op} {comp}' for op, comp in zip(ops, comparators))}"
+
+        elif isinstance(node, ast.Eq): return "=="
+        elif isinstance(node, ast.NotEq): return "!="
+        elif isinstance(node, ast.Lt): return "<"
+        elif isinstance(node, ast.LtE): return "<="
+        elif isinstance(node, ast.Gt): return ">"
+        elif isinstance(node, ast.GtE): return ">="
+        elif isinstance(node, ast.Is): return "is"
+        elif isinstance(node, ast.IsNot): return "is not"
+        elif isinstance(node, ast.In): return "in"
+        elif isinstance(node, ast.NotIn): return "not in"
+
+        # Boolean logic
+        elif isinstance(node, ast.BoolOp):
+            op_str = " and " if isinstance(node.op, ast.And) else " or "
+            return f"({op_str.join(my_unparse(v, depth+1, max_depth) for v in node.values)})"
+
+        # Unary operations
+        elif isinstance(node, ast.UnaryOp):
+            op = my_unparse(node.op, depth+1, max_depth)
+            operand = my_unparse(node.operand, depth+1, max_depth)
+            space = " " if op == "not" else ""
+            return f"{op}{space}{operand}"
+
+        elif isinstance(node, ast.Not): return "not"
+        elif isinstance(node, ast.USub): return "-"
+        elif isinstance(node, ast.UAdd): return "+"
+        elif isinstance(node, ast.Invert): return "~"
+
+        # Data structures
+        elif isinstance(node, ast.Dict):
+            keys = [my_unparse(k, depth+1, max_depth) if k else "None" 
+                   for k in node.keys]
+            values = [my_unparse(v, depth+1, max_depth) for v in node.values]
+            pairs = [f"{k}: {v}" for k, v in zip(keys, values)]
+            return "{" + ", ".join(pairs) + "}"
+        
+        elif isinstance(node, ast.List):
+            elements = ", ".join(my_unparse(e, depth+1, max_depth) for e in node.elts)
+            return f"[{elements}]"
+        
+        elif isinstance(node, ast.Tuple):
+            elements = ", ".join(my_unparse(e, depth+1, max_depth) for e in node.elts)
+            if len(node.elts) == 1:
+                elements += ","
+            return f"({elements})"
+        
+        elif isinstance(node, ast.Set):
+            elements = ", ".join(my_unparse(e, depth+1, max_depth) for e in node.elts)
+            return f"{{{elements}}}" if elements else "set()"
+
+        # Lambda expressions
+        elif isinstance(node, ast.Lambda):
+            args = my_unparse(node.args, depth+1, max_depth)
+            body = my_unparse(node.body, depth+1, max_depth)
+            return f"lambda {args}: {body}"
+
+        # Comprehensions
+        elif isinstance(node, ast.ListComp):
+            elt = my_unparse(node.elt, depth+1, max_depth)
+            gens = " ".join(my_unparse(g, depth+1, max_depth) for g in node.generators)
+            return f"[{elt} {gens}]"
+        
+        elif isinstance(node, ast.SetComp):
+            elt = my_unparse(node.elt, depth+1, max_depth)
+            gens = " ".join(my_unparse(g, depth+1, max_depth) for g in node.generators)
+            return f"{{{elt} {gens}}}"
+        
+        elif isinstance(node, ast.DictComp):
+            key = my_unparse(node.key, depth+1, max_depth)
+            value = my_unparse(node.value, depth+1, max_depth)
+            gens = " ".join(my_unparse(g, depth+1, max_depth) for g in node.generators)
+            return f"{{{key}: {value} {gens}}}"
+        
+        elif isinstance(node, ast.GeneratorExp):
+            elt = my_unparse(node.elt, depth+1, max_depth)
+            gens = " ".join(my_unparse(g, depth+1, max_depth) for g in node.generators)
+            return f"({elt} {gens})"
+        
+        elif isinstance(node, ast.comprehension):
+            target = my_unparse(node.target, depth+1, max_depth)
+            iter_ = my_unparse(node.iter, depth+1, max_depth)
+            ifs = [my_unparse(cond, depth+1, max_depth) for cond in node.ifs]
+            ifs_str = " if " + " if ".join(ifs) if ifs else ""
+            return f"for {target} in {iter_}{ifs_str}"
+
+        # Exception handling
+        elif isinstance(node, ast.Try):
+            try_body = format_body(node.body, depth)
+            excepts = []
+            for handler in node.handlers:
+                type_str = my_unparse(handler.type, depth+1, max_depth) if handler.type else ""
+                name = f" as {handler.name}" if handler.name else ""
+                handler_body = format_body(handler.body, depth)
+                excepts.append(f"except {type_str}{name}:\n{handler_body}")
+            else_body = ""
+            if node.orelse:
+                else_body = f"\nelse:\n{format_body(node.orelse, depth)}"
+            finally_body = ""
+            if node.finalbody:
+                finally_body = f"\nfinally:\n{format_body(node.finalbody, depth)}"
+            return f"try:\n{try_body}\n" + "\n".join(excepts) + else_body + finally_body
+
+        # Async constructs
+        elif isinstance(node, ast.AsyncFunctionDef):
+            decorators = [f"@{my_unparse(d, depth+1, max_depth)}" for d in node.decorator_list]
+            decorator_str = "\n".join(decorators) + "\n" if decorators else ""
+            args = my_unparse(node.args, depth+1, max_depth)
+            body = format_body(node.body, depth)
+            return f"{decorator_str}async def {node.name}({args}):\n{body}"
+
+        elif isinstance(node, ast.AsyncFor):
+            target = my_unparse(node.target, depth+1, max_depth)
+            iter_ = my_unparse(node.iter, depth+1, max_depth)
+            body = format_body(node.body, depth)
+            orelse = ""
+            if node.orelse:
+                orelse = f"\nelse:\n{format_body(node.orelse, depth)}"
+            return f"async for {target} in {iter_}:\n{body}{orelse}"
+
+        elif isinstance(node, ast.AsyncWith):
+            items = []
+            for item in node.items:
+                ctx_expr = my_unparse(item.context_expr, depth+1, max_depth)
+                var = f" as {my_unparse(item.optional_vars, depth+1, max_depth)}" if item.optional_vars else ""
+                items.append(f"{ctx_expr}{var}")
+            body = format_body(node.body, depth)
+            return f"async with {', '.join(items)}:\n{body}"
+
+        elif isinstance(node, ast.Await):
+            value = my_unparse(node.value, depth+1, max_depth)
+            return f"await {value}"
+
+        # Type annotations
+        elif isinstance(node, ast.AnnAssign):
+            target = my_unparse(node.target, depth+1, max_depth)
+            annotation = my_unparse(node.annotation, depth+1, max_depth)
+            value = f" = {my_unparse(node.value, depth+1, max_depth)}" if node.value else ""
+            return f"{target}: {annotation}{value}"
+
+        # Walrus operator
+        elif isinstance(node, ast.NamedExpr):
+            target = my_unparse(node.target, depth+1, max_depth)
+            value = my_unparse(node.value, depth+1, max_depth)
+            return f"({target} := {value})"
+
+        # Formatted strings
+        elif isinstance(node, ast.JoinedStr):
+            parts = [my_unparse(v, depth+1, max_depth) for v in node.values]
+            return f"f{''.join(parts)}"
+
+        elif isinstance(node, ast.FormattedValue):
+            value = my_unparse(node.value, depth+1, max_depth)
+            conversion = f"!{chr(node.conversion)}" if node.conversion != -1 else ""
+            format_spec = f":{my_unparse(node.format_spec, depth+1, max_depth)}" if node.format_spec else ""
+            return f"{{{value}{conversion}{format_spec}}}"
+
+        # Yield statements
+        elif isinstance(node, ast.Yield):
+            value = my_unparse(node.value, depth+1, max_depth) if node.value else ""
+            return f"yield {value}"
+
+        elif isinstance(node, ast.YieldFrom):
+            value = my_unparse(node.value, depth+1, max_depth)
+            return f"yield from {value}"
+
+        # Control statements
+        elif isinstance(node, ast.Global):
+            return f"global {', '.join(node.names)}"
+
+        elif isinstance(node, ast.Nonlocal):
+            return f"nonlocal {', '.join(node.names)}"
+
+        elif isinstance(node, ast.Assert):
+            test = my_unparse(node.test, depth+1, max_depth)
+            msg = f", {my_unparse(node.msg, depth+1, max_depth)}" if node.msg else ""
+            return f"assert {test}{msg}"
+
+        elif isinstance(node, ast.Raise):
+            expr = my_unparse(node.exc, depth+1, max_depth) if node.exc else ""
+            cause = f" from {my_unparse(node.cause, depth+1, max_depth)}" if node.cause else ""
+            return f"raise {expr}{cause}" if expr or cause else "raise"
+
+        elif isinstance(node, ast.Pass):
+            return "pass"
+
+        elif isinstance(node, ast.Break):
+            return "break"
+
+        elif isinstance(node, ast.Continue):
+            return "continue"
+
+        # Advanced operators
+        elif isinstance(node, ast.BitAnd): return "&"
+        elif isinstance(node, ast.BitOr): return "|"
+        elif isinstance(node, ast.BitXor): return "^"
+        elif isinstance(node, ast.LShift): return "<<"
+        elif isinstance(node, ast.RShift): return ">>"
+
+        # Augmented assignment
+        elif isinstance(node, ast.AugAssign):
+            target = my_unparse(node.target, depth+1, max_depth)
+            op = my_unparse(node.op, depth+1, max_depth)
+            value = my_unparse(node.value, depth+1, max_depth)
+            return f"{target} {op}= {value}"
+
+        # Subscripting
+        elif isinstance(node, ast.Subscript):
+            value = my_unparse(node.value, depth+1, max_depth)
+            slice_part = my_unparse(node.slice, depth+1, max_depth)
+            return f"{value}[{slice_part}]"
+
+        elif isinstance(node, ast.Slice):
+            lower = my_unparse(node.lower, depth+1, max_depth) if node.lower else ""
+            upper = my_unparse(node.upper, depth+1, max_depth) if node.upper else ""
+            step = my_unparse(node.step, depth+1, max_depth) if node.step else ""
+            return f"{lower}:{upper}" + (f":{step}" if step else "")
+
+        elif isinstance(node, ast.Index):
+            return my_unparse(node.value, depth+1, max_depth)
+
+        # Starred expressions
+        elif isinstance(node, ast.Starred):
+            value = my_unparse(node.value, depth+1, max_depth)
+            return f"*{value}"
+
+        # Attribute access
+        elif isinstance(node, ast.Attribute):
+            value = my_unparse(node.value, depth+1, max_depth)
+            return f"{value}.{node.attr}"
+
+        # Pattern matching (Python 3.10+)
+        elif isinstance(node, ast.Match):
+            subject = my_unparse(node.subject, depth+1, max_depth)
+            cases = "\n".join(my_unparse(c, depth+1, max_depth) for c in node.cases)
+            return f"match {subject}:\n{cases}"
+
+        elif isinstance(node, ast.match_case):
+            pattern = my_unparse(node.pattern, depth+1, max_depth)
+            guard = f" if {my_unparse(node.guard, depth+1, max_depth)}" if node.guard else ""
+            body = format_body(node.body, depth)
+            return f"case {pattern}{guard}:\n{body}"
+
+        # Special constants
+        elif isinstance(node, ast.Constant) and node.value is Ellipsis:
+            return "..."
+        
+        # Edge cases
+        elif isinstance(node, ast.Set) and not node.elts:
+            return "set()"
+
+        elif isinstance(node, ast.Expr) and isinstance(node.value, ast.Str):
+            return f'"""{node.value.s}"""'
+
+        # Final fallback
+        else:
+            return ast.dump(node)
+            
+    except Exception as e:
+        return ast.dump(node)
+
+######################################
+# File Rewriting & CLI Handling
+######################################
 
 def rewrite_file_to_avoid_regex_infinite_loops(file_path, dry_run=False, backup=False):
     """
     Rewrites the given file to avoid infinite loops in regular expressions.
-    Ensures only insecure regex patterns are modified.
-
-    Args:
-        file_path (str): The path to the Python file to be processed.
-        dry_run (bool): If True, shows a diff of changes without modifying the file.
-        backup (bool): If True and changes are made, create a backup of the original file.
+    Only modifies insecure regex patterns.
     """
     try:
         VSlog(f"Reading file: {file_path}")
@@ -668,16 +1175,17 @@ def rewrite_file_to_avoid_regex_infinite_loops(file_path, dry_run=False, backup=
         new_tree = transformer.visit(tree)
         ast.fix_missing_locations(new_tree)
 
-        try:
+        if hasattr(ast, "unparse"):
             new_code = ast.unparse(new_tree)
-        except AttributeError:
-            try:
-                import astor
-                new_code = astor.to_source(new_tree)
-            except ImportError:
-                VSlog("Error: ast.unparse() is not available and the 'astor' module is not installed. "
-                      "Please install astor (pip install astor) or upgrade to Python 3.9+.")
-                return
+        else:
+            VSlog("ast.unparse() not available; using custom unparser.")
+            new_code = my_unparse(new_tree)
+
+        try:
+            compile(new_code, file_path, 'exec')
+        except Exception as compile_error:
+            VSlog(f"Compilation error after AST transformation: {compile_error}")
+            return
 
         if new_code != file_contents:
             if dry_run:
