@@ -1060,14 +1060,62 @@ def create_recommendations_file_for_netflix_like_recommendations(because_num):
 
             # Template du contenu prédéfini pour recommendations.py.
             # Utilisation de triple quotes avec des quotes simples pour éviter d'échapper les docstrings.
-            file_content_template = Template(r'''from resources.lib.comaddon import dialog, addon, VSlog
-from resources.lib.gui.gui import cGui
+            file_content_template = Template(r'''from resources.lib.gui.gui import cGui
 from resources.lib.handler.outputParameterHandler import cOutputParameterHandler
 from resources.lib.db import cDb
 from resources.sites.themoviedb_org import SITE_IDENTIFIER as SITE_TMDB
 
 SITE_IDENTIFIER = 'cRecommendations'
 SITE_NAME = 'Recommendations'
+
+import requests
+import re
+import traceback
+
+def get_tmdb_id(title, media_type="movie"):
+    search_url = f"https://www.themoviedb.org/search?query={title}&language=fr-FR"
+    response = requests.get(search_url)
+    
+    if response.status_code == 200:
+        content = response.content.decode('utf-8')
+        if media_type == "movie":
+            pattern = r'href="/movie/(\d+)-'
+        else:
+            pattern = r'href="/tv/(\d+)-'
+
+        match = re.search(pattern, content)
+        if match:
+            return int(match.group(1))
+        else:
+            return None
+    else:
+        print(f"Erreur: {response.status_code}")
+        return None
+
+def get_release_date(title, media_type="movie"):
+    tmdb_id = get_tmdb_id(title, media_type)
+    if not tmdb_id:
+        return None
+    
+    search_url = f"https://www.themoviedb.org/{'movie' if media_type == 'movie' else 'tv'}/{tmdb_id}?language=fr-FR"
+    response = requests.get(search_url)
+    
+    if response.status_code == 200:
+        content = response.content.decode('utf-8')
+        if media_type == "movie":
+            pattern = r'<span class="release">(.*?)</span>'
+        else:
+            pattern = r'Première diffusion:.*?<span>(.*?)</span>'
+        
+        match = re.search(pattern, content, re.DOTALL)
+        if match:
+            return match.group(1).strip()
+        else:
+            return None
+    else:
+        print(f"Erreur: {response.status_code}")
+        return None
+
 
 class cRecommendations:
     DIALOG = dialog()
@@ -1083,6 +1131,7 @@ class cRecommendations:
         """
         oGui = cGui()
         try:
+
             VSlog(f"Fetching recommendations for category {category}")
             
             with cDb() as DB:
@@ -1093,13 +1142,23 @@ class cRecommendations:
                     return
 
                 for data in row:
+                    # Afficher toutes les clés de data
+                    keys_list = list(data.keys())
+                    VSlog("Clés de data: " + ", ".join(keys_list))
+                    tmdb_id = data['tmdb_id']
+                    date = ""
+                    if not isinstance(data['tmdb_id'], int) or data['tmdb_id'] == 0:
+                        tmdb_id = get_tmdb_id(data['title'], f"{'movie' if category == '1' else 'tv'}")
+                        date = get_release_date(data['title'], f"{'movie' if category == '1' else 'tv'}")
+
                     oOutputParameterHandler = cOutputParameterHandler()
-                    oOutputParameterHandler.addParameter('sTmdbId', data['tmdb_id'])
+                    oOutputParameterHandler.addParameter('sTmdbId', tmdb_id)
                     oOutputParameterHandler.addParameter(
-                        'siteUrl', f"{'movie' if category == '1' else 'tv'}/{data['tmdb_id']}/recommendations"
+                        'siteUrl', f"{'movie' if category == '1' else 'tv'}/{tmdb_id}/recommendations"
                     )
-                    title = self.ADDON.VSlang(${because_num}) + ' ' + data['title']
-                    VSlog(f"Title {title} recommended from views.")
+                    title = self.ADDON.VSlang(0) + ' ' + data['title']
+                    VSlog(f"Title {title} to make recommendations")
+                    VSlog(f"tmdb_id: {tmdb_id} recommended from views.")
                     oGui.addMovie(SITE_TMDB, content_type, title, icon, '', '', oOutputParameterHandler)
 
         except Exception as e:
