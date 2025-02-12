@@ -1430,8 +1430,8 @@ MAX_INPUT_LENGTH = 10000  # Maximum length of input sample strings
 # Configuration for whitelist/blacklist constructs
 BLACKLIST_REGEX_CONSTRUCTS = [
     # Example patterns that are known to be potentially dangerous
-    r'(\w+\s*)+',
-    r'(.+)+'
+    # r'(\w+\s*)+',
+    # r'(.+)+'
 ]
 WHITELIST_REGEX_CONSTRUCTS = [
     # For example, you might explicitly allow certain constructs.
