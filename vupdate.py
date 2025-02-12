@@ -505,24 +505,110 @@ def isRecommendations(sSiteName, sFunction):
     with open(file_path, 'r', encoding='utf-8') as f:
         content = f.read()
     
-    # === Insertion de la ligne de dispatch dans la classe main ===
-    # La regex a été adaptée pour prendre en compte les retours chariot et l'indentation (espaces ou tabulations)
-    main_block_pattern = r"(class\s+main\s*:\s*(?:\r?\n)(?:[ \t]+.*(?:\r?\n))+)"
-    main_match = re.search(main_block_pattern, content)
-    if main_match:
-        main_block = main_match.group(1)
-        # La regex prend désormais en compte les espaces en début de ligne
-        is_pattern = re.compile(r"^\s*if\s+is\w+\(sSiteName,\s*sFunction\):.*$", re.MULTILINE)
-        matches = list(is_pattern.finditer(main_block))
-        if matches:
-            last_match = matches[-1]
-            new_main_block = main_block[:last_match.end()] + dispatch_line + "\n" + main_block[last_match.end():]
-            content = content.replace(main_block, new_main_block)
-            VSlog("La ligne de dispatch a été insérée après la dernière fonction is* dans la classe main.")
+import re
+
+def add_recommendations_condition(filename='default.py'):
+    """
+    This function finds the block inside default.py that is inside
+    "if oInputParameterHandler.exist('site'):" and then locates all lines
+    that begin with any "if is..." condition (using a generic regex). If the
+    recommendations condition is not already present, it inserts:
+    
+        if isRecommendations(sSiteName, sFunction):
+            return
+    
+    into that block.
+    """
+    
+    # Read in the file.
+    with open(filename, 'r', encoding='utf-8') as f:
+        lines = f.readlines()
+    
+    # Pattern to find the "if oInputParameterHandler.exist('site'):" line.
+    site_if_pattern = re.compile(r'^\s*if\s+oInputParameterHandler\.exist\([\'"]site[\'"]\):')
+    
+    # Pattern to match any condition line that starts with "if is..."
+    is_condition_pattern = re.compile(r'^\s*if\s+is[A-Za-z0-9_]+\s*\(')
+    
+    # Pattern to match the recommendations condition.
+    rec_condition_pattern = re.compile(r'^\s*if\s+isRecommendations\s*\(sSiteName,\s*sFunction\)\s*:')
+    
+    in_site_block = False
+    site_block_indent = ""
+    site_if_line_index = -1
+    last_is_condition_idx = -1
+    rec_condition_found = False
+
+    # First pass: Walk through the file to find the block and record indices.
+    for i, line in enumerate(lines):
+        # Look for the "if oInputParameterHandler.exist('site'):" start.
+        if not in_site_block:
+            if site_if_pattern.search(line):
+                in_site_block = True
+                site_if_line_index = i
+                # Save its indentation (number of leading spaces).
+                site_block_indent = re.match(r'^(\s*)', line).group(1)
         else:
-            VSlog("Aucune ligne 'if is* (sSiteName, sFunction):' n'a été trouvée dans la classe main ; aucune insertion effectuée.")
+            # Once inside the block, check if we have left it.
+            # Compare indentation lengths (ignoring blank lines).
+            current_indent = len(re.match(r'^(\s*)', line).group(1))
+            if current_indent <= len(site_block_indent) and line.strip():
+                # End of the site block reached.
+                in_site_block = False
+            else:
+                # We are inside the block.
+                # If the line starts with an "if is..." condition, record its index.
+                if is_condition_pattern.search(line):
+                    last_is_condition_idx = i
+                    if rec_condition_pattern.search(line):
+                        rec_condition_found = True
+
+    if rec_condition_found:
+        VSlog("The recommendations condition already exists. No changes made.")
+        return
+
+    # Determine the insertion index.
+    # If we found any "if is..." condition, insert right after the last one and its block.
+    if last_is_condition_idx != -1:
+        # Get the indentation of the last "if is..." line.
+        if_line_indent = re.match(r'^(\s*)', lines[last_is_condition_idx]).group(1)
+        insert_index = last_is_condition_idx + 1
+        # Advance past any lines that are part of the last condition's block.
+        for j in range(last_is_condition_idx + 1, len(lines)):
+            line_indent = len(re.match(r'^(\s*)', lines[j]).group(1))
+            if line_indent <= len(if_line_indent) and lines[j].strip():
+                break
+            insert_index = j + 1
     else:
-        VSlog("Le bloc 'class main:' n'a pas été trouvé dans le fichier.")
+        # Otherwise, simply insert right after the "if oInputParameterHandler.exist('site'):" line.
+        insert_index = site_if_line_index + 1
+
+    # Decide the proper indentation for the snippet.
+    # Use the indentation of the last "if is..." condition if available,
+    # or add one level (assumed 4 spaces) to the site's block indent.
+    if last_is_condition_idx != -1:
+        snippet_indent = re.match(r'^(\s*)', lines[last_is_condition_idx]).group(1)
+    else:
+        snippet_indent = site_block_indent + "    "
+    
+    # Define the snippet lines.
+    snippet = [
+        f"{snippet_indent}if isRecommendations(sSiteName, sFunction):\n",
+        f"{snippet_indent}    return\n"
+    ]
+    
+    # Insert the snippet into the lines.
+    new_lines = lines[:insert_index] + snippet + lines[insert_index:]
+    
+    # Write the modified content back to the file.
+    with open(filename, 'w', encoding='utf-8') as f:
+        f.writelines(new_lines)
+    
+    VSlog("Inserted the recommendations condition successfully.")
+
+        # Read in the file.
+    with open(filename, 'r', encoding='utf-8') as f:
+        content = f.read()
     
     # === Insertion de la fonction libre isRecommendations ===
     if not re.search(r"^def\s+isRecommendations\s*\(", content, re.MULTILINE):
