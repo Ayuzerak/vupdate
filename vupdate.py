@@ -468,73 +468,79 @@ def add_netflix_like_recommendations():
 
 def add_is_recommendations_for_netflix_like_recommendations():
     """
-    Vérifie et ajoute les définitions de `isRecommendations` :
-    - Comme méthode dans la classe `main` si elle est absente.
-    - Comme fonction libre en dehors de toute classe si elle est absente.
+    Cette fonction modifie le fichier default.py du plugin vStream de la manière suivante :
+      1. Dans la classe main, elle insère une ligne de dispatch (appel à isRecommendations)
+         juste après la dernière ligne commençant par "if isXXX(sSiteName, sFunction):".
+      2. Elle ajoute la définition libre de la fonction isRecommendations juste AVANT
+         la ligne définissant "def _pluginSearch(plugin, sSearchText):". Si cette ligne n'est pas trouvée,
+         la fonction est ajoutée à la fin du fichier.
     """
-    # Chemin vers le fichier default.py
+    # Chemin vers le fichier default.py (normalisé)
     file_path = VSPath('special://home/addons/plugin.video.vstream/default.py').replace('\\', '/')
-
-    # Contenu de la méthode `isRecommendations` à ajouter dans la classe `main`
-    method_content = """
-    def isRecommendations(self, sSiteName, sFunction):
+    
+    # Ligne de dispatch à insérer dans la classe main
+    dispatch_line = """
+    if isRecommendations(sSiteName, sFunction):
         return
     """
-
-    # Contenu de la fonction libre `isRecommendations` à ajouter
-    function_content = """
+    
+    # Définition libre de la fonction isRecommendations à ajouter
+    free_function = """
 def isRecommendations(sSiteName, sFunction): 
     if sSiteName == 'cRecommendations':
         print("HEHEHEHEHEHEHEHEHEHE COUCOU (fonction libre)")
-
         plugins = __import__('resources.lib.recommendations', fromlist=['cRecommendations']).cRecommendations()
         function = getattr(plugins, sFunction)
         function()
         return True
     return False
 """
-
-    # Vérifier si le fichier default.py existe
+    
+    # Vérifier que le fichier existe
     if not os.path.exists(file_path):
         VSlog(f"Fichier introuvable : {file_path}")
         return
-
-    # Lire le contenu actuel du fichier
-    with open(file_path, 'r', encoding='utf-8') as file:
-        content = file.read()
-
-    # Vérifier la présence de la classe main
-    if not re.search(r"class main\s*:", content):
-        VSlog("La classe `main` est introuvable dans le fichier.")
-        return
-
-    # Vérifier si la méthode isRecommendations existe dans la classe main
-    if not re.search(r"class main.*?def isRecommendations\(.*\):", content, re.DOTALL):
-        # Ajouter la méthode dans la classe `main`
-        content = re.sub(
-            r"(class main\s*:\s*)\n",
-            rf"\1{method_content}\n",
-            content,
-            count=1,
-            flags=re.DOTALL
-        )
-        VSlog("La méthode `isRecommendations` a été ajoutée à la classe `main`.")
-
+    
+    # Lire le contenu du fichier
+    with open(file_path, 'r', encoding='utf-8') as f:
+        content = f.read()
+    
+    # === Insertion de la ligne de dispatch dans la classe main ===
+    main_block_pattern = r"(class\s+main\s*:\s*\n(?:\s+.*\n)+)"
+    main_match = re.search(main_block_pattern, content)
+    if main_match:
+        main_block = main_match.group(1)
+        is_pattern = re.compile(r"^(if\s+is\w+\(sSiteName,\s*sFunction\):.*)$", re.MULTILINE)
+        matches = list(is_pattern.finditer(main_block))
+        if matches:
+            last_match = matches[-1]
+            new_main_block = main_block[:last_match.end()] + dispatch_line + "\n" + main_block[last_match.end():]
+            content = content.replace(main_block, new_main_block)
+            VSlog("La ligne de dispatch a été insérée après la dernière fonction is* dans la classe main.")
+        else:
+            VSlog("Aucune ligne 'if is* (sSiteName, sFunction):' n'a été trouvée dans la classe main ; aucune insertion effectuée.")
     else:
-        VSlog("La méthode `isRecommendations` existe déjà dans la classe `main`.")
-
-    # Vérifier si une fonction libre `isRecommendations` existe déjà
-    if not re.search(r"^def isRecommendations\(.*\):", content, re.MULTILINE):
-        # Ajouter la fonction libre à la fin du fichier
-        content += function_content
-        VSlog("La fonction libre `isRecommendations` a été ajoutée.")
-
+        VSlog("Le bloc 'class main:' n'a pas été trouvé dans le fichier.")
+    
+    # === Insertion de la fonction libre isRecommendations ===
+    if not re.search(r"^def\s+isRecommendations\s*\(", content, re.MULTILINE):
+        # Recherche de la ligne définissant def _pluginSearch
+        plugin_search_match = re.search(r"^def\s+_pluginSearch\s*\(plugin,\s*sSearchText\):", content, re.MULTILINE)
+        if plugin_search_match:
+            index = plugin_search_match.start()
+            # Insérer la fonction libre juste avant la définition de def _pluginSearch
+            content = content[:index] + free_function + "\n" + content[index:]
+            VSlog("La fonction libre isRecommendations a été insérée avant 'def _pluginSearch(plugin, sSearchText):'.")
+        else:
+            # Si def _pluginSearch n'est pas trouvée, ajouter à la fin du fichier
+            content += free_function
+            VSlog("La fonction libre isRecommendations a été ajoutée à la fin du fichier (aucune occurrence de 'def _pluginSearch' trouvée).")
     else:
-        VSlog("La fonction libre `isRecommendations` existe déjà.")
-
-    # Écrire les modifications dans le fichier
-    with open(file_path, 'w', encoding='utf-8') as file:
-        file.write(content)
+        VSlog("La fonction libre isRecommendations existe déjà.")
+    
+    # Écriture des modifications dans le fichier
+    with open(file_path, 'w', encoding='utf-8') as f:
+        f.write(content)
     VSlog(f"Les modifications ont été appliquées à {file_path}.")
 
 def add_translations_to_file_for_netflix_like_recommendations():
