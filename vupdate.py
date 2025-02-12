@@ -1193,55 +1193,77 @@ class cRecommendations:
 
 def add_get_recommendations_method_for_netflix_like_recommendations():
     """
-    Ajoute la méthode `get_recommendations_by_id_movie` à tmdb.py si elle est absente.
+    Ajoute la méthode `get_recommendations_by_id_movie` à tmdb.py si elle est absente 
+    et vérifie son ajout.
     """
     # Chemin vers le fichier tmdb.py
     file_path = VSPath('special://home/addons/plugin.video.vstream/resources/lib/tmdb.py').replace('\\', '/')
 
-    # Contenu de la méthode à ajouter
-    method_content = """
-    def get_recommendations_by_id_movie(self, tmdbid): 
-        meta = self._call('movie/'+tmdbid+'/recommendations')
-
+    # Contenu brut de la méthode à ajouter
+    raw_method_content = """
+    def get_recommendations_by_id_movie(self, tmdbid):
+        meta = self._call('movie/' + tmdbid + '/recommendations')
         if 'errors' not in meta and 'status_code' not in meta:
             return meta
         else:
-            meta = {}
-        return meta
-"""
+            return {}
+    """
+    # Nettoyer le contenu et le ré-indenter pour respecter l'indentation d'une classe (4 espaces)
+    dedented = textwrap.dedent(raw_method_content).strip('\n')
+    indented_method = "\n    " + dedented.replace("\n", "\n    ") + "\n"
 
-    # Vérifier si le fichier tmdb.py existe
+    # Vérifier si le fichier existe
     if not os.path.exists(file_path):
         VSlog(f"Fichier introuvable : {file_path}")
         return
 
     # Lire le contenu actuel du fichier
-    with open(file_path, 'r', encoding='utf-8') as file:
-        content = file.read()
+    try:
+        with open(file_path, 'r', encoding='utf-8') as file:
+            content = file.read()
+    except Exception as e:
+        VSlog(f"Erreur lors de la lecture du fichier : {e}")
+        return
 
     # Vérifier si la méthode est déjà présente
-    if re.search(r"def get_recommendations_by_id_movie\(.*\):", content):
+    if re.search(r"def\s+get_recommendations_by_id_movie\s*\(.*\):", content):
         VSlog("La méthode `get_recommendations_by_id_movie` est déjà présente.")
         return
 
-    # Ajouter la méthode à la fin de la classe
-    if "class" in content:
-        content = re.sub(
-            r"(class\s+\w+\(.*?\):)",  # Recherche de la première classe dans le fichier
-            rf"\1{method_content}",
+    # Ajouter la méthode dans la première classe trouvée
+    match = re.search(r"(class\s+\w+\(.*?\):)", content, flags=re.DOTALL)
+    if match:
+        new_content = re.sub(
+            r"(class\s+\w+\(.*?\):)",
+            r"\1" + indented_method,
             content,
             count=1,
             flags=re.DOTALL
         )
     else:
-        # Si aucune classe n'est définie, on ajoute simplement le contenu à la fin
-        content += method_content
+        # Si aucune classe n'est définie, on ajoute la méthode à la fin du fichier
+        new_content = content + "\n" + indented_method
 
     # Écrire les modifications dans le fichier
-    with open(file_path, 'w', encoding='utf-8') as file:
-        file.write(content)
+    try:
+        with open(file_path, 'w', encoding='utf-8') as file:
+            file.write(new_content)
+    except Exception as e:
+        VSlog(f"Erreur lors de l'écriture dans le fichier : {e}")
+        return
 
-    VSlog(f"La méthode `get_recommendations_by_id_movie` a été ajoutée à {file_path}.")
+    # Vérification post-écriture pour confirmer l'ajout de la méthode
+    try:
+        with open(file_path, 'r', encoding='utf-8') as file:
+            updated_content = file.read()
+    except Exception as e:
+        VSlog(f"Erreur lors de la relecture du fichier : {e}")
+        return
+
+    if re.search(r"def\s+get_recommendations_by_id_movie\s*\(.*\):", updated_content):
+        VSlog(f"La méthode `get_recommendations_by_id_movie` a été ajoutée avec succès dans {file_path}.")
+    else:
+        VSlog("Erreur : La méthode `get_recommendations_by_id_movie` n'a pas été trouvée après modification.")
 
 def modify_files():
     VSlog("Starting file modification process")
