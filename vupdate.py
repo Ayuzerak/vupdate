@@ -1197,8 +1197,7 @@ def add_get_recommendations_method_for_netflix_like_recommendations():
     Ajoute la méthode get_recommendations_by_id_movie à tmdb.py si elle est absente 
     et vérifie son ajout.
     """
-    import os, re, textwrap
-
+    
     # Chemin vers le fichier tmdb.py
     file_path = VSPath('special://home/addons/plugin.video.vstream/resources/lib/tmdb.py').replace('\\', '/')
 
