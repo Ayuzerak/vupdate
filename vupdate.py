@@ -960,7 +960,7 @@ def add_recommendations_for_netflix_like_recommendations(recommendations_num):
     inserted_movies = False
     inserted_series = False
 
-    # Define code blocks with corrected series endpoint
+    # Code blocks avec indentations corrigées
     movies_block = [
         '\n        # Recommendations\n',
         '        oOutputParameterHandler.addParameter(\'siteUrl\', \'movies/recommendations\')\n',
@@ -969,7 +969,7 @@ def add_recommendations_for_netflix_like_recommendations(recommendations_num):
 
     series_block = [
         '\n        # Recommendations\n',
-        '        oOutputParameterHandler.addParameter(\'siteUrl\', \'tv/recommendations\')\n',  # Changed to TV endpoint
+        '        oOutputParameterHandler.addParameter(\'siteUrl\', \'tv/recommendations\')\n',
         '        oGui.addDir(\'cRecommendations\', \'showShowsRecommendations\', "Recommendations", \'listes.png\', oOutputParameterHandler)\n\n'
     ]
 
@@ -977,6 +977,7 @@ def add_recommendations_for_netflix_like_recommendations(recommendations_num):
     while i < len(lines):
         line = lines[i]
 
+        # Détection des fonctions
         if line.strip().startswith('def showMovies(self):'):
             in_show_movies = True
             in_show_series = False
@@ -987,23 +988,36 @@ def add_recommendations_for_netflix_like_recommendations(recommendations_num):
             in_show_movies = False
             in_show_series = False
 
-        # Insert movies recommendations
+        # Insertion pour les films
         if in_show_movies and not inserted_movies:
-            if line.strip() == '# Nouveautés' and lines[i+2].strip().endswith('showMoviesNews'):
-                new_lines.extend(lines[i:i+3])
-                new_lines.extend(movies_block)
-                inserted_movies = True
-                i += 3
-                continue
+            if line.strip() == '# Nouveautés':
+                # Vérification des 2 lignes suivantes
+                if i+2 < len(lines):
+                    line1 = lines[i+1].strip()
+                    line2 = lines[i+2].strip()
+                    if 'showMoviesNews' in line2:  # Modification clé ici
+                        new_lines.append(line)
+                        new_lines.append(lines[i+1])
+                        new_lines.append(lines[i+2])
+                        new_lines.extend(movies_block)
+                        inserted_movies = True
+                        i += 3
+                        continue
 
-        # Insert series recommendations
+        # Insertion pour les séries
         if in_show_series and not inserted_series:
-            if line.strip() == '# Nouveautés' and lines[i+2].strip().endswith('showSeriesNews'):
-                new_lines.extend(lines[i:i+3])
-                new_lines.extend(series_block)
-                inserted_series = True
-                i += 3
-                continue
+            if line.strip() == '# Nouveautés':
+                if i+2 < len(lines):
+                    line1 = lines[i+1].strip()
+                    line2 = lines[i+2].strip()
+                    if 'showSeriesNews' in line2:  # Modification clé ici
+                        new_lines.append(line)
+                        new_lines.append(lines[i+1])
+                        new_lines.append(lines[i+2])
+                        new_lines.extend(series_block)
+                        inserted_series = True
+                        i += 3
+                        continue
 
         new_lines.append(line)
         i += 1
