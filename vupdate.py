@@ -948,9 +948,6 @@ def modify_get_catWatched_for_netflix_like_recommendations():
     except Exception as e:
         VSlog(f"Error while modifying file '{file_path}': {str(e)}")
 
-import re
-import textwrap
-
 def insert_code_at_marker(method_body, marker, recommendation_code, position='before'):
     """
     Inserts the recommendation_code into method_body at the line containing marker.
@@ -998,16 +995,9 @@ def add_recommendations_for_netflix_like_recommendations(recommendations_num):
     Adds recommendation blocks for Netflix-like recommendations in the methods `showMovies` and `showSeries`
     in `home.py`.
     
-    For `showMovies`, the recommendation block is inserted after the marker "# Nouveautés" (or before "# Populaires"
-    if that marker is found instead).
+    For `showMovies`, the recommendation block is inserted before the marker "# Populaires".
     
     For `showSeries`, the recommendation block is inserted before the following code block:
-    
-        oOutputParameterHandler.addParameter('siteUrl', 'SERIE_VOSTFRS')
-        oGui.addDir(SITE_IDENTIFIER, 'callpluging', self.addons.VSlang(30108), 'vostfr.png', oOutputParameterHandler)
-    
-        oOutputParameterHandler.addParameter('siteUrl', 'SERIE_SERIES')
-        oGui.addDir(SITE_IDENTIFIER, 'callpluging', self.addons.VSlang(30138), 'host.png', oOutputParameterHandler)
     
         oGui.setEndOfDirectory()
     
