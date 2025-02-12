@@ -1194,9 +1194,11 @@ class cRecommendations:
 
 def add_get_recommendations_method_for_netflix_like_recommendations():
     """
-    Ajoute la méthode `get_recommendations_by_id_movie` à tmdb.py si elle est absente 
+    Ajoute la méthode get_recommendations_by_id_movie à tmdb.py si elle est absente 
     et vérifie son ajout.
     """
+    import os, re, textwrap
+
     # Chemin vers le fichier tmdb.py
     file_path = VSPath('special://home/addons/plugin.video.vstream/resources/lib/tmdb.py').replace('\\', '/')
 
@@ -1228,18 +1230,20 @@ def add_get_recommendations_method_for_netflix_like_recommendations():
 
     # Vérifier si la méthode est déjà présente
     if re.search(r"def\s+get_recommendations_by_id_movie\s*\(.*\):", content):
-        VSlog("La méthode `get_recommendations_by_id_movie` est déjà présente.")
+        VSlog("La méthode get_recommendations_by_id_movie est déjà présente.")
         return
 
-    # Ajouter la méthode dans la première classe trouvée
-    match = re.search(r"(class\s+\w+\(.*?\):)", content, flags=re.DOTALL)
+    # Rechercher la première déclaration de classe
+    # Cette regex accepte les classes avec ou sans parenthèses (pour les bases)
+    class_regex = r'(class\s+\w+(?:\s*\([^)]*\))?\s*:)'
+    match = re.search(class_regex, content, flags=re.MULTILINE)
     if match:
         new_content = re.sub(
-            r"(class\s+\w+\(.*?\):)",
+            class_regex,
             r"\1" + indented_method,
             content,
             count=1,
-            flags=re.DOTALL
+            flags=re.MULTILINE
         )
     else:
         # Si aucune classe n'est définie, on ajoute la méthode à la fin du fichier
@@ -1262,9 +1266,9 @@ def add_get_recommendations_method_for_netflix_like_recommendations():
         return
 
     if re.search(r"def\s+get_recommendations_by_id_movie\s*\(.*\):", updated_content):
-        VSlog(f"La méthode `get_recommendations_by_id_movie` a été ajoutée avec succès dans {file_path}.")
+        VSlog(f"La méthode get_recommendations_by_id_movie a été ajoutée avec succès dans {file_path}.")
     else:
-        VSlog("Erreur : La méthode `get_recommendations_by_id_movie` n'a pas été trouvée après modification.")
+        VSlog("Erreur : La méthode get_recommendations_by_id_movie n'a pas été trouvée après modification.")
 
 def modify_files():
     VSlog("Starting file modification process")
