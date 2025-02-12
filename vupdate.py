@@ -1032,7 +1032,7 @@ def add_recommendations_for_netflix_like_recommendations(recommendations_num):
     # ========================
     try:
         # Step 1: File Setup
-        file_path = os.path.join(os.getcwd(), 'home.py')  # Adapt path as needed
+        file_path = VSPath('special://home/addons/plugin.video.vstream/resources//lib/home.py') # Adapt path as needed
         backup_path = create_backup(file_path)
         log(f'Backup created at {backup_path}')
 
