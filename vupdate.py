@@ -1054,7 +1054,7 @@ def add_recommendations_for_netflix_like_recommendations(recommendations_num):
             marker2 = "# Populaires"
             new_body = insert_code_at_marker(method_body, marker, recommendation_code, position='before')
 
-            if marker2 in method_body and is None:
+            if marker2 in method_body and new_body is None:
                 new_body = insert_code_at_marker(method_body, marker2, recommendation_code, position='before')
                 
             if new_body is None:
@@ -1066,7 +1066,7 @@ def add_recommendations_for_netflix_like_recommendations(recommendations_num):
             marker2 = "# Populaires"
             new_body = insert_code_at_marker(method_body, marker, recommendation_code, position='before')
             
-            if marker2 in method_body and is None:
+            if marker2 in method_body and new_body is None:
                 new_body = insert_code_at_marker(method_body, marker2, recommendation_code, position='before')
             else:
                 VSlog(f"Insertion markers not found in {method_name}.")
