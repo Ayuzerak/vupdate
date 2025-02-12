@@ -977,10 +977,10 @@ def insert_code_at_marker(method_body, marker, recommendation_code, position='be
                 # Insert the recommendation code before the marker line.
                 for rec_line in recommendation_lines:
                     new_lines.append(indent + rec_line + "\n")
-                new_lines.append(line)
+                new_lines.append(line + "\n")
             elif position == 'after':
                 # Insert the recommendation code after the marker line.
-                new_lines.append(line)
+                new_lines.append(line + "\n")
                 for rec_line in recommendation_lines:
                     new_lines.append(indent + rec_line + "\n")
             inserted = True
@@ -988,7 +988,7 @@ def insert_code_at_marker(method_body, marker, recommendation_code, position='be
             new_lines.append(line)
     if not inserted:
         return None
-    return "\n".join(new_lines)
+    return "".join(new_lines)
 
 def add_recommendations_for_netflix_like_recommendations(recommendations_num):
     """
