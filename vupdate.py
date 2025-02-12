@@ -951,23 +951,17 @@ def modify_get_catWatched_for_netflix_like_recommendations():
 def add_recommendations_for_netflix_like_recommendations(recommendations_num):
     file_path = VSPath('special://home/addons/plugin.video.vstream/resources/lib/home.py').replace('\\', '/')
 
-    def read_file(path):
-        with open(path, 'r', encoding='utf-8') as f:
-            return f.readlines()
-
-    def write_file(path, lines):
-        with open(path, 'w', encoding='utf-8') as f:
-            f.writelines(lines)
-
     def insert_block(lines, section, block, next_section):
         inserted = False
         new_lines = []
         in_section = False
         for line in lines:
             new_lines.append(line)
+            # Check if we're inside the target section
             if line.strip().startswith(f'# {section}'):
                 in_section = True
             elif in_section and line.strip().startswith(f'# {next_section}'):
+                # Insert the block before the next section
                 new_lines.extend(block)
                 inserted = True
                 in_section = False
@@ -975,14 +969,11 @@ def add_recommendations_for_netflix_like_recommendations(recommendations_num):
                 in_section = False
         return new_lines, inserted
 
-    def verify_insertion(file_path):
-        with open(file_path, 'r', encoding='utf-8') as f:
-            content = f.read()
-            if "showMoviesRecommendations" not in content:
-                print("ÉCHEC insertion films - vérifiez manuellement")
-            if "showShowsRecommendations" not in content:
-                print("ÉCHEC insertion séries - vérifiez manuellement")
+    # Read the file
+    with open(file_path, 'r', encoding='utf-8') as f:
+        lines = f.readlines()
 
+    # Define the blocks
     movies_block = [
         '\n        # Recommendations\n',
         '        oOutputParameterHandler.addParameter(\'siteUrl\', \'movies/recommendations\')\n',
@@ -994,18 +985,27 @@ def add_recommendations_for_netflix_like_recommendations(recommendations_num):
         '        oGui.addDir(\'cRecommendations\', \'showShowsRecommendations\', "Mes recommendations", \'listes.png\', oOutputParameterHandler)\n\n'
     ]
 
-    lines = read_file(file_path)
-
+    # Try with "Nouveautés" section first
     modified_lines, movies_inserted = insert_block(lines, "Nouveautés", movies_block, "Populaires")
     modified_lines, series_inserted = insert_block(modified_lines, "Nouveautés", series_block, "Populaires")
 
+    # If it fails, try with "Populaires" section
     if not movies_inserted:
         modified_lines, _ = insert_block(modified_lines, "Populaires", movies_block, "")
     if not series_inserted:
         modified_lines, _ = insert_block(modified_lines, "Populaires", series_block, "")
 
-    write_file(file_path, modified_lines)
-    verify_insertion(file_path)
+    # Write the modified lines back to the file
+    with open(file_path, 'w', encoding='utf-8') as f:
+        f.writelines(modified_lines)
+
+    # Final verification
+    with open(file_path, 'r', encoding='utf-8') as f:
+        content = f.read()
+        if "showMoviesRecommendations" not in content:
+            print("ÉCHEC insertion films - vérifiez manuellement")
+        if "showShowsRecommendations" not in content:
+            print("ÉCHEC insertion séries - vérifiez manuellement")
         
 def create_recommendations_file_for_netflix_like_recommendations(because_num):
     """
