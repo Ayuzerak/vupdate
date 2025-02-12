@@ -948,13 +948,59 @@ def modify_get_catWatched_for_netflix_like_recommendations():
     except Exception as e:
         VSlog(f"Error while modifying file '{file_path}': {str(e)}")
 
+import re
+import textwrap
+
+def insert_code_at_marker(method_body, marker, recommendation_code, position='before'):
+    """
+    Inserts the recommendation_code into method_body at the line containing marker.
+    The recommendation_code is dedented and re-indented to match the marker's indentation.
+    
+    Parameters:
+        method_body (str): The text of the method body.
+        marker (str): The text marker to look for.
+        recommendation_code (str): The code block to insert.
+        position (str): 'before' or 'after' the marker line.
+        
+    Returns:
+        str or None: The updated method body if insertion was successful, or None if marker not found.
+    """
+    lines = method_body.splitlines(keepends=True)
+    new_lines = []
+    inserted = False
+    for line in lines:
+        if not inserted and marker in line:
+            # Get the indentation of the marker line.
+            indent_match = re.match(r"^(\s*)", line)
+            indent = indent_match.group(1) if indent_match else ""
+            # Remove any extra indentation from the recommendation_code.
+            dedented_code = textwrap.dedent(recommendation_code).strip("\n")
+            recommendation_lines = dedented_code.splitlines()
+            if position == 'before':
+                # Insert the recommendation code before the marker line.
+                for rec_line in recommendation_lines:
+                    new_lines.append(indent + rec_line + "\n")
+                new_lines.append(line)
+            elif position == 'after':
+                # Insert the recommendation code after the marker line.
+                new_lines.append(line)
+                for rec_line in recommendation_lines:
+                    new_lines.append(indent + rec_line + "\n")
+            inserted = True
+        else:
+            new_lines.append(line)
+    if not inserted:
+        return None
+    return "".join(new_lines)
+
 def add_recommendations_for_netflix_like_recommendations(recommendations_num):
     """
     Adds recommendation blocks for Netflix-like recommendations in the methods `showMovies` and `showSeries`
     in `home.py`.
     
-    For `showMovies`, the recommendation block is inserted after the marker "# Populaires".
-
+    For `showMovies`, the recommendation block is inserted after the marker "# Nouveautés" (or before "# Populaires"
+    if that marker is found instead).
+    
     For `showSeries`, the recommendation block is inserted before the following code block:
     
         oOutputParameterHandler.addParameter('siteUrl', 'SERIE_VOSTFRS')
@@ -965,12 +1011,12 @@ def add_recommendations_for_netflix_like_recommendations(recommendations_num):
     
         oGui.setEndOfDirectory()
     
-    so that the recommendations appear before it.
+    so that the recommendations appear before that block.
     """
     # Construct and normalize the file path
     file_path = VSPath('special://home/addons/plugin.video.vstream/resources/lib/home.py').replace('\\', '/')
 
-    # Define the code blocks to insert
+    # Define the recommendation code blocks to insert
     movies_recommendations_code = f"""
         #Recommendations
         oOutputParameterHandler.addParameter('siteUrl', 'movies/recommendations')
@@ -994,7 +1040,7 @@ def add_recommendations_for_netflix_like_recommendations(recommendations_num):
 
     def process_method(method_name, recommendation_code):
         nonlocal updated_content
-        # Regex to find the method definition and its body
+        # Regex to capture the method definition and its body
         method_pattern = re.compile(rf"(def {method_name}\(self\):)(\s+.*?)(?=\n\s*def|\Z)", re.DOTALL)
         match = method_pattern.search(updated_content)
         if not match:
@@ -1010,28 +1056,35 @@ def add_recommendations_for_netflix_like_recommendations(recommendations_num):
             VSlog(f"Recommendations already exist in {method_name}.")
             return
 
-        # Determine the insertion point:
-        # For showSeries, insert before the specific block if found.
-        if method_name == "showSeries" and "oGui.setEndOfDirectory()" in method_body:
+        # Determine insertion point based on method and marker.
+        new_body = None
+        if method_name == "showSeries":
+            # Insert before the marker for series.
             marker = "oGui.setEndOfDirectory()"
-            new_body = method_body.replace(marker, recommendation_code + marker, 1)
-        # Otherwise, for showMovies or as fallback, use the "# Populaires" marker.
-        elif "# Populaires" in method_body:
-            new_body = method_body.replace("# Populaires", recommendation_code + "# Populaires", 1)
+            new_body = insert_code_at_marker(method_body, marker, recommendation_code, position='before')
+            if new_body is None:
+                VSlog(f"Marker not found in {method_name}.")
+                return
         else:
-            VSlog(f"Insertion marker not found in {method_name}.")
-            return
+            if "# Populaires" in method_body:
+                new_body = insert_code_at_marker(method_body, "# Populaires", recommendation_code, position='before')
+            else:
+                VSlog(f"Insertion markers not found in {method_name}.")
+                return
+            if new_body is None:
+                VSlog(f"Failed to insert recommendations in {method_name}.")
+                return
 
-        # Replace the method with the new version
+        # Replace the original method body with the updated one.
         new_method = method_header + new_body
         updated_content = updated_content.replace(full_method, new_method, 1)
         VSlog(f"Added recommendations to {method_name}.")
 
-    # Process each method accordingly
+    # Process each method accordingly.
     process_method("showMovies", movies_recommendations_code)
     process_method("showSeries", series_recommendations_code)
 
-    # Write back the updated content if changes were made
+    # Write back the updated content if changes were made.
     if updated_content != content:
         try:
             with open(file_path, 'w', encoding='utf-8') as file:
