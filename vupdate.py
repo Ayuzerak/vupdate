@@ -506,11 +506,13 @@ def isRecommendations(sSiteName, sFunction):
         content = f.read()
     
     # === Insertion de la ligne de dispatch dans la classe main ===
-    main_block_pattern = r"(class\s+main\s*:\s*\n(?:\s+.*\n)+)"
+    # La regex a été adaptée pour prendre en compte les retours chariot et l'indentation (espaces ou tabulations)
+    main_block_pattern = r"(class\s+main\s*:\s*(?:\r?\n)(?:[ \t]+.*(?:\r?\n))+)"
     main_match = re.search(main_block_pattern, content)
     if main_match:
         main_block = main_match.group(1)
-        is_pattern = re.compile(r"^(if\s+is\w+\(sSiteName,\s*sFunction\):.*)$", re.MULTILINE)
+        # La regex prend désormais en compte les espaces en début de ligne
+        is_pattern = re.compile(r"^\s*if\s+is\w+\(sSiteName,\s*sFunction\):.*$", re.MULTILINE)
         matches = list(is_pattern.finditer(main_block))
         if matches:
             last_match = matches[-1]
