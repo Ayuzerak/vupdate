@@ -976,13 +976,13 @@ def insert_code_at_marker(method_body, marker, recommendation_code, position='be
             if position == 'before':
                 # Insert the recommendation code before the marker line.
                 for rec_line in recommendation_lines:
-                    new_lines.append(indent + rec_line + "\n")
+                    new_lines.append(indent + rec_line + "\n\n")
                 new_lines.append(line)
             elif position == 'after':
                 # Insert the recommendation code after the marker line.
                 new_lines.append(line)
                 for rec_line in recommendation_lines:
-                    new_lines.append(indent + rec_line + "\n")
+                    new_lines.append(indent + rec_line + "\n\n")
             inserted = True
         else:
             new_lines.append(line)
