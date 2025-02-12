@@ -1049,15 +1049,25 @@ def add_recommendations_for_netflix_like_recommendations(recommendations_num):
         # Determine insertion point based on method and marker.
         new_body = None
         if method_name == "showSeries":
-            # Insert before the marker for series.
+            # Insert before the markers for series.
             marker = "oGui.setEndOfDirectory()"
+            marker2 = "# Populaires"
             new_body = insert_code_at_marker(method_body, marker, recommendation_code, position='before')
+
+            if marker2 in method_body and is None:
+                new_body = insert_code_at_marker(method_body, marker2, recommendation_code, position='before')
+                
             if new_body is None:
                 VSlog(f"Marker not found in {method_name}.")
                 return
-        else:
-            if "# Populaires" in method_body:
-                new_body = insert_code_at_marker(method_body, "# Populaires", recommendation_code, position='before')
+        elif method_name == "showMovies":
+            # Insert before the following markers for movies.
+            marker = "oGui.setEndOfDirectory()"
+            marker2 = "# Populaires"
+            new_body = insert_code_at_marker(method_body, marker, recommendation_code, position='before')
+            
+            if marker2 in method_body and is None:
+                new_body = insert_code_at_marker(method_body, marker2, recommendation_code, position='before')
             else:
                 VSlog(f"Insertion markers not found in {method_name}.")
                 return
