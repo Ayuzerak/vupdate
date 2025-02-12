@@ -949,64 +949,161 @@ def modify_get_catWatched_for_netflix_like_recommendations():
         VSlog(f"Error while modifying file '{file_path}': {str(e)}")
 
 def add_recommendations_for_netflix_like_recommendations(recommendations_num):
-    file_path = VSPath('special://home/addons/plugin.video.vstream/resources/lib/home.py').replace('\\', '/')
+    import os
+    import re
+    from shutil import copy2
 
-    def insert_block(lines, section, block, next_section):
-        inserted = False
-        new_lines = []
-        in_section = False
-        for line in lines:
-            new_lines.append(line)
-            # Check if we're inside the target section
-            if line.strip().startswith(f'# {section}'):
-                in_section = True
-            elif in_section and line.strip().startswith(f'# {next_section}'):
-                # Insert the block before the next section
-                new_lines.extend(block)
-                inserted = True
-                in_section = False
-            elif in_section and ("showMoviesRecommendations" in line or "showShowsRecommendations" in line):
-                in_section = False
-        return new_lines, inserted
+    # ========================
+    # CONFIGURATION
+    # ========================
+    TARGETS = {
+        'movies': {
+            'function': r'def showMovies\(self\):',
+            'markers': {
+                'after': r'# Nouveautés\s*\n\s*oOutputParameterHandler\.addParameter.*?\n\s*oGui\.addDir.*?showMoviesNews',
+                'before': r'# Populaires\s*\n\s*oOutputParameterHandler\.addParameter'
+            },
+            'code': [
+                '        # Recommendations',
+                '        oOutputParameterHandler.addParameter(\'siteUrl\', \'movies/recommendations\')',
+                '        oGui.addDir(\'cRecommendations\', \'showMoviesRecommendations\', "Mes Recommendations", \'listes.png\', oOutputParameterHandler)'
+            ]
+        },
+        'series': {
+            'function': r'def showSeries\(self\):',
+            'markers': {
+                'after': r'# Nouveautés\s*\n\s*oOutputParameterHandler\.addParameter.*?\n\s*oGui\.addDir.*?showSeriesNews',
+                'before': r'# Populaires trakt\s*\n\s*oOutputParameterHandler\.addParameter'
+            },
+            'code': [
+                '        # Recommendations',
+                '        oOutputParameterHandler.addParameter(\'siteUrl\', \'tv/recommendations\')',
+                '        oGui.addDir(\'cRecommendations\', \'showShowsRecommendations\', "Mes Recommendations", \'listes.png\', oOutputParameterHandler)'
+            ]
+        }
+    }
+    BACKUP_EXT = '.pre_recommendations_backup'
 
-    # Read the file
-    with open(file_path, 'r', encoding='utf-8') as f:
-        lines = f.readlines()
+    # ========================
+    # CORE FUNCTIONS
+    # ========================
+    def log(message):
+        print(f'[DEBUG] {message}')
 
-    # Define the blocks
-    movies_block = [
-        '\n        # Recommendations\n',
-        '        oOutputParameterHandler.addParameter(\'siteUrl\', \'movies/recommendations\')\n',
-        '        oGui.addDir(\'cRecommendations\', \'showMoviesRecommendations\', "Recommendations", \'listes.png\', oOutputParameterHandler)\n\n'
-    ]
-    series_block = [
-        '\n        # Recommendations\n',
-        '        oOutputParameterHandler.addParameter(\'siteUrl\', \'tv/recommendations\')\n',
-        '        oGui.addDir(\'cRecommendations\', \'showShowsRecommendations\', "Mes recommendations", \'listes.png\', oOutputParameterHandler)\n\n'
-    ]
+    def create_backup(source):
+        backup_path = source + BACKUP_EXT
+        copy2(source, backup_path)
+        return backup_path
 
-    # Try with "Nouveautés" section first
-    modified_lines, movies_inserted = insert_block(lines, "Nouveautés", movies_block, "Populaires")
-    modified_lines, series_inserted = insert_block(modified_lines, "Nouveautés", series_block, "Populaires")
+    def validate_context(content, pattern):
+        return bool(re.search(pattern, content, re.DOTALL))
 
-    # If it fails, try with "Populaires" section
-    if not movies_inserted:
-        modified_lines, _ = insert_block(modified_lines, "Populaires", movies_block, "")
-    if not series_inserted:
-        modified_lines, _ = insert_block(modified_lines, "Populaires", series_block, "")
+    def method_regex_insert_after(content, config):
+        pattern = f'({config["function"]}.*?{config["markers"]["after"]})'
+        replacement = f'\\1\n\n' + '\n'.join(config['code']) + '\n'
+        return re.sub(pattern, replacement, content, 1, re.DOTALL)
 
-    # Write the modified lines back to the file
-    with open(file_path, 'w', encoding='utf-8') as f:
-        f.writelines(modified_lines)
+    def method_regex_insert_before(content, config):
+        pattern = f'({config["markers"]["before"]})'
+        replacement = '\n'.join(config['code']) + '\n\n\\1'
+        return re.sub(pattern, replacement, content, 1, re.DOTALL)
 
-    # Final verification
-    with open(file_path, 'r', encoding='utf-8') as f:
-        content = f.read()
-        if "showMoviesRecommendations" not in content:
-            print("ÉCHEC insertion films - vérifiez manuellement")
-        if "showShowsRecommendations" not in content:
-            print("ÉCHEC insertion séries - vérifiez manuellement")
+    def method_line_by_line_scan(lines, config):
+        in_target = False
+        modified = False
+        output = []
         
+        for i, line in enumerate(lines):
+            output.append(line)
+            
+            if re.match(config['function'], line.strip()):
+                in_target = True
+            elif in_target and re.search(config['markers']['after'], '\n'.join(lines[i-2:i+1])):
+                output.extend(['\n'] + config['code'] + ['\n'])
+                modified = True
+            elif in_target and re.search(config['markers']['before'], line):
+                output[-1:-1] = ['\n'] + config['code'] + ['\n']
+                modified = True
+                
+        return '\n'.join(output), modified
+
+    # ========================
+    # EXECUTION FLOW
+    # ========================
+    try:
+        # Step 1: File Setup
+        file_path = os.path.join(os.getcwd(), 'home.py')  # Adapt path as needed
+        backup_path = create_backup(file_path)
+        log(f'Backup created at {backup_path}')
+
+        with open(file_path, 'r+', encoding='utf-8') as f:
+            original_content = f.read()
+            content = original_content
+
+            # Step 2: Pre-Validation
+            if validate_context(content, r'show(Movies|Shows)Recommendations'):
+                log('Recommendations already exist')
+                return
+
+            # Step 3: Dry Run with Multiple Methods
+            success = False
+            methods = [
+                ('Regex After Insert', method_regex_insert_after),
+                ('Regex Before Insert', method_regex_insert_before),
+                ('Line-by-Line Scan', lambda c, conf: method_line_by_line_scan(c.split('\n'), conf))
+            ]
+
+            for method_name, method in methods:
+                for media_type in ['movies', 'series']:
+                    new_content = method(content, TARGETS[media_type])
+                    content = new_content[0] if isinstance(new_content, tuple) else new_content
+                    
+                # Validation Check
+                if all(validate_context(content, pattern) for pattern in [
+                    r'# Recommendations.*?movies/recommendations',
+                    r'# Recommendations.*?tv/recommendations'
+                ]):
+                    log(f'Success with method: {method_name}')
+                    success = True
+                    break
+
+            # Step 4: Final Simulation
+            if success:
+                # Structural Validation
+                validation_pattern = r'''(?x)
+                def\ showMovies\(.*?\):
+                (.*?\n)*?
+                    #\ Nouveautés.*?\n
+                    (.*?\n){3}
+                    #\ Recommendations.*?\n
+                    .*?movies/recommendations.*?\n
+                (.*?\n)*?
+                def\ showSeries\(.*?\):
+                (.*?\n)*?
+                    #\ Nouveautés.*?\n
+                    (.*?\n){3}
+                    #\ Recommendations.*?\n
+                    .*?tv/recommendations.*?\n
+                '''
+                
+                if not re.search(validation_pattern, content, re.DOTALL):
+                    raise Exception('Final structure validation failed')
+
+                # Step 5: Write Changes
+                f.seek(0)
+                f.write(content)
+                f.truncate()
+                log('Write successful')
+            else:
+                log('All methods failed, restoring backup')
+                copy2(backup_path, file_path)
+
+    except Exception as e:
+        log(f'Error: {str(e)}')
+        if 'backup_path' in locals():
+            log(f'Restoring from backup {backup_path}')
+            copy2(backup_path, file_path)
+            
 def create_recommendations_file_for_netflix_like_recommendations(because_num):
     """
     Vérifie si le fichier recommendations.py existe dans le chemin cible.
