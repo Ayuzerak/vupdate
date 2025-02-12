@@ -951,7 +951,6 @@ def modify_get_catWatched_for_netflix_like_recommendations():
 def add_recommendations_for_netflix_like_recommendations(recommendations_num):
     file_path = VSPath('special://home/addons/plugin.video.vstream/resources/lib/home.py').replace('\\', '/')
     
-    # Read the file content
     with open(file_path, 'r') as f:
         lines = f.readlines()
 
@@ -961,16 +960,16 @@ def add_recommendations_for_netflix_like_recommendations(recommendations_num):
     inserted_movies = False
     inserted_series = False
 
-    # Define the code blocks to insert
+    # Define code blocks with corrected series endpoint
     movies_block = [
-        '        \n\n#Recommendations\n',
+        '\n        # Recommendations\n',
         '        oOutputParameterHandler.addParameter(\'siteUrl\', \'movies/recommendations\')\n',
         '        oGui.addDir(\'cRecommendations\', \'showMoviesRecommendations\', "Recommendations", \'listes.png\', oOutputParameterHandler)\n\n'
     ]
 
     series_block = [
-        '        \n\n#Recommendations\n',
-        '        oOutputParameterHandler.addParameter(\'siteUrl\', \'movies/recommendations\')\n',
+        '\n        # Recommendations\n',
+        '        oOutputParameterHandler.addParameter(\'siteUrl\', \'tv/recommendations\')\n',  # Changed to TV endpoint
         '        oGui.addDir(\'cRecommendations\', \'showShowsRecommendations\', "Recommendations", \'listes.png\', oOutputParameterHandler)\n\n'
     ]
 
@@ -978,7 +977,6 @@ def add_recommendations_for_netflix_like_recommendations(recommendations_num):
     while i < len(lines):
         line = lines[i]
 
-        # Check if entering the showMovies or showSeries functions
         if line.strip().startswith('def showMovies(self):'):
             in_show_movies = True
             in_show_series = False
@@ -986,50 +984,30 @@ def add_recommendations_for_netflix_like_recommendations(recommendations_num):
             in_show_series = True
             in_show_movies = False
         elif line.strip().startswith('def '):
-            # Exiting any function
             in_show_movies = False
             in_show_series = False
 
-        # Process showMovies function
+        # Insert movies recommendations
         if in_show_movies and not inserted_movies:
-            if line.strip() == '# Nouveautés':
-                # Check the next two lines to confirm the Nouveautés block
-                if i + 2 < len(lines):
-                    line1 = lines[i + 1]
-                    line2 = lines[i + 2]
-                    if 'oOutputParameterHandler.addParameter' in line1 and 'showMoviesNews' in line2:
-                        # Append the existing lines
-                        new_lines.append(line)
-                        new_lines.append(line1)
-                        new_lines.append(line2)
-                        # Insert the movies recommendations block
-                        new_lines.extend(movies_block)
-                        inserted_movies = True
-                        i += 3  # Skip processed lines
-                        continue
+            if line.strip() == '# Nouveautés' and lines[i+2].strip().endswith('showMoviesNews'):
+                new_lines.extend(lines[i:i+3])
+                new_lines.extend(movies_block)
+                inserted_movies = True
+                i += 3
+                continue
 
-        # Process showSeries function for the recommendation block
+        # Insert series recommendations
         if in_show_series and not inserted_series:
-            if line.strip() == '# Nouveautés':
-                if i + 2 < len(lines):
-                    line1 = lines[i + 1]
-                    line2 = lines[i + 2]
-                    if 'oOutputParameterHandler.addParameter' in line1 and 'showSeriesNews' in line2:
-                        # Append the existing lines
-                        new_lines.append(line)
-                        new_lines.append(line1)
-                        new_lines.append(line2)
-                        # Insert the series recommendations block
-                        new_lines.extend(series_block)
-                        inserted_series = True
-                        i += 3  # Skip processed lines
-                        continue
+            if line.strip() == '# Nouveautés' and lines[i+2].strip().endswith('showSeriesNews'):
+                new_lines.extend(lines[i:i+3])
+                new_lines.extend(series_block)
+                inserted_series = True
+                i += 3
+                continue
 
-        # Default: append the current line
         new_lines.append(line)
         i += 1
 
-    # Write the modified content back to the file
     with open(file_path, 'w') as f:
         f.writelines(new_lines)
         
