@@ -976,19 +976,19 @@ def insert_code_at_marker(method_body, marker, recommendation_code, position='be
             if position == 'before':
                 # Insert the recommendation code before the marker line.
                 for rec_line in recommendation_lines:
-                    new_lines.append(indent + rec_line + "\n\n")
+                    new_lines.append(indent + rec_line + "\n")
                 new_lines.append(line)
             elif position == 'after':
                 # Insert the recommendation code after the marker line.
                 new_lines.append(line)
                 for rec_line in recommendation_lines:
-                    new_lines.append(indent + rec_line + "\n\n")
+                    new_lines.append(indent + rec_line + "\n")
             inserted = True
         else:
             new_lines.append(line)
     if not inserted:
         return None
-    return "".join(new_lines)
+    return "\n".join(new_lines)
 
 def add_recommendations_for_netflix_like_recommendations(recommendations_num):
     """
@@ -1058,7 +1058,8 @@ def add_recommendations_for_netflix_like_recommendations(recommendations_num):
                 new_body = insert_code_at_marker(method_body, marker2, recommendation_code, position='before')
                 
             if new_body is None:
-                VSlog(f"Marker not found in {method_name}.")
+                VSlog(f"Markers not found in {method_name}.")
+                VSlog(f"Failed to insert recommendations in {method_name}.")
                 return
         elif method_name == "showMovies":
             # Insert before the following markers for movies.
@@ -1068,10 +1069,9 @@ def add_recommendations_for_netflix_like_recommendations(recommendations_num):
             
             if marker2 in method_body and new_body is None:
                 new_body = insert_code_at_marker(method_body, marker2, recommendation_code, position='before')
-            else:
-                VSlog(f"Insertion markers not found in {method_name}.")
-                return
+                
             if new_body is None:
+                VSlog(f"Markers not found in {method_name}.")
                 VSlog(f"Failed to insert recommendations in {method_name}.")
                 return
 
