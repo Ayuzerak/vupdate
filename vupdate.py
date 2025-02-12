@@ -951,54 +951,24 @@ def modify_get_catWatched_for_netflix_like_recommendations():
 def add_recommendations_for_netflix_like_recommendations(recommendations_num):
     file_path = VSPath('special://home/addons/plugin.video.vstream/resources/lib/home.py').replace('\\', '/')
     
-    def insert_recommendations(lines, news_marker, popular_marker, block):
+    def insert_block(lines, section, block):
+        inserted = False
         new_lines = []
         i = 0
-        inserted = False
-        in_target_function = False
-        skip_functions = ['showAnimes']  # Liste des fonctions à ignorer
-
         while i < len(lines):
             line = lines[i]
             new_lines.append(line)
-
-            # Vérifier le début des fonctions à traiter
-            if line.strip().startswith(('def showMovies(self):', 'def showSeries(self):')):
-                in_target_function = True
-            elif line.strip().startswith('def ') and not line.strip().startswith(('def showMovies', 'def showSeries')):
-                in_target_function = False
-                for func in skip_functions:
-                    if line.strip().startswith(f'def {func}('):
-                        in_target_function = False
-                        break
-
-            if in_target_function:
-                # Trouver le bloc Nouveautés complet
-                if line.strip() == news_marker:
-                    nouveau_block_end = i
-                    while nouveau_block_end < len(lines) and not lines[nouveau_block_end].strip().startswith('#'):
-                        nouveau_block_end += 1
-                    
-                    # Vérifier si le bloc de recommandations existe déjà
-                    existing_recommendation = any('showMoviesRecommendations' in l or 'showShowsRecommendations' in l 
-                                                for l in lines[i:nouveau_block_end])
-                    
-                    if not existing_recommendation:
-                        # Insérer après le bloc Nouveautés complet
-                        for j in range(i, nouveau_block_end):
-                            new_lines.append(lines[j])
-                            i += 1
-                        new_lines.extend(['\n'] + block + ['\n'])
-                        inserted = True
-                        continue
-
-                # Fallback: Insérer avant Populaires si Nouveautés non trouvé
-                if not inserted and line.strip() == popular_marker:
-                    # Ajouter une ligne vide avant
-                    new_lines.insert(-1, '\n')
-                    new_lines.extend(block + ['\n'])
+            
+            # Cherche la section cible (Nouveautés ou Populaires)
+            if line.strip() == f'# {section}':
+                next_line = lines[i+1] if i+1 < len(lines) else ''
+                next_next_line = lines[i+2] if i+2 < len(lines) else ''
+                
+                # Vérifie si le bloc de recommandations est déjà présent
+                if not any("showMoviesRecommendations" in l or "showShowsRecommendations" in l for l in lines[i:i+10]):
+                    new_lines.extend(block)
                     inserted = True
-
+            
             i += 1
         return new_lines, inserted
 
@@ -1006,44 +976,39 @@ def add_recommendations_for_netflix_like_recommendations(recommendations_num):
     with open(file_path, 'r', encoding='utf-8') as f:
         lines = f.readlines()
 
-    # Configuration des blocs
-    movies_config = {
-        'news_marker': '# Nouveautés',
-        'popular_marker': '# Populaires',
-        'block': [
-            '        # Recommendations Films\n',
-            '        oOutputParameterHandler.addParameter(\'siteUrl\', \'movies/recommendations\')\n',
-            '        oGui.addDir(\'cRecommendations\', \'showMoviesRecommendations\', "Recommendations", \'listes.png\', oOutputParameterHandler)\n'
-        ]
-    }
+    # Définir les blocs
+    movies_block = [
+        '\n        # Recommendations\n',
+        '        oOutputParameterHandler.addParameter(\'siteUrl\', \'movies/recommendations\')\n',
+        '        oGui.addDir(\'cRecommendations\', \'showMoviesRecommendations\', "Recommendations", \'listes.png\', oOutputParameterHandler)\n\n'
+    ]
+    series_block = [
+        '\n        # Recommendations\n',
+        '        oOutputParameterHandler.addParameter(\'siteUrl\', \'tv/recommendations\')\n',
+        '        oGui.addDir(\'cRecommendations\', \'showShowsRecommendations\', "Recommendations", \'listes.png\', oOutputParameterHandler)\n\n'
+    ]
 
-    series_config = {
-        'news_marker': '# Nouveautés',
-        'popular_marker': '# Populaires trakt',
-        'block': [
-            '        # Recommendations Séries\n',
-            '        oOutputParameterHandler.addParameter(\'siteUrl\', \'tv/recommendations\')\n',
-            '        oGui.addDir(\'cRecommendations\', \'showShowsRecommendations\', "Recommendations", \'listes.png\', oOutputParameterHandler)\n'
-        ]
-    }
+    # Essayer d'abord avec Nouveautés
+    modified_lines, movies_inserted = insert_block(lines, "Nouveautés", movies_block)
+    modified_lines, series_inserted = insert_block(modified_lines, "Nouveautés", series_block)
 
-    # Traitement pour les films
-    modified_lines, movies_inserted = insert_recommendations(lines, **movies_config)
-    
-    # Traitement pour les séries
-    final_lines, series_inserted = insert_recommendations(modified_lines, **series_config)
+    # Si échec, essayer avec Populaires
+    if not movies_inserted:
+        modified_lines, _ = insert_block(modified_lines, "Populaires", movies_block)
+    if not series_inserted:
+        modified_lines, _ = insert_block(modified_lines, "Populaires", series_block)
 
-    # Écrire les modifications
+    # Réécrire le fichier
     with open(file_path, 'w', encoding='utf-8') as f:
-        f.writelines(final_lines)
+        f.writelines(modified_lines)
 
     # Vérification finale
     with open(file_path, 'r', encoding='utf-8') as f:
         content = f.read()
-        if not movies_inserted and 'showMoviesRecommendations' not in content:
-            print("ERREUR: Insertion films échouée - vérification manuelle requise")
-        if not series_inserted and 'showShowsRecommendations' not in content:
-            print("ERREUR: Insertion séries échouée - vérification manuelle requise")
+        if "showMoviesRecommendations" not in content:
+            print("ÉCHEC insertion films - vérifiez manuellement")
+        if "showShowsRecommendations" not in content:
+            print("ÉCHEC insertion séries - vérifiez manuellement")
         
 def create_recommendations_file_for_netflix_like_recommendations(because_num):
     """
