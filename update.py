@@ -798,12 +798,21 @@ def my_unparse(node, depth=0, max_depth=50):
             keywords = [my_unparse(k, depth+1, max_depth) for k in node.keywords]
             return f"{func}({', '.join(args + keywords)})"
 
+        # Keyword arguments (e.g., func(arg=value))
+        elif isinstance(node, ast.keyword):
+            if node.arg is None:
+                return f"**{my_unparse(node.value, depth+1, max_depth)}"
+            else:
+                return f"{node.arg}={my_unparse(node.value, depth+1, max_depth)}"
+
         # Variable names
         elif isinstance(node, ast.Name):
             return node.id
 
         # Constants
         elif isinstance(node, ast.Constant):
+            if node.value is Ellipsis:
+                return "..."
             return repr(node.value)
 
         # String literals (Python <3.8)
@@ -812,8 +821,11 @@ def my_unparse(node, depth=0, max_depth=50):
 
         # Return statements
         elif isinstance(node, ast.Return):
-            value = my_unparse(node.value, depth+1, max_depth) if node.value else ""
-            return f"return {value}"
+            if node.value is not None:
+                value = my_unparse(node.value, depth+1, max_depth)
+                return f"return {value}"
+            else:
+                return "return"
 
         # Binary operations
         elif isinstance(node, ast.BinOp):
@@ -923,10 +935,14 @@ def my_unparse(node, depth=0, max_depth=50):
 
         # Data structures
         elif isinstance(node, ast.Dict):
-            keys = [my_unparse(k, depth+1, max_depth) if k else "None" 
-                   for k in node.keys]
-            values = [my_unparse(v, depth+1, max_depth) for v in node.values]
-            pairs = [f"{k}: {v}" for k, v in zip(keys, values)]
+            pairs = []
+            for k, v in zip(node.keys, node.values):
+                if k is None:
+                    pairs.append(f"**{my_unparse(v, depth+1, max_depth)}")
+                else:
+                    k_str = my_unparse(k, depth+1, max_depth)
+                    v_str = my_unparse(v, depth+1, max_depth)
+                    pairs.append(f"{k_str}: {v_str}")
             return "{" + ", ".join(pairs) + "}"
         
         elif isinstance(node, ast.List):
@@ -985,8 +1001,18 @@ def my_unparse(node, depth=0, max_depth=50):
             for handler in node.handlers:
                 type_str = my_unparse(handler.type, depth+1, max_depth) if handler.type else ""
                 name = f" as {handler.name}" if handler.name else ""
+                except_parts = []
+                if type_str:
+                    except_parts.append(type_str)
+                if name:
+                    except_parts.append(name)
+                except_clause = ' '.join(except_parts)
+                if except_clause:
+                    except_clause = ' ' + except_clause
+                else:
+                    except_clause = ''
                 handler_body = format_body(handler.body, depth)
-                excepts.append(f"except {type_str}{name}:\n{handler_body}")
+                excepts.append(f"except{except_clause}:\n{handler_body}")
             else_body = ""
             if node.orelse:
                 else_body = f"\nelse:\n{format_body(node.orelse, depth)}"
@@ -1052,7 +1078,7 @@ def my_unparse(node, depth=0, max_depth=50):
         # Yield statements
         elif isinstance(node, ast.Yield):
             value = my_unparse(node.value, depth+1, max_depth) if node.value else ""
-            return f"yield {value}"
+            return f"yield {value}" if value else "yield"
 
         elif isinstance(node, ast.YieldFrom):
             value = my_unparse(node.value, depth+1, max_depth)
@@ -1135,10 +1161,6 @@ def my_unparse(node, depth=0, max_depth=50):
             body = format_body(node.body, depth)
             return f"case {pattern}{guard}:\n{body}"
 
-        # Special constants
-        elif isinstance(node, ast.Constant) and node.value is Ellipsis:
-            return "..."
-        
         # Edge cases
         elif isinstance(node, ast.Set) and not node.elts:
             return "set()"
