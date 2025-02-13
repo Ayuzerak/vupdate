@@ -535,6 +535,7 @@ def add_translations_to_file_for_netflix_like_recommendations():
     (because_num_fr_fr, recommendations_num_fr_fr) = add_translations_to_fr_fr_po_file_for_netflix_like_recommendations()
     (because_num_fr_ca, recommendations_num_fr_ca) = add_translations_to_fr_ca_po_file_for_netflix_like_recommendations()
     (because_num_en_gb, recommendations_num_en_gb) = add_translations_to_en_gb_po_file_for_netflix_like_recommendations()
+    recommendations_num = 0
     if language_setting == "resource.language.fr_fr":
         recommendations_num = recommendations_num_fr_fr
         because_num = because_num_fr_fr
@@ -955,130 +956,129 @@ def add_recommendations_for_netflix_like_recommendations(recommendations_num):
     in `home.py` after `# Nouveautés` or before `# Populaires`, scoped to each method.
     """
     
-# Chemin du fichier à éditer
-file_path = VSPath('special://home/addons/plugin.video.vstream/resources/lib/home.py').replace('\\', '/')
+    # Chemin du fichier à éditer
+    file_path = VSPath('special://home/addons/plugin.video.vstream/resources/lib/home.py').replace('\\', '/')
 
-if not os.path.isfile(file_path):
-    VSlog(f"Fichier non trouvé : {file_path}")
-    exit(1)
-
-# Lecture du contenu du fichier
-with open(file_path, 'r', encoding='utf-8') as f:
-    content = f.read()
-
-modifications_effectuees = False
-
-# ============================================================================
-# 1. Ajout de la méthode addDir dans la classe cHome
-# ============================================================================
-if 'def addDir(self, categorie, oGui, oOutputParameterHandler):' in content:
-    VSlog("La méthode addDir existe déjà dans la classe cHome.")
-else:
-    # Recherche de la déclaration de la classe cHome
-    class_pattern = r'(class\s+cHome\s*:\s*\n)'
-    match = re.search(class_pattern, content)
-    if match:
-        # Définition du code de la méthode addDir avec indentation sur 4 espaces
-        adddir_method = (
-            "    def addDir(self, categorie, oGui, oOutputParameterHandler):\n"
-            "        categorie2 = \"\"\n"
-            "        if categorie == \"tv\":\n"
-            "            categorie2 = \"Shows\"\n"
-            "        else:\n"
-            "            categorie2 = \"Movies\"\n"
-            "        oOutputParameterHandler.addParameter('siteUrl', f'{categorie}/recommendations')\n"
-            "        oGui.addDir('cRecommendations', f'show{categorie2}Recommendations'," + f" self.addons.VSlang({recommendations_num})" + ", 'listes.png', oOutputParameterHandler)\n"
-        )
-        # Insertion de la méthode juste après la déclaration de la classe
-        content = re.sub(class_pattern, r'\1' + adddir_method + "\n", content, count=1)
-        # Vérification après insertion
-        if 'def addDir(self, categorie, oGui, oOutputParameterHandler):' in content:
-            modifications_effectuees = True
-            VSlog("La méthode addDir a été ajoutée avec succès dans cHome.")
-        else:
-            VSlog("Erreur: L'ajout de la méthode addDir a échoué.")
-    else:
-        VSlog("La classe cHome n'a pas été trouvée dans le fichier.")
+    if not os.path.isfile(file_path):
+        VSlog(f"Fichier non trouvé : {file_path}")
         exit(1)
 
-# ============================================================================
-# 2. Modification de showMovies pour y appeler self.addDir("movies", oGui, oOutputParameterHandler)
-# ============================================================================
-if re.search(r'def\s+showMovies\s*\(self\):', content):
-    # Vérification préliminaire dans showMovies
-    if re.search(r'self\.addDir\("movies",\s*oGui,\s*oOutputParameterHandler\)', content):
-        VSlog("La fonction showMovies contient déjà l'appel à self.addDir pour 'movies'.")
-    else:
-        pattern_showMovies = r'(def\s+showMovies\s*\(self\):\s*\n)([ \t]+).*?(?=\n(?:[ \t]*def\s|$))'
-        def repl_showMovies(match):
-            header = match.group(1)
-            indent = match.group(2)
-            new_body = f'{indent}self.addDir("movies", oGui, oOutputParameterHandler)\n'
-            return header + new_body
-        new_content, count_movies = re.subn(pattern_showMovies, repl_showMovies, content, flags=re.DOTALL)
-        if count_movies > 0 and 'self.addDir("movies", oGui, oOutputParameterHandler)' in new_content:
-            content = new_content
-            modifications_effectuees = True
-            VSlog("La fonction showMovies a été modifiée avec succès.")
-        else:
-            VSlog("Erreur: La modification de la fonction showMovies a échoué.")
-else:
-    VSlog("La fonction showMovies n'a pas été trouvée dans le fichier.")
-
-# ============================================================================
-# 3. Modification de showSeries pour y appeler self.addDir("tv", oGui, oOutputParameterHandler)
-# ============================================================================
-if re.search(r'def\s+showSeries\s*\(self\):', content):
-    if re.search(r'self\.addDir\("tv",\s*oGui,\s*oOutputParameterHandler\)', content):
-        VSlog("La fonction showSeries contient déjà l'appel à self.addDir pour 'tv'.")
-    else:
-        pattern_showSeries = r'(def\s+showSeries\s*\(self\):\s*\n)([ \t]+).*?(?=\n(?:[ \t]*def\s|$))'
-        def repl_showSeries(match):
-            header = match.group(1)
-            indent = match.group(2)
-            new_body = f'{indent}self.addDir("tv", oGui, oOutputParameterHandler)\n'
-            return header + new_body
-        new_content, count_series = re.subn(pattern_showSeries, repl_showSeries, content, flags=re.DOTALL)
-        if count_series > 0 and 'self.addDir("tv", oGui, oOutputParameterHandler)' in new_content:
-            content = new_content
-            modifications_effectuees = True
-            VSlog("La fonction showSeries a été modifiée avec succès.")
-        else:
-            VSlog("Erreur: La modification de la fonction showSeries a échoué.")
-else:
-    VSlog("La fonction showSeries n'a pas été trouvée dans le fichier.")
-
-# ============================================================================
-# Sauvegarde des modifications et vérification finale
-# ============================================================================
-if modifications_effectuees:
-    with open(file_path, 'w', encoding='utf-8') as f:
-        f.write(content)
-    VSlog("Modifications sauvegardées. Vérification du fichier final en cours...")
-
-    # Relecture du fichier pour vérification finale
+    # Lecture du contenu du fichier
     with open(file_path, 'r', encoding='utf-8') as f:
-        final_content = f.read()
-    verification = True
+        content = f.read()
 
-    if 'def addDir(self, categorie, oGui, oOutputParameterHandler):' not in final_content:
-        VSlog("Vérification échouée : La méthode addDir n'est pas présente dans le fichier final.")
-        verification = False
-    if not re.search(r'self\.addDir\("movies",\s*oGui,\s*oOutputParameterHandler\)', final_content):
-        VSlog("Vérification échouée : L'appel self.addDir pour 'movies' est absent dans showMovies.")
-        verification = False
-    if not re.search(r'self\.addDir\("tv",\s*oGui,\s*oOutputParameterHandler\)', final_content):
-        VSlog("Vérification échouée : L'appel self.addDir pour 'tv' est absent dans showSeries.")
-        verification = False
+    modifications_effectuees = False
 
-    if verification:
-        VSlog("Toutes les modifications ont été vérifiées avec succès dans le fichier final.")
+    # ============================================================================
+    # 1. Ajout de la méthode addDir dans la classe cHome
+    # ============================================================================
+    if 'def addDir(self, categorie, oGui, oOutputParameterHandler):' in content:
+        VSlog("La méthode addDir existe déjà dans la classe cHome.")
     else:
-        VSlog("Des erreurs ont été détectées lors de la vérification finale des modifications.")
-else:
-    VSlog("Aucune modification n'a été apportée au fichier.")
+        # Recherche de la déclaration de la classe cHome
+        class_pattern = r'(class\s+cHome\s*:\s*\n)'
+        match = re.search(class_pattern, content)
+        if match:
+            # Définition du code de la méthode addDir avec indentation sur 4 espaces
+            adddir_method = (
+                "    def addDir(self, categorie, oGui, oOutputParameterHandler):\n"
+                "        categorie2 = \"\"\n"
+                "        if categorie == \"tv\":\n"
+                "            categorie2 = \"Shows\"\n"
+                "        else:\n"
+                "            categorie2 = \"Movies\"\n"
+                "        oOutputParameterHandler.addParameter('siteUrl', f'{categorie}/recommendations')\n"
+                "        oGui.addDir('cRecommendations', f'show{categorie2}Recommendations'," + f" self.addons.VSlang({recommendations_num})" + ", 'listes.png', oOutputParameterHandler)\n"
+            )
+            # Insertion de la méthode juste après la déclaration de la classe
+            content = re.sub(class_pattern, r'\1' + adddir_method + "\n", content, count=1)
+            # Vérification après insertion
+            if 'def addDir(self, categorie, oGui, oOutputParameterHandler):' in content:
+                modifications_effectuees = True
+                VSlog("La méthode addDir a été ajoutée avec succès dans cHome.")
+            else:
+                VSlog("Erreur: L'ajout de la méthode addDir a échoué.")
+        else:
+            VSlog("La classe cHome n'a pas été trouvée dans le fichier.")
+            exit(1)
 
-        
+    # ============================================================================
+    # 2. Modification de showMovies pour y appeler self.addDir("movies", oGui, oOutputParameterHandler)
+    # ============================================================================
+    if re.search(r'def\s+showMovies\s*\(self\):', content):
+        # Vérification préliminaire dans showMovies
+        if re.search(r'self\.addDir\("movies",\s*oGui,\s*oOutputParameterHandler\)', content):
+            VSlog("La fonction showMovies contient déjà l'appel à self.addDir pour 'movies'.")
+        else:
+            pattern_showMovies = r'(def\s+showMovies\s*\(self\):\s*\n)([ \t]+).*?(?=\n(?:[ \t]*def\s|$))'
+            def repl_showMovies(match):
+                header = match.group(1)
+                indent = match.group(2)
+                new_body = f'{indent}self.addDir("movies", oGui, oOutputParameterHandler)\n'
+                return header + new_body
+            new_content, count_movies = re.subn(pattern_showMovies, repl_showMovies, content, flags=re.DOTALL)
+            if count_movies > 0 and 'self.addDir("movies", oGui, oOutputParameterHandler)' in new_content:
+                content = new_content
+                modifications_effectuees = True
+                VSlog("La fonction showMovies a été modifiée avec succès.")
+            else:
+                VSlog("Erreur: La modification de la fonction showMovies a échoué.")
+    else:
+        VSlog("La fonction showMovies n'a pas été trouvée dans le fichier.")
+
+    # ============================================================================
+    # 3. Modification de showSeries pour y appeler self.addDir("tv", oGui, oOutputParameterHandler)
+    # ============================================================================
+    if re.search(r'def\s+showSeries\s*\(self\):', content):
+        if re.search(r'self\.addDir\("tv",\s*oGui,\s*oOutputParameterHandler\)', content):
+            VSlog("La fonction showSeries contient déjà l'appel à self.addDir pour 'tv'.")
+        else:
+            pattern_showSeries = r'(def\s+showSeries\s*\(self\):\s*\n)([ \t]+).*?(?=\n(?:[ \t]*def\s|$))'
+            def repl_showSeries(match):
+                header = match.group(1)
+                indent = match.group(2)
+                new_body = f'{indent}self.addDir("tv", oGui, oOutputParameterHandler)\n'
+                return header + new_body
+            new_content, count_series = re.subn(pattern_showSeries, repl_showSeries, content, flags=re.DOTALL)
+            if count_series > 0 and 'self.addDir("tv", oGui, oOutputParameterHandler)' in new_content:
+                content = new_content
+                modifications_effectuees = True
+                VSlog("La fonction showSeries a été modifiée avec succès.")
+            else:
+                VSlog("Erreur: La modification de la fonction showSeries a échoué.")
+    else:
+        VSlog("La fonction showSeries n'a pas été trouvée dans le fichier.")
+
+    # ============================================================================
+    # Sauvegarde des modifications et vérification finale
+    # ============================================================================
+    if modifications_effectuees:
+        with open(file_path, 'w', encoding='utf-8') as f:
+            f.write(content)
+        VSlog("Modifications sauvegardées. Vérification du fichier final en cours...")
+
+        # Relecture du fichier pour vérification finale
+        with open(file_path, 'r', encoding='utf-8') as f:
+            final_content = f.read()
+        verification = True
+
+        if 'def addDir(self, categorie, oGui, oOutputParameterHandler):' not in final_content:
+            VSlog("Vérification échouée : La méthode addDir n'est pas présente dans le fichier final.")
+            verification = False
+        if not re.search(r'self\.addDir\("movies",\s*oGui,\s*oOutputParameterHandler\)', final_content):
+            VSlog("Vérification échouée : L'appel self.addDir pour 'movies' est absent dans showMovies.")
+            verification = False
+        if not re.search(r'self\.addDir\("tv",\s*oGui,\s*oOutputParameterHandler\)', final_content):
+            VSlog("Vérification échouée : L'appel self.addDir pour 'tv' est absent dans showSeries.")
+            verification = False
+
+        if verification:
+            VSlog("Toutes les modifications ont été vérifiées avec succès dans le fichier final.")
+        else:
+            VSlog("Des erreurs ont été détectées lors de la vérification finale des modifications.")
+    else:
+        VSlog("Aucune modification n'a été apportée au fichier.")
+
 def create_recommendations_file_for_netflix_like_recommendations(because_num):
     """
     Vérifie si le fichier recommendations.py existe dans le chemin cible.
