@@ -2687,15 +2687,15 @@ def set_frenchstream_url(url):
     except Exception as e:
         VSlog(f"Error while updating FrenchStream URL: {e}")
 
-def activate_site(site_name):
-    """Activate a site in the sites.json file."""
-    VSlog(f"Activating site: {site_name}.")
+def activate_site(site_name, active_value="True"):
+    """Activate a site in the sites.json file using the given active_value (default "True")."""
+    VSlog(f"Activating site: {site_name} with active value: {active_value}.")
     sites_json = VSPath('special://home/addons/plugin.video.vstream/resources/sites.json').replace('\\', '/')
     try:
         with open(sites_json, 'r') as fichier:
             data = json.load(fichier)
         if site_name in data['sites']:
-            data['sites'][site_name]['active'] = "True"
+            data['sites'][site_name]['active'] = active_value
             with open(sites_json, 'w') as fichier:
                 json.dump(data, fichier, indent=4)
             VSlog(f"Site {site_name} activated successfully.")
@@ -3329,6 +3329,8 @@ class cUpdate:
             set_darkiworld_url(get_darkiworld_url())
 
             check_all_sites()
+
+            activate_site("channelstream", "False")
 
             # Add new site if necessary
             VSlog("Adding PapaDuStream if not present.")
