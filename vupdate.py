@@ -1002,52 +1002,69 @@ def add_recommendations_for_netflix_like_recommendations(recommendations_num):
             VSlog("La classe cHome n'a pas été trouvée dans le fichier.")
             exit(1)
 
-    # ============================================================================
-    # 2. Modification de showMovies pour y appeler self.addDir("movies", oGui, oOutputParameterHandler)
-    # ============================================================================
-    if re.search(r'def\s+showMovies\s*\(self\):', content):
-        # Vérification préliminaire dans showMovies
-        if re.search(r'self\.addDir\("movies",\s*oGui,\s*oOutputParameterHandler\)', content):
-            VSlog("La fonction showMovies contient déjà l'appel à self.addDir pour 'movies'.")
-        else:
-            pattern_showMovies = r'(def\s+showMovies\s*\(self\):\s*\n)([ \t]+).*?(?=\n(?:[ \t]*def\s|$))'
-            def repl_showMovies(match):
-                header = match.group(1)
-                indent = match.group(2)
-                new_body = f'{indent}self.addDir("movies", oGui, oOutputParameterHandler)\n'
-                return header + new_body
-            new_content, count_movies = re.subn(pattern_showMovies, repl_showMovies, content, flags=re.DOTALL)
-            if count_movies > 0 and 'self.addDir("movies", oGui, oOutputParameterHandler)' in new_content:
-                content = new_content
-                modifications_effectuees = True
-                VSlog("La fonction showMovies a été modifiée avec succès.")
-            else:
-                VSlog("Erreur: La modification de la fonction showMovies a échoué.")
+# ============================================================================ 
+# 2. Modification de showMovies pour y appeler self.addDir("movies", oGui, oOutputParameterHandler)
+#    avant oGui.setEndOfDirectory()
+# ============================================================================ 
+if re.search(r'def\s+showMovies\s*\(self\):', content):
+    if re.search(r'self\.addDir\("movies",\s*oGui,\s*oOutputParameterHandler\)', content):
+        VSlog("La fonction showMovies contient déjà l'appel à self.addDir pour 'movies'.")
     else:
-        VSlog("La fonction showMovies n'a pas été trouvée dans le fichier.")
+        # Capture de l'intégralité de la fonction showMovies (header + corps)
+        pattern_showMovies = r'(def\s+showMovies\s*\(self\):(?:\n[ \t]+.*)+)'
+        def modify_showMovies(match):
+            func_block = match.group(0)
+            # Recherche de la ligne oGui.setEndOfDirectory() dans le corps
+            pattern_setend = r'([ \t]*)oGui\.setEndOfDirectory\(\)'
+            def insert_line(m):
+                indent = m.group(1)
+                # Insertion de l'appel à self.addDir juste avant oGui.setEndOfDirectory()
+                return f'{indent}self.addDir("movies", oGui, oOutputParameterHandler)\n{indent}oGui.setEndOfDirectory()'
+            new_func_block, count_body = re.subn(pattern_setend, insert_line, func_block, count=1)
+            if count_body == 0:
+                VSlog("Erreur: oGui.setEndOfDirectory() introuvable dans showMovies.")
+                return func_block
+            return new_func_block
+        new_content, count_movies = re.subn(pattern_showMovies, modify_showMovies, content, flags=re.DOTALL)
+        if count_movies > 0 and 'self.addDir("movies", oGui, oOutputParameterHandler)' in new_content:
+            content = new_content
+            modifications_effectuees = True
+            VSlog("La fonction showMovies a été modifiée avec succès.")
+        else:
+            VSlog("Erreur: La modification de la fonction showMovies a échoué.")
+else:
+    VSlog("La fonction showMovies n'a pas été trouvée dans le fichier.")
 
-    # ============================================================================
-    # 3. Modification de showSeries pour y appeler self.addDir("tv", oGui, oOutputParameterHandler)
-    # ============================================================================
-    if re.search(r'def\s+showSeries\s*\(self\):', content):
-        if re.search(r'self\.addDir\("tv",\s*oGui,\s*oOutputParameterHandler\)', content):
-            VSlog("La fonction showSeries contient déjà l'appel à self.addDir pour 'tv'.")
-        else:
-            pattern_showSeries = r'(def\s+showSeries\s*\(self\):\s*\n)([ \t]+).*?(?=\n(?:[ \t]*def\s|$))'
-            def repl_showSeries(match):
-                header = match.group(1)
-                indent = match.group(2)
-                new_body = f'{indent}self.addDir("tv", oGui, oOutputParameterHandler)\n'
-                return header + new_body
-            new_content, count_series = re.subn(pattern_showSeries, repl_showSeries, content, flags=re.DOTALL)
-            if count_series > 0 and 'self.addDir("tv", oGui, oOutputParameterHandler)' in new_content:
-                content = new_content
-                modifications_effectuees = True
-                VSlog("La fonction showSeries a été modifiée avec succès.")
-            else:
-                VSlog("Erreur: La modification de la fonction showSeries a échoué.")
+# ============================================================================ 
+# 3. Modification de showSeries pour y appeler self.addDir("tv", oGui, oOutputParameterHandler)
+#    avant oGui.setEndOfDirectory()
+# ============================================================================ 
+if re.search(r'def\s+showSeries\s*\(self\):', content):
+    if re.search(r'self\.addDir\("tv",\s*oGui,\s*oOutputParameterHandler\)', content):
+        VSlog("La fonction showSeries contient déjà l'appel à self.addDir pour 'tv'.")
     else:
-        VSlog("La fonction showSeries n'a pas été trouvée dans le fichier.")
+        # Capture de l'intégralité de la fonction showSeries (header + corps)
+        pattern_showSeries = r'(def\s+showSeries\s*\(self\):(?:\n[ \t]+.*)+)'
+        def modify_showSeries(match):
+            func_block = match.group(0)
+            pattern_setend = r'([ \t]*)oGui\.setEndOfDirectory\(\)'
+            def insert_line(m):
+                indent = m.group(1)
+                return f'{indent}self.addDir("tv", oGui, oOutputParameterHandler)\n{indent}oGui.setEndOfDirectory()'
+            new_func_block, count_body = re.subn(pattern_setend, insert_line, func_block, count=1)
+            if count_body == 0:
+                VSlog("Erreur: oGui.setEndOfDirectory() introuvable dans showSeries.")
+                return func_block
+            return new_func_block
+        new_content, count_series = re.subn(pattern_showSeries, modify_showSeries, content, flags=re.DOTALL)
+        if count_series > 0 and 'self.addDir("tv", oGui, oOutputParameterHandler)' in new_content:
+            content = new_content
+            modifications_effectuees = True
+            VSlog("La fonction showSeries a été modifiée avec succès.")
+        else:
+            VSlog("Erreur: La modification de la fonction showSeries a échoué.")
+else:
+    VSlog("La fonction showSeries n'a pas été trouvée dans le fichier.")
 
     # ============================================================================
     # Sauvegarde des modifications et vérification finale
