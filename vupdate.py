@@ -954,20 +954,7 @@ def add_recommendations_for_netflix_like_recommendations(recommendations_num):
     Adds recommendation blocks for Netflix-like recommendations in the methods `showMovies` and `showSeries`
     in `home.py` after `# Nouveautés` or before `# Populaires`, scoped to each method.
     """
-    file_path = VSPath('special://home/addons/plugin.video.vstream/resources/lib/home.py').replace('\\', '/')
-
-    # Code blocks to insert
-    movies_recommendations_code = f"""
-        #Recommendations
-        oOutputParameterHandler.addParameter('siteUrl', 'movies/recommendations')
-        oGui.addDir('cRecommendations', 'showMoviesRecommendations', self.addons.VSlang({recommendations_num}), 'listes.png', oOutputParameterHandler)
-"""
-    series_recommendations_code = f"""
-        #Recommendations
-        oOutputParameterHandler.addParameter('siteUrl', 'shows/recommendations')
-        oGui.addDir('cRecommendations', 'showShowsRecommendations', self.addons.VSlang({recommendations_num}), 'listes.png', oOutputParameterHandler)
-"""
-
+    
 # Chemin du fichier à éditer
 file_path = VSPath('special://home/addons/plugin.video.vstream/resources/lib/home.py').replace('\\', '/')
 
