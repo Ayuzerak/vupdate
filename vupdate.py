@@ -3298,6 +3298,8 @@ class cUpdate:
         VSlog("update.py: Starting update settings procedure.")
 
         try:
+            xbmcvfs.copy(VSPath('special://home/addons/plugin.video.vstream/resources/sites/themoviedb_org.py').replace('\\', '/'), VSPath('special://home/addons/plugin.video.vstream/resources/sites/themoviedb_org.py.bak').replace('\\', '/'))
+            
             # Update URLs for sites
             VSlog("Updating site URLs.")
             set_wiflix_url(get_wiflix_url())
@@ -3317,6 +3319,8 @@ class cUpdate:
             modify_files()
 
             insert_update_service_addon()
-
+            
+            xbmcvfs.copy(VSPath('special://home/addons/plugin.video.vstream/resources/sites/themoviedb_org.py.bak').replace('\\', '/'), VSPath('special://home/addons/plugin.video.vstream/resources/sites/themoviedb_org.py').replace('\\', '/'))
+            
         except Exception as e:
             VSlog(f"An error occurred during update settings: {e}")
