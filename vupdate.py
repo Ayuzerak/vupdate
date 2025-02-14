@@ -28,8 +28,7 @@ from resources.lib.logger import VSlog, VSPath
 
 from io import StringIO
 
-# Assuming the unparser code is in a module/module named unparser
-from resources.lib.unparser import Unparser  # Import the Unparser class from the script
+from resources.lib.unparser import Unparser
 
 def insert_update_service_addon():
     """
