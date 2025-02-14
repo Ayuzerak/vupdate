@@ -1978,7 +1978,7 @@ def rewrite_file_to_avoid_regex_infinite_loops(file_path, dry_run=False, backup=
 
         if hasattr(ast, "unparse"):
             new_code = ast.unparse(new_tree)
-        elif hasattr(unparse, "unparse"):
+        elif hasattr(astunparse, "unparse"):
             astunparse.unparse(new_tree)
         else:
             VSlog("ast.unparse() and astunparse() not available; using custom unparser.")
