@@ -175,7 +175,7 @@ def insert_update_service_addon():
             f"{method_indent}    backup_path = os.path.join(addons_dir, backup_name)\n",
             "\n",
             f"{method_indent}    # Vérification si la mise à jour a déjà été effectuée en cherchant le fichier 'updated'\n",
-            f"{method_indent}    updated_flag_path = os.path.join(addon_path, \"updatedededededed\")\n",
+            f"{method_indent}    updated_flag_path = os.path.join(addon_path, \"updatededededededed\")\n",
             f"{method_indent}    if os.path.exists(updated_flag_path):\n",
             f"{method_indent}        VSlog(\"La mise à jour a déjà été effectuée. Aucune action supplémentaire n'est nécessaire.\")\n",
             f"{method_indent}        return\n",
