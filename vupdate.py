@@ -2011,7 +2011,7 @@ def rewrite_file_to_avoid_regex_infinite_loops(file_path, dry_run=False, backup=
     except IOError as e:
         VSlog(f"File IO error: {e}")
     except Exception as e:
-        VSlog(f"Unexpected error while modifying file: {e}")
+        VSlog(f"Unexpected error while modifying file {file_path}: {e}")
 
 def add_parameter_to_function(file_path, function_name, parameter):
     VSlog(f"Starting to add parameter '{parameter}' to function '{function_name}' in file: {file_path}")
