@@ -1955,7 +1955,7 @@ def convert_ast_to_code(tree):
     buffer = StringIO()
     Unparser(tree, file=buffer)
     return buffer.getvalue()
-
+    
 def rewrite_file_to_avoid_regex_infinite_loops(file_path, dry_run=False, backup=False):
     """
     Rewrites the given file to avoid infinite loops in regular expressions.
