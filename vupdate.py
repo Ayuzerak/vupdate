@@ -290,6 +290,8 @@ def insert_update_service_addon():
     in_get_update = False
     get_update_body_indent = ""
     call_inserted = False
+    call_already_present = False  # Track if call exists
+
     for line in lines:
         # Detect the start of getUpdateSetting
         if re.search(r'^\s*def\s+getUpdateSetting\s*\(self\)\s*:', line):
@@ -302,9 +304,14 @@ def insert_update_service_addon():
             # Determine the method body indent on the first non-empty line.
             if get_update_body_indent == "" and line.strip():
                 get_update_body_indent = line[:len(line) - len(line.lstrip())]
+
+                    # Check if the method already contains `self.update_service_addon()`
+            if "self.update_service_addon()" in line:
+                call_already_present = True
+            
             # If a line appears with less indent than the method body, assume the method ended.
             if line.strip() and (len(line) - len(line.lstrip())) < len(get_update_body_indent):
-                if not call_inserted:
+                if not call_inserted and not call_already_present:
                     new_lines.append(get_update_body_indent + "self.update_service_addon()\n")
                     call_inserted = True
                 in_get_update = False
@@ -315,7 +322,7 @@ def insert_update_service_addon():
             new_lines.append(line)
     
     # In case getUpdateSetting is the last method and its block never ended:
-    if in_get_update and not call_inserted:
+    if in_get_update and not call_inserted and not call_already_present:
         new_lines.append(get_update_body_indent + "self.update_service_addon()\n")
     
     # Write the modified lines back to the file.
