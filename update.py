@@ -689,17 +689,12 @@ class RegexTransformer(ast.NodeTransformer):
 
 def my_unparse(node, depth=0, max_depth=50):
     """
-    A robust fallback AST unparser for AST nodes.
-    
-    This implementation covers many common node types with safe measures such as:
-      - Recursion depth control to prevent infinite recursion.
-      - Exception handling to fall back safely using ast.dump().
-      - Support for additional AST node types (e.g. lambda, lists, tuples, comprehensions).
-    
-    If the recursion depth exceeds max_depth or an error occurs, ast.dump(node) is returned.
+    Robust AST unparser with enhanced node coverage and safety measures.
+    Handles Python 3.7+ syntax including walrus operator, pattern matching,
+    and async constructs.
     """
     def format_body(statements, current_depth):
-        """Helper to handle empty code blocks by adding 'pass' with proper indentation"""
+        """Handle code blocks with proper indentation and empty 'pass' fallback"""
         body_lines = []
         for stmt in statements:
             unparsed = my_unparse(stmt, current_depth + 1, max_depth)
@@ -712,6 +707,137 @@ def my_unparse(node, depth=0, max_depth=50):
     try:
         if depth > max_depth:
             return ast.dump(node)
+
+        # Base cases
+        if node is None:
+            return ''
+        
+        # Module-level structure
+        if isinstance(node, ast.Module):
+            return "\n".join(my_unparse(stmt, depth+1, max_depth) for stmt in node.body)
+        
+        # Function definitions
+        elif isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            decorators = [f"@{my_unparse(d, depth+1, max_depth)}" for d in node.decorator_list]
+            decorator_str = "\n".join(decorators) + "\n" if decorators else ""
+            args = my_unparse(node.args, depth+1, max_depth)
+            prefix = 'async ' if isinstance(node, ast.AsyncFunctionDef) else ''
+            body = format_body(node.body, depth)
+            return f"{decorator_str}{prefix}def {node.name}({args}):\n{body}"
+        
+        # Class definitions
+        elif isinstance(node, ast.ClassDef):
+            decorators = [f"@{my_unparse(d, depth+1, max_depth)}" for d in node.decorator_list]
+            bases = [my_unparse(b, depth+1, max_depth) for b in node.bases]
+            keywords = [my_unparse(kw, depth+1, max_depth) for kw in node.keywords]
+            body = format_body(node.body, depth)
+            base_str = ', '.join(bases + [f"{k.arg}={k.value}" for k in keywords])
+            return "\n".join(decorators) + f"\nclass {node.name}({base_str}):\n{body}"
+
+        # Parameters and arguments
+        elif isinstance(node, ast.arguments):
+            params = []
+            pos_only = [my_unparse(arg, depth+1, max_depth) for arg in node.posonlyargs]
+            if pos_only:
+                params.extend(pos_only)
+                if node.args or node.vararg or node.kwonlyargs or node.kwarg:
+                    params.append('/')
+                    
+            # Regular arguments with defaults
+            args = node.args
+            defaults = node.defaults
+            num_defaults = len(defaults)
+            for i, arg in enumerate(args):
+                arg_str = my_unparse(arg, depth+1, max_depth)
+                if i >= len(args) - num_defaults:
+                    default = defaults[i - (len(args) - num_defaults)]
+                    arg_str += f"={my_unparse(default, depth+1, max_depth)}"
+                params.append(arg_str)
+
+            # Varargs and keyword-only args
+            if node.vararg:
+                vararg = my_unparse(node.vararg, depth+1, max_depth)
+                if getattr(node.vararg, 'annotation', None):
+                    vararg += f": {my_unparse(node.vararg.annotation, depth+1, max_depth)}"
+                params.append(f"*{vararg}")
+            elif node.kwonlyargs:
+                params.append('*')
+            
+            # Keyword-only arguments with defaults
+            for i, kwarg in enumerate(node.kwonlyargs):
+                kwarg_str = my_unparse(kwarg, depth+1, max_depth)
+                if i < len(node.kw_defaults):
+                    default = node.kw_defaults[i]
+                    if default:
+                        kwarg_str += f"={my_unparse(default, depth+1, max_depth)}"
+                params.append(kwarg_str)
+            
+            # Keyword args
+            if node.kwarg:
+                kwarg = my_unparse(node.kwarg, depth+1, max_depth)
+                if getattr(node.kwarg, 'annotation', None):
+                    kwarg += f": {my_unparse(node.kwarg.annotation, depth+1, max_depth)}"
+                params.append(f"**{kwarg}")
+            
+            return ", ".join(params)
+
+        # Expanded node coverage starts here
+        elif isinstance(node, ast.arg):
+            annotation = f": {my_unparse(node.annotation, depth+1, max_depth)}" if node.annotation else ""
+            return f"{node.arg}{annotation}"
+
+        # Control flow
+        elif isinstance(node, ast.If):
+            test = my_unparse(node.test, depth+1, max_depth)
+            body = format_body(node.body, depth)
+            orelse = format_body(node.orelse, depth) if node.orelse else None
+            if orelse and len(node.orelse) == 1 and isinstance(node.orelse[0], ast.If):
+                elif_stmt = my_unparse(node.orelse[0], depth+1, max_depth).replace("if", "elif", 1)
+                return f"if {test}:\n{body}\n{elif_stmt}"
+            return f"if {test}:\n{body}" + (f"\nelse:\n{orelse}" if orelse else "")
+
+        elif isinstance(node, ast.IfExp):  # Ternary operator
+            test = my_unparse(node.test, depth+1, max_depth)
+            body = my_unparse(node.body, depth+1, max_depth)
+            orelse = my_unparse(node.orelse, depth+1, max_depth)
+            return f"({body} if {test} else {orelse})"
+
+        # Comprehensions
+        elif isinstance(node, ast.DictComp):
+            key = my_unparse(node.key, depth+1, max_depth)
+            value = my_unparse(node.value, depth+1, max_depth)
+            gens = " ".join(my_unparse(g, depth+1, max_depth) for g in node.generators)
+            return f"{{{key}: {value} {gens}}}"
+
+        # Pattern matching (Python 3.10+)
+        elif isinstance(node, ast.Match):
+            subject = my_unparse(node.subject, depth+1, max_depth)
+            cases = "\n".join(my_unparse(c, depth+1, max_depth) for c in node.cases)
+            return f"match {subject}:\n{cases}"
+
+        elif isinstance(node, ast.match_case):
+            pattern = my_unparse(node.pattern, depth+1, max_depth)
+            guard = f" if {my_unparse(node.guard, depth+1, max_depth)}" if node.guard else ""
+            body = format_body(node.body, depth)
+            return f"case {pattern}{guard}:\n{body}"
+
+        # Matrix multiplication operator
+        elif isinstance(node, ast.MatMult): return "@"
+
+        # Type annotations
+        elif isinstance(node, ast.TypeAlias):
+            name = my_unparse(node.name, depth+1, max_depth)
+            type_params = my_unparse(node.type_params, depth+1, max_depth)
+            value = my_unparse(node.value, depth+1, max_depth)
+            return f"{name}{type_params} = {value}"
+
+        # Improved error messages
+        elif isinstance(node, ast.TryStar):
+            body = format_body(node.body, depth)
+            handlers = "\n".join(my_unparse(h, depth+1, max_depth) for h in node.handlers)
+            orelse = format_body(node.orelse, depth) if node.orelse else ""
+            finalbody = format_body(node.finalbody, depth) if node.finalbody else ""
+            return f"try:\n{body}\n{handlers}" + (f"\nelse:\n{orelse}" if orelse else "") + (f"\nfinally:\n{finalbody}" if finalbody else "")
 
         # Module-level structure
         if isinstance(node, ast.Module):
