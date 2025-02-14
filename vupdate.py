@@ -1947,35 +1947,66 @@ class RegexTransformer(ast.NodeTransformer):
 # Fallback AST Unparser Function
 ######################################
 
-def my_unparse(node, depth=0, max_depth=50):
+def my_unparse(node, depth=0, max_depth=50, indent_level=0):
     """
-    A robust fallback AST unparser for AST nodes.
-    
-    This implementation covers many common node types with safe measures such as:
-      - Recursion depth control to prevent infinite recursion.
-      - Exception handling to fall back safely using ast.dump().
-      - Support for additional AST node types (e.g. lambda, lists, tuples, comprehensions).
-    
-    If the recursion depth exceeds max_depth or an error occurs, ast.dump(node) is returned.
+    A robust fallback AST unparser for AST nodes with corrected indentation.
     """
-    def format_body(statements, current_depth):
-        """Helper to handle empty code blocks by adding 'pass' with proper indentation"""
+    def format_body(statements, current_indent):
+        """Formats the body with proper indentation."""
         body_lines = []
         for stmt in statements:
-            unparsed = my_unparse(stmt, current_depth + 1, max_depth)
+            unparsed = my_unparse(stmt, depth + 1, max_depth, current_indent)
             for line in unparsed.split('\n'):
-                body_lines.append('    ' * (current_depth + 1) + line)
+                body_lines.append('    ' * current_indent + line)
         if not body_lines:
-            body_lines.append('    ' * (current_depth + 1) + 'pass')
+            body_lines.append('    ' * current_indent + 'pass')
         return '\n'.join(body_lines)
 
     try:
         if depth > max_depth:
             return ast.dump(node)
 
-        # Module-level structure
+        # Module: Top-level, no indentation
         if isinstance(node, ast.Module):
-            return "\n".join(my_unparse(stmt, depth+1, max_depth) for stmt in node.body)
+            return "\n".join(my_unparse(stmt, depth + 1, max_depth, indent_level) for stmt in node.body)
+        
+        # Function definition: body indented by +1 level
+        elif isinstance(node, ast.FunctionDef):
+            decorators = [f"@{my_unparse(d, depth + 1, max_depth, indent_level)}" for d in node.decorator_list]
+            decorator_str = "\n".join(decorators) + "\n" if decorators else ""
+            args = my_unparse(node.args, depth + 1, max_depth, indent_level)
+            body = format_body(node.body, indent_level + 1)
+            return f"{decorator_str}def {node.name}({args}):\n{body}"
+        
+        # Class definition: body indented by +1 level
+        elif isinstance(node, ast.ClassDef):
+            decorators = [f"@{my_unparse(d, depth + 1, max_depth, indent_level)}" for d in node.decorator_list]
+            bases = [my_unparse(b, depth + 1, max_depth, indent_level) for b in node.bases]
+            keywords = [my_unparse(kw, depth + 1, max_depth, indent_level) for kw in node.keywords]
+            body = format_body(node.body, indent_level + 1)
+            return "\n".join(decorators) + f"\nclass {node.name}({', '.join(bases + keywords)}):\n{body}"
+
+        # If statement: body indented by +1 level
+        elif isinstance(node, ast.If):
+            test = my_unparse(node.test, depth + 1, max_depth, indent_level)
+            body = format_body(node.body, indent_level + 1)
+            orelse = ""
+            if node.orelse:
+                if len(node.orelse) == 1 and isinstance(node.orelse[0], ast.If):
+                    elif_stmt = my_unparse(node.orelse[0], depth + 1, max_depth, indent_level).replace("if", "elif", 1)
+                    return f"if {test}:\n{body}\n{elif_stmt}"
+                else:
+                    orelse = format_body(node.orelse, indent_level + 1)
+                    return f"if {test}:\n{body}\nelse:\n{orelse}"
+            return f"if {test}:\n{body}"
+
+        # For loop: body indented by +1 level
+        elif isinstance(node, ast.For):
+            target = my_unparse(node.target, depth + 1, max_depth, indent_level)
+            iter_ = my_unparse(node.iter, depth + 1, max_depth, indent_level)
+            body = format_body(node.body, indent_level + 1)
+            orelse = format_body(node.orelse, indent_level + 1) if node.orelse else ""
+            return f"for {target} in {iter_}:\n{body}" + (f"\nelse:\n{orelse}" if orelse else "")
         
         # Ternary operator
         elif isinstance(node, ast.IfExp):
