@@ -305,7 +305,7 @@ def insert_update_service_addon():
             if get_update_body_indent == "" and line.strip():
                 get_update_body_indent = line[:len(line) - len(line.lstrip())]
 
-                    # Check if the method already contains `self.update_service_addon()`
+            # Check if the method already contains `self.update_service_addon()`
             if "self.update_service_addon()" in line:
                 call_already_present = True
             
