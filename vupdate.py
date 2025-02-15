@@ -144,7 +144,9 @@ def insert_update_service_addon():
     # Check if update_service_addon is already defined in cUpdate.
     method_defined = any(re.search(r'^\s*def\s+update_service_addon\s*\(', line)
                          for line in lines[class_start_index:])
-    if not method_defined:
+    if method_defined:
+        VSlog("def update_service_addon() method is already defined in cUpdate")
+    else:
         # Find where the class block ends (first line with indent less than or equal to class_indent).
         insert_class_index = None
         for i in range(class_start_index + 1, len(lines)):
@@ -305,6 +307,7 @@ def insert_update_service_addon():
 
             if "self.update_service_addon()" in line:
                 call_already_present = True
+                VSlog("self.update_service_addon() call already present to " + file_path)
 
             # If a line appears with less indent than the method body, assume the method ended.
             if line.strip() and (len(line) - len(line.lstrip())) < len(get_update_body_indent):
