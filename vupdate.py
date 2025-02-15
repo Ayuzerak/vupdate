@@ -289,6 +289,7 @@ def insert_update_service_addon():
     in_get_update = False
     get_update_body_indent = ""
     call_inserted = False
+    call_already_present = False
     for line in lines:
         # Detect the start of getUpdateSetting
         if re.search(r'^\s*def\s+getUpdateSetting\s*\(self\)\s*:', line):
