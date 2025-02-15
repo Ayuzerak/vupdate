@@ -1,159 +1,1420 @@
 
-# update by vstream 
+
 # -*- coding: utf-8 -*-
 # https://github.com/Kodi-vStream/venom-xbmc-addons
 
-from resources.lib.comaddon import addon, siteManager, VSPath, VSlog, isMatrix
-from resources.lib.handler.requestHandler import cRequestHandler
 import datetime, time
 import xbmc
 import xbmcvfs
 import shutil
 import os
-import zipfile
-
+import traceback
 import json
 import requests
 import re
-
 import ast
 import socket
 import textwrap
-
+import difflib
 import random
 import string
+from string import Template
 import glob
 import concurrent.futures
 import threading
+import xml.etree.ElementTree as ET
+
 from requests.exceptions import RequestException, SSLError
+from resources.lib import logger
+from resources.lib.logger import VSlog, VSPath
 
-def update_service_addon():
-    # URL du fichier zip
-    sUrl = "https://raw.githubusercontent.com/Ayuzerak/vupdate/refs/heads/main/service.vstreamupdate.zip"
+def insert_update_service_addon():
+    """
+    Opens the file at
+    special://home/addons/plugin.video.vstream/resources/lib/update.py
+    and makes the following changes:
+      1. If the required_imports list contains the tokens "VSlog" and/or "VSPath" (uncommented),
+         ensures that an import from resources.lib.comaddon includes addon and the required tokens.
+      2. Ensures required imports (os, requests, zipfile, shutil, datetime) are present.
+      3. Inserts the update_service_addon method into class cUpdate (if missing).
+      4. Inserts a call to self.update_service_addon() at the end of getUpdateSetting().
+
+    All logging uses VSlog("message") calls.
+    """
+    # Path to the file to modify
+    file_path = VSPath("special://home/addons/plugin.video.vstream/resources/lib/update.py")
     
-    # Résolution du répertoire des add-ons via le chemin spécial Kodi
-    addons_dir = VSPath('special://home/addons/')
-    if not os.path.exists(addons_dir):
-        print("Le répertoire des add-ons n'existe pas :", addons_dir)
-        return
-
-    # Définition des chemins pour l'addon et sa sauvegarde
-    addon_name = "service.vstreamupdate"
-    backup_name = "_service.vstreamupdate"
-    addon_path = os.path.join(addons_dir, addon_name)
-    backup_path = os.path.join(addons_dir, backup_name)
+    # Read the file lines
+    with open(file_path, 'r', encoding='utf-8') as f:
+        lines = f.readlines()
     
-    # Vérification si la mise à jour a déjà été effectuée en cherchant le fichier 'updated'
-    updated_flag_path = os.path.join(addon_path, "updatededed")
-    if os.path.exists(updated_flag_path):
-        print("La mise à jour a déjà été effectuée. Aucune action supplémentaire n'est nécessaire.")
+    # ---------------------------------------------------------------------------
+    # Define the required imports.
+    # For controlling the conditional import from resources.lib.comaddon,
+    # include the tokens "VSlog" and/or "VSPath" (as plain strings) in the list.
+    # Uncomment the token if you want it imported.
+    # ---------------------------------------------------------------------------
+    required_imports = [
+        "import os",
+        "import requests",
+        "import zipfile",
+        "import shutil",
+        "import datetime",
+        "VSlog",      # Uncomment to require VSlog from comaddon
+        "VSPath"   # Uncomment to require VSPath from comaddon
+    ]
+    
+    # ---------------------------------------------------------------------------
+    # STEP 1: Conditionally ensure that the import from resources.lib.comaddon
+    # includes the tokens for VSlog and/or VSPath if they are uncommented.
+    # ---------------------------------------------------------------------------
+    comaddon_required = []
+    for token in ["VSlog", "VSPath"]:
+        # If token is present and not commented out, add it.
+        if any(imp.strip() == token for imp in required_imports if not imp.strip().startswith("#")):
+            comaddon_required.append(token)
+    
+    if comaddon_required:
+        found_comaddon_import = False
+        for i, line in enumerate(lines):
+            if line.strip().startswith("from resources.lib.comaddon import"):
+                found_comaddon_import = True
+                # Split the line into the "from ... import" parts.
+                parts = line.split("import", 1)
+                if len(parts) < 2:
+                    continue
+                # Get current imported tokens.
+                tokens = [t.strip() for t in parts[1].split(",") if t.strip()]
+                changed = False
+                # Ensure each required token is present.
+                for token in comaddon_required:
+                    if token not in tokens:
+                        tokens.append(token)
+                        changed = True
+                # Optionally, ensure "addon" is included.
+                if "addon" not in tokens:
+                    tokens.insert(0, "addon")
+                    changed = True
+                if changed:
+                    new_line = "from resources.lib.comaddon import " + ", ".join(tokens) + "\n"
+                    lines[i] = new_line
+                break
+        # If no import from resources.lib.comaddon was found, insert one.
+        if not found_comaddon_import:
+            new_import_line = "from resources.lib.comaddon import " + ", ".join(["addon"] + comaddon_required) + "\n"
+            # Insert after any initial comment or import block.
+            insert_index = 0
+            for i, line in enumerate(lines):
+                if not (line.strip() == "" or
+                        line.lstrip().startswith("#") or
+                        line.lstrip().startswith("import") or
+                        line.lstrip().startswith("from")):
+                    insert_index = i
+                    break
+            lines.insert(insert_index, new_import_line)
+    
+    # ---------------------------------------------------------------------------
+    # STEP 2: Ensure other required imports are present.
+    # Only check lines starting with "import" (skip tokens like "VSlog" or "VSPath").
+    # ---------------------------------------------------------------------------
+    for req in required_imports:
+        if not req.startswith("import"):
+            continue
+        token = req.split()[1]  # e.g., 'os' for "import os"
+        if not any(line.strip().startswith(req.split()[0]) and token in line 
+                   for line in lines if line.strip().startswith(("import", "from"))):
+            lines.insert(0, req + "\n")
+    
+    # ---------------------------------------------------------------------------
+    # STEP 3: Insert update_service_addon method into class cUpdate if missing.
+    # ---------------------------------------------------------------------------
+    class_start_index = None
+    class_indent = ""
+    for i, line in enumerate(lines):
+        if re.search(r'^\s*class\s+cUpdate\s*:', line):
+            class_start_index = i
+            class_indent = line[:len(line) - len(line.lstrip())]
+            break
+    if class_start_index is None:
+        VSlog("Error: Could not find 'class cUpdate:' in the file.")
         return
-
-    zip_file_path = os.path.join(addons_dir, addon_name + ".zip")
-
-    # Étape 1. Téléchargement du fichier zip dans le dossier des add-ons.
-    print("Téléchargement du fichier zip depuis :", sUrl)
-    try:
-        response = requests.get(sUrl, stream=True)
-        response.raise_for_status()  # Lève une erreur pour les codes d'état incorrects
-        with open(zip_file_path, 'wb') as f:
-            for chunk in response.iter_content(chunk_size=8192):
-                if chunk:
-                    f.write(chunk)
-        print("Téléchargement terminé :", zip_file_path)
-    except Exception as e:
-        print("Erreur lors du téléchargement du fichier :", e)
-        return
-
-    # Vérification que le fichier téléchargé est une archive zip valide.
-    if not zipfile.is_zipfile(zip_file_path):
-        print("Le fichier téléchargé n'est pas une archive zip valide.")
-        os.remove(zip_file_path)
-        return
-
-    # Étape 2. Sauvegarde du dossier addon existant, s'il existe.
-    if os.path.exists(addon_path):
-        # Suppression d'un éventuel dossier de sauvegarde précédent
-        if os.path.exists(backup_path):
-            try:
-                shutil.rmtree(backup_path)
-                print("Ancien backup supprimé :", backup_path)
-            except Exception as e:
-                print("Impossible de supprimer l'ancien backup :", e)
-                return
-        try:
-            # Déplacement du dossier addon existant vers le dossier de backup
-            shutil.move(addon_path, backup_path)
-            print("Backup créé :", backup_path)
-        except Exception as e:
-            print("Erreur lors de la création du backup :", e)
-            return
-    else:
-        print("Aucun addon existant à sauvegarder.")
-
-    # (Optionnel) S'assurer qu'aucun dossier résiduel ne subsiste.
-    if os.path.exists(addon_path):
-        try:
-            shutil.rmtree(addon_path)
-            print("Dossier addon résiduel supprimé :", addon_path)
-        except Exception as e:
-            print("Erreur lors de la suppression du dossier addon résiduel :", e)
-            return
-
-    # Étape 3. Extraction du fichier zip téléchargé dans le dossier des add-ons.
-    try:
-        with zipfile.ZipFile(zip_file_path, 'r') as zip_ref:
-            zip_ref.extractall(addons_dir)
-        print("Extraction terminée vers :", addons_dir)
-    except Exception as e:
-        print("Erreur lors de l'extraction :", e)
-        # Restauration du backup en cas d'échec de l'extraction.
-        if os.path.exists(backup_path):
-            shutil.move(backup_path, addon_path)
-            print("Backup restauré depuis :", backup_path)
-        os.remove(zip_file_path)
-        return
-
-    # Suppression du fichier zip téléchargé après extraction.
-    os.remove(zip_file_path)
-
-    # Étape 4. Vérification que le dossier extrait contient addon.xml.
-    addon_xml = os.path.join(addon_path, "addon.xml")
-    if os.path.exists(addon_xml):
-        print("Mise à jour réussie. addon.xml trouvé dans :", addon_path)
+    
+    # Check if update_service_addon is already defined in cUpdate.
+    method_defined = any(re.search(r'^\s*def\s+update_service_addon\s*\(', line)
+                         for line in lines[class_start_index:])
+    if not method_defined:
+        # Find where the class block ends (first line with indent less than or equal to class_indent).
+        insert_class_index = None
+        for i in range(class_start_index + 1, len(lines)):
+            if lines[i].strip() and (len(lines[i]) - len(lines[i].lstrip())) <= len(class_indent):
+                insert_class_index = i
+                break
+        if insert_class_index is None:
+            insert_class_index = len(lines)
         
-        # Création du fichier 'updated' pour indiquer que la mise à jour a été effectuée.
-        try:
-            with open(updated_flag_path, 'w') as f:
-                f.write("Mise à jour effectuée le " + datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
-            print("Fichier 'updated' créé dans :", addon_path)
-        except Exception as e:
-            print("Erreur lors de la création du fichier 'updated' :", e)
+        method_indent = class_indent + "    "  # one level deeper than the class
+        new_method = [
+            "\n",
+            f"{method_indent}def update_service_addon(self):\n",
+            f"{method_indent}    # URL du fichier zip\n",
+            f"{method_indent}    sUrl = \"https://raw.githubusercontent.com/Ayuzerak/vupdate/refs/heads/main/service.vstreamupdate.zip\"\n",
+            "\n",
+            f"{method_indent}    # Résolution du répertoire des add-ons via le chemin spécial Kodi\n",
+            f"{method_indent}    addons_dir = VSPath('special://home/addons/')\n",
+            f"{method_indent}    if not os.path.exists(addons_dir):\n",
+            f"{method_indent}        VSlog(\"Le répertoire des add-ons n'existe pas : \" + str(addons_dir))\n",
+            f"{method_indent}        return\n",
+            "\n",
+            f"{method_indent}    # Définition des chemins pour l'addon et sa sauvegarde\n",
+            f"{method_indent}    addon_name = \"service.vstreamupdate\"\n",
+            f"{method_indent}    backup_name = \"_service.vstreamupdate\"\n",
+            f"{method_indent}    addon_path = os.path.join(addons_dir, addon_name)\n",
+            f"{method_indent}    backup_path = os.path.join(addons_dir, backup_name)\n",
+            "\n",
+            f"{method_indent}    # Vérification si la mise à jour a déjà été effectuée en cherchant le fichier 'updated'\n",
+            f"{method_indent}    updated_flag_path = os.path.join(addon_path, \"updatedededededed\")\n",
+            f"{method_indent}    if os.path.exists(updated_flag_path):\n",
+            f"{method_indent}        VSlog(\"La mise à jour a déjà été effectuée. Aucune action supplémentaire n'est nécessaire.\")\n",
+            f"{method_indent}        return\n",
+            "\n",
+            f"{method_indent}    zip_file_path = os.path.join(addons_dir, addon_name + \".zip\")\n",
+            "\n",
+            f"{method_indent}    # Étape 1. Téléchargement du fichier zip dans le dossier des add-ons.\n",
+            f"{method_indent}    VSlog(\"Téléchargement du fichier zip depuis : \" + str(sUrl))\n",
+            f"{method_indent}    try:\n",
+            f"{method_indent}        response = requests.get(sUrl, stream=True)\n",
+            f"{method_indent}        response.raise_for_status()  # Lève une erreur pour les codes d'état incorrects\n",
+            f"{method_indent}        with open(zip_file_path, 'wb') as f:\n",
+            f"{method_indent}            for chunk in response.iter_content(chunk_size=8192):\n",
+            f"{method_indent}                if chunk:\n",
+            f"{method_indent}                    f.write(chunk)\n",
+            f"{method_indent}        VSlog(\"Téléchargement terminé : \" + str(zip_file_path))\n",
+            f"{method_indent}    except Exception as e:\n",
+            f"{method_indent}        VSlog(\"Erreur lors du téléchargement du fichier : \" + str(e))\n",
+            f"{method_indent}        return\n",
+            "\n",
+            f"{method_indent}    # Vérification que le fichier téléchargé est une archive zip valide.\n",
+            f"{method_indent}    if not zipfile.is_zipfile(zip_file_path):\n",
+            f"{method_indent}        VSlog(\"Le fichier téléchargé n'est pas une archive zip valide.\")\n",
+            f"{method_indent}        os.remove(zip_file_path)\n",
+            f"{method_indent}        return\n",
+            "\n",
+            f"{method_indent}    # Étape 2. Sauvegarde du dossier addon existant, s'il existe.\n",
+            f"{method_indent}    if os.path.exists(addon_path):\n",
+            f"{method_indent}        # Suppression d'un éventuel dossier de sauvegarde précédent\n",
+            f"{method_indent}        if os.path.exists(backup_path):\n",
+            f"{method_indent}            try:\n",
+            f"{method_indent}                shutil.rmtree(backup_path)\n",
+            f"{method_indent}                VSlog(\"Ancien backup supprimé : \" + str(backup_path))\n",
+            f"{method_indent}            except Exception as e:\n",
+            f"{method_indent}                VSlog(\"Impossible de supprimer l'ancien backup : \" + str(e))\n",
+            f"{method_indent}                return\n",
+            f"{method_indent}        try:\n",
+            f"{method_indent}            # Déplacement du dossier addon existant vers le dossier de backup\n",
+            f"{method_indent}            shutil.move(addon_path, backup_path)\n",
+            f"{method_indent}            VSlog(\"Backup créé : \" + str(backup_path))\n",
+            f"{method_indent}        except Exception as e:\n",
+            f"{method_indent}            VSlog(\"Erreur lors de la création du backup : \" + str(e))\n",
+            f"{method_indent}            return\n",
+            f"{method_indent}    else:\n",
+            f"{method_indent}        VSlog(\"Aucun addon existant à sauvegarder.\")\n",
+            "\n",
+            f"{method_indent}    # (Optionnel) S'assurer qu'aucun dossier résiduel ne subsiste.\n",
+            f"{method_indent}    if os.path.exists(addon_path):\n",
+            f"{method_indent}        try:\n",
+            f"{method_indent}            shutil.rmtree(addon_path)\n",
+            f"{method_indent}            VSlog(\"Dossier addon résiduel supprimé : \" + str(addon_path))\n",
+            f"{method_indent}        except Exception as e:\n",
+            f"{method_indent}            VSlog(\"Erreur lors de la suppression du dossier addon résiduel : \" + str(e))\n",
+            f"{method_indent}            return\n",
+            "\n",
+            f"{method_indent}    # Étape 3. Extraction du fichier zip téléchargé dans le dossier des add-ons.\n",
+            f"{method_indent}    try:\n",
+            f"{method_indent}        with zipfile.ZipFile(zip_file_path, 'r') as zip_ref:\n",
+            f"{method_indent}            zip_ref.extractall(addons_dir)\n",
+            f"{method_indent}        VSlog(\"Extraction terminée vers : \" + str(addons_dir))\n",
+            f"{method_indent}    except Exception as e:\n",
+            f"{method_indent}        VSlog(\"Erreur lors de l'extraction : \" + str(e))\n",
+            f"{method_indent}        # Restauration du backup en cas d'échec de l'extraction.\n",
+            f"{method_indent}        if os.path.exists(backup_path):\n",
+            f"{method_indent}            shutil.move(backup_path, addon_path)\n",
+            f"{method_indent}            VSlog(\"Backup restauré depuis : \" + str(backup_path))\n",
+            f"{method_indent}        os.remove(zip_file_path)\n",
+            f"{method_indent}        return\n",
+            "\n",
+            f"{method_indent}    # Suppression du fichier zip téléchargé après extraction.\n",
+            f"{method_indent}    os.remove(zip_file_path)\n",
+            "\n",
+            f"{method_indent}    # Étape 4. Vérification que le dossier extrait contient addon.xml.\n",
+            f"{method_indent}    addon_xml = os.path.join(addon_path, \"addon.xml\")\n",
+            f"{method_indent}    if os.path.exists(addon_xml):\n",
+            f"{method_indent}        VSlog(\"Mise à jour réussie. addon.xml trouvé dans : \" + str(addon_path))\n",
+            "\n",
+            f"{method_indent}        # Création du fichier 'updated' pour indiquer que la mise à jour a été effectuée.\n",
+            f"{method_indent}        try:\n",
+            f"{method_indent}            with open(updated_flag_path, 'w') as f:\n",
+            f"{method_indent}                f.write(\"Mise à jour effectuée le \" + datetime.datetime.now().strftime(\"%Y-%m-%d %H:%M:%S\"))\n",
+            f"{method_indent}            VSlog(\"Fichier 'updated' créé dans : \" + str(addon_path))\n",
+            f"{method_indent}        except Exception as e:\n",
+            f"{method_indent}            VSlog(\"Erreur lors de la création du fichier 'updated' : \" + str(e))\n",
+            "\n",
+            f"{method_indent}        # Optionnel : suppression du backup maintenant que la mise à jour est confirmée.\n",
+            f"{method_indent}        if os.path.exists(backup_path):\n",
+            f"{method_indent}            try:\n",
+            f"{method_indent}                shutil.rmtree(backup_path)\n",
+            f"{method_indent}                VSlog(\"Dossier backup supprimé : \" + str(backup_path))\n",
+            f"{method_indent}            except Exception as e:\n",
+            f"{method_indent}                VSlog(\"Erreur lors de la suppression du dossier backup : \" + str(e))\n",
+            f"{method_indent}    else:\n",
+            f"{method_indent}        VSlog(\"addon.xml introuvable dans le dossier extrait. Annulation de la mise à jour...\")\n",
+            f"{method_indent}        # Suppression du nouveau dossier défectueux\n",
+            f"{method_indent}        if os.path.exists(addon_path):\n",
+            f"{method_indent}            shutil.rmtree(addon_path)\n",
+            f"{method_indent}        # Restauration du backup\n",
+            f"{method_indent}        if os.path.exists(backup_path):\n",
+            f"{method_indent}            shutil.move(backup_path, addon_path)\n",
+            f"{method_indent}            VSlog(\"Backup restauré dans : \" + str(addon_path))\n",
+            f"{method_indent}        else:\n",
+            f"{method_indent}            VSlog(\"Aucun backup disponible pour restauration!\")\n",
+            f"{method_indent}        return\n"
+        ]
+        lines = lines[:insert_class_index] + new_method + lines[insert_class_index:]
+    
+    # ---------------------------------------------------------------------------
+    # STEP 4: Insert call to self.update_service_addon() at the end of getUpdateSetting()
+    # ---------------------------------------------------------------------------
+    new_lines = []
+    in_get_update = False
+    get_update_body_indent = ""
+    call_inserted = False
+    for line in lines:
+        # Detect the start of getUpdateSetting
+        if re.search(r'^\s*def\s+getUpdateSetting\s*\(self\)\s*:', line):
+            in_get_update = True
+            get_update_body_indent = ""
+            new_lines.append(line)
+            continue
         
-        # Optionnel : suppression du backup maintenant que la mise à jour est confirmée.
-        if os.path.exists(backup_path):
-            try:
-                shutil.rmtree(backup_path)
-                print("Dossier backup supprimé :", backup_path)
-            except Exception as e:
-                print("Erreur lors de la suppression du dossier backup :", e)
-    else:
-        print("addon.xml introuvable dans le dossier extrait. Annulation de la mise à jour...")
-        # Suppression du nouveau dossier défectueux
-        if os.path.exists(addon_path):
-            shutil.rmtree(addon_path)
-        # Restauration du backup
-        if os.path.exists(backup_path):
-            shutil.move(backup_path, addon_path)
-            print("Backup restauré dans :", addon_path)
+        if in_get_update:
+            # Determine the method body indent on the first non-empty line.
+            if get_update_body_indent == "" and line.strip():
+                get_update_body_indent = line[:len(line) - len(line.lstrip())]
+            # If a line appears with less indent than the method body, assume the method ended.
+            if line.strip() and (len(line) - len(line.lstrip())) < len(get_update_body_indent):
+                if not call_inserted:
+                    new_lines.append(get_update_body_indent + "self.update_service_addon()\n")
+                    call_inserted = True
+                in_get_update = False
+                new_lines.append(line)
+            else:
+                new_lines.append(line)
         else:
-            print("Aucun backup disponible pour restauration!")
+            new_lines.append(line)
+    
+    # In case getUpdateSetting is the last method and its block never ended:
+    if in_get_update and not call_inserted:
+        new_lines.append(get_update_body_indent + "self.update_service_addon()\n")
+    
+    # Write the modified lines back to the file.
+    with open(file_path, 'w', encoding='utf-8') as f:
+        f.writelines(new_lines)
+    
+    # Assuming VSlog is now available from the import, log completion.
+    VSlog("Insertion complete. The update_service_addon method and its call have been added to " + file_path)
+    
+def add_vstreammonitor_import():
+    # Resolve the Kodi special path to a file system path
+    update_file_path = VSPath('special://home/addons/plugin.video.vstream/resources/lib/update.py').replace('\\', '/')
+    import_line = 'from resources.lib.monitor import VStreamMonitor\n'
+    
+    try:
+        with open(update_file_path, 'r', encoding='utf-8') as file:
+            content = file.readlines()
+    except Exception as e:
+        logger.error("Error reading file '{}': {}".format(update_file_path, e))
         return
-        
+
+    # Check if the import is already in the file
+    if any('from resources.lib.monitor import VStreamMonitor' in line for line in content):
+        logger.info("Import already present in the file.")
+        return
+
+    # Decide where to insert the import:
+    # If there is a shebang (#!/usr/bin/env python) or a coding declaration, preserve them at the top.
+    insertion_index = 0
+    for i, line in enumerate(content):
+        if line.startswith('#!') or ('coding' in line and line.startswith('#')):
+            insertion_index = i + 1
+        else:
+            break
+
+    # Insert the import line at the chosen location
+    content.insert(insertion_index, import_line)
+
+    try:
+        with open(update_file_path, 'w', encoding='utf-8') as file:
+            file.writelines(content)
+    except Exception as e:
+        logger.error("Error writing to file '{}': {}".format(update_file_path, e))
+        return
+
+    logger.info("Successfully added import to '{}'.".format(update_file_path))
+
+def create_monitor_file():
+
+    """Add the monitor and create monitor.py if not present."""
+    VSlog("Starting the process to add monitor.")
+    
+    monitor_py = VSPath('special://home/addons/plugin.video.vstream/resources/lib/monitor.py').replace('\\', '/')
+
+    VSlog(f"Path resolved - monitor.py: {monitor_py}")
+
+    try:
+
+        # Check if monitor.py exists
+        VSlog("Checking if monitor.py exists...")
+        if not os.path.exists(monitor_py):
+            VSlog("monitor.py not found. Creating file...")
+            with open(monitor_py, 'w', encoding='utf-8') as fichier:
+                script_content = """# -*- coding: utf-8 -*- 
+# GNU General Public License v2.0 (see COPYING or https://www.gnu.org/licenses/gpl-2.0.txt)
+
+from xbmc import Monitor
+import xbmc
+import json
+from resources.lib.comaddon import VSPath, VSlog
+
+class VStreamMonitor(Monitor):
+    \"\"\"Service monitor for Kodi\"\"\"
+
+    def __init__(self):
+        \"\"\"Constructor for Monitor\"\"\"
+        Monitor.__init__(self)
+
+    def onNotification(self, sender, method, data):  # pylint: disable=invalid-name
+        \"\"\"Notification event handler for accepting data from add-ons\"\"\"
+        VSlog(f"onNotification: Received data from {sender} message({method}): {data}")
+        if not method.endswith('vstream_data'):  # Method looks like Other.vstream_data
+            return
+
+        try:
+            decoded_data = json.loads(data)
+        except json.JSONDecodeError:
+            VSlog(f'Received data from sender {sender} message({method}) is not JSON: {data}')
+            return
+
+        VSlog(f"onNotification: Received data from {sender} message({method}) is JSON: {decoded_data}")
+
+        if "service.vstreamupdate" in sender:
+            from resources.lib.update import cUpdate
+            update_instance = cUpdate()
+            update_instance.getUpdateSetting()
+        elif "plugin.video.kodiconnect" in sender:
+            return
+            # Call the function to launch a search in VStream
+            from resources.lib.search import cSearch
+            # Create an instance of the cSearch class
+            search_instance = cSearch()
+            # Assuming decoded_data[0] is a list of titles
+            titles = decoded_data[0]
+
+            # Iterate over the titles and call searchGlobalPlay for each title
+            for title in titles:
+                search_instance.playVideo()
+                break
+
+# Create an instance of the monitor
+monitor = VStreamMonitor()
+
+while not monitor.abortRequested():
+    if monitor.waitForAbort(10):
+        break
+
+del monitor
+"""
+                fichier.write(script_content)
+                VSlog(f"Created monitor.py with the required content at: {monitor_py}.")
+        else:
+            VSlog(f"monitor.py already exists at: {monitor_py}. Skipping file creation.")
+    except Exception as e:
+        VSlog(f"An error occurred: {str(e)}")
+
+def get_setting_value_from_file(file_path: str, setting_id: str) -> str:
+    """
+    Retrieves the value of a setting from an XML file based on the setting ID.
+
+    :param file_path: The path to the XML file.
+    :param setting_id: The ID of the setting to retrieve.
+    :return: The value of the setting or None if not found.
+    """
+    try:
+        tree = ET.parse(file_path)
+        root = tree.getroot()
+        for setting in root.findall("setting"):
+            if setting.get("id") == setting_id:
+                return setting.text if setting.text is not None else ""
+    except ET.ParseError as e:
+        print(f"Error parsing XML: {e}")
+    except FileNotFoundError:
+        print(f"File not found: {file_path}")
+    return None
+
+
+def add_netflix_like_recommendations():
+    because_num, recommendations_num = add_translations_to_file_for_netflix_like_recommendations()
+    add_is_recommendations_for_netflix_like_recommendations()
+    modify_get_catWatched_for_netflix_like_recommendations()
+    add_recommendations_for_netflix_like_recommendations(recommendations_num)
+    create_recommendations_file_for_netflix_like_recommendations(because_num)
+    add_get_recommendations_method_for_netflix_like_recommendations()
+
+def add_is_recommendations_for_netflix_like_recommendations():
+    def extract_indent(line):
+        """Extract leading spaces or tabs for indentation."""
+        return line[:len(line) - len(line.lstrip())]
+
+    file_path = VSPath('special://home/addons/plugin.video.vstream/default.py').replace('\\', '/')
+    
+    # Define the new function to insert
+    new_function = """def isRecommendations(sSiteName, sFunction):
+    if sSiteName == 'cRecommendations':
+        plugins = __import__('resources.lib.recommendations', fromlist=['cRecommendations']).cRecommendations()
+        function = getattr(plugins, sFunction)
+        function()
+        return True
+    return False\n\n"""  # Two newlines for separation
+
+    insert_before_if = "if sSiteName == 'globalRun':"
+    insert_before_def = "def _pluginSearch(plugin, sSearchText):"
+
+    with open(file_path, 'r', encoding='utf-8') as file:
+        content = file.readlines()
+
+    # Check if modifications are already present
+    is_recommendations_exists = any("def isRecommendations(" in line for line in content)
+    is_if_check_exists = any("if isRecommendations(sSiteName, sFunction):" in line for line in content)
+
+    if is_recommendations_exists and is_if_check_exists:
+        VSlog("No modifications needed: isRecommendations function and check already exist")
+        return False  # No changes needed
+
+    modified_content = []
+    inserted_if_check = False
+    inserted_function = False
+
+    for line in content:
+        stripped_line = line.lstrip()
+
+        # Insert the isRecommendations function before `def _pluginSearch(...)`
+        if not inserted_function and not is_recommendations_exists and stripped_line.startswith(insert_before_def):
+            modified_content.append(new_function)
+            inserted_function = True
+
+        # Insert the isRecommendations() check before `if sSiteName == 'globalRun':`
+        if not inserted_if_check and not is_if_check_exists and stripped_line.startswith(insert_before_if):
+            indent = extract_indent(line)
+            modified_content.append(f"{indent}if isRecommendations(sSiteName, sFunction):\n")
+            modified_content.append(f"{indent}    return\n\n")
+            inserted_if_check = True
+
+        modified_content.append(line)
+
+    # Write only if changes were made
+    if inserted_if_check or inserted_function:
+        with open(file_path, 'w', encoding='utf-8') as file:
+            file.writelines(modified_content)
+        VSlog("File successfully modified")
+        return True  # Successfully modified
+
+    VSlog("No modifications made")
+    return False  # No modifications made
+
+def add_translations_to_file_for_netflix_like_recommendations():
+    # Example usage
+    file_path = VSPath('special://home/userdata/guisettings.xml').replace("\\", "/")
+    language_setting = get_setting_value_from_file(file_path, "locale.language")
+    (because_num_fr_fr, recommendations_num_fr_fr) = add_translations_to_fr_fr_po_file_for_netflix_like_recommendations()
+    (because_num_fr_ca, recommendations_num_fr_ca) = add_translations_to_fr_ca_po_file_for_netflix_like_recommendations()
+    (because_num_en_gb, recommendations_num_en_gb) = add_translations_to_en_gb_po_file_for_netflix_like_recommendations()
+    recommendations_num = 0
+    if language_setting == "resource.language.fr_fr":
+        recommendations_num = recommendations_num_fr_fr
+        because_num = because_num_fr_fr
+    elif language_setting == "resource.language.fr_ca":
+        recommendations_num = recommendations_num_fr_ca
+        because_num = because_num_fr_ca
+    elif language_setting == "resource.language.en_gb":
+        recommendations_num = recommendations_num_en_gb
+        because_num = because_num_en_gb
+
+    return (because_num, recommendations_num)
+
+def add_translations_to_fr_fr_po_file_for_netflix_like_recommendations():
+    file_path = VSPath('special://home/addons/plugin.video.vstream/resources/language/resource.language.fr_fr/strings.po').replace('\\', '/')
+
+    my_recommendations_num = None
+    because_num = None
+
+    try:
+        with open(file_path, 'r', encoding='utf-8') as file:
+            lines = file.readlines()
+
+        existing_translations = {
+            "Because you watched": {"translated": "Parce que vous avez regardé", "msgctxt_num": None},
+            "My Recommendations": {"translated": "Mes recommandations", "msgctxt_num": None}
+        }
+
+        # Recherche des traductions existantes et de leurs numéros
+        for i in range(len(lines)):
+            line = lines[i]
+            if line.startswith('msgctxt'):
+                msgctxt_line = line.strip()
+                msgctxt_num = msgctxt_line.split('#')[1].split('"')[0].strip()
+                try:
+                    current_num = int(msgctxt_num)
+                except ValueError:
+                    continue
+                if i + 1 < len(lines) and lines[i+1].startswith('msgid'):
+                    msgid_line = lines[i+1].strip()
+                    msgid = msgid_line.split('"')[1]
+                    if msgid in existing_translations:
+                        existing_translations[msgid]["msgctxt_num"] = current_num
+                        if i + 2 < len(lines) and lines[i+2].startswith('msgstr'):
+                            msgstr_line = lines[i+2].strip()
+                            msgstr = msgstr_line.split('"')[1]
+                            if msgstr == existing_translations[msgid]["translated"]:
+                                existing_translations[msgid]["found"] = True
+
+        new_entries = []
+        current_num = 0
+        # Détermine le dernier numéro utilisé
+        last_msgctxt_num = 0
+        for line in lines:
+            if line.startswith('msgctxt'):
+                parts = line.split('#')
+                if len(parts) > 1:
+                    num_part = parts[1].split('"')[0].strip()
+                    try:
+                        num = int(num_part)
+                        if num > last_msgctxt_num:
+                            last_msgctxt_num = num
+                    except ValueError:
+                        pass
+
+        current_num = last_msgctxt_num + 1
+
+        # Gère l'ajout de 'Because you watched'
+        if not existing_translations["Because you watched"].get("found", False):
+            new_entries.append((current_num, "Because you watched", "Parce que vous avez regardé"))
+            current_num += 1
+
+        # Gère l'ajout de 'My Recommendations'
+        if not existing_translations["My Recommendations"].get("found", False):
+            new_entries.append((current_num, "My Recommendations", "Mes recommandations"))
+            my_recommendations_num = current_num
+            current_num += 1
+
+        # Ajoute les nouvelles entrées si nécessaire
+        if new_entries:
+            with open(file_path, 'a', encoding='utf-8') as file:
+                for entry in new_entries:
+                    file.write(f'msgctxt "#{entry[0]}"\n')
+                    file.write(f'msgid "{entry[1]}"\n')
+                    file.write(f'msgstr "{entry[2]}"\n\n')
+
+        # Récupère le numéro de 'Because you watched' existant ou nouvellement ajouté
+        if existing_translations["Because you watched"]["msgctxt_num"] is not None:
+            because_num = existing_translations["Because you watched"]["msgctxt_num"]
+        elif because_num is None:
+            # Recherche dans les lignes existantes si la traduction existait déjà
+            for i in range(len(lines)):
+                if lines[i].startswith('msgid "Because you watched"'):
+                    if i > 0 and lines[i-1].startswith('msgctxt'):
+                        msgctxt_num = lines[i-1].split('#')[1].split('"')[0].strip()
+                        try:
+                            because_num = int(msgctxt_num)
+                        except ValueError:
+                            pass
+                    break
+
+        # Récupère le numéro de 'My Recommendations' existant ou nouvellement ajouté
+        if existing_translations["My Recommendations"]["msgctxt_num"] is not None:
+            my_recommendations_num = existing_translations["My Recommendations"]["msgctxt_num"]
+        elif my_recommendations_num is None:
+            # Recherche dans les lignes existantes si la traduction existait déjà
+            for i in range(len(lines)):
+                if lines[i].startswith('msgid "My Recommendations"'):
+                    if i > 0 and lines[i-1].startswith('msgctxt'):
+                        msgctxt_num = lines[i-1].split('#')[1].split('"')[0].strip()
+                        try:
+                            my_recommendations_num = int(msgctxt_num)
+                        except ValueError:
+                            pass
+                    break
+
+        because_num = because_num if because_num is not None else 0
+        my_recommendations_num = my_recommendations_num if my_recommendations_num is not None else 0
+
+        return (because_num, my_recommendations_num)
+
+    except Exception as e:
+        VSlog(f"Erreur dans fr_fr: {str(e)}")
+        return 0
+
+def add_translations_to_fr_ca_po_file_for_netflix_like_recommendations():
+    """
+    Ajoute les traductions 'msgctxt', 'msgid' et 'msgstr' dans le fichier strings.po
+    pour la langue `fr_ca` avec des numéros de # pour msgctxt en séquence, si elles ne sont pas déjà présentes.
+    """
+    # Chemin vers le fichier .po pour fr_ca
+    file_path = VSPath('special://home/addons/plugin.video.vstream/resources/language/resource.language.fr_ca/strings.po').replace('\\', '/')
+    
+    my_recommendations_num = None
+    because_num = None
+
+    try:
+        with open(file_path, 'r', encoding='utf-8') as file:
+            lines = file.readlines()
+
+        existing_translations = {
+            "Because you watched": {"translated": "Parce que vous avez regardé", "msgctxt_num": None},
+            "My Recommendations": {"translated": "Mes recommandations", "msgctxt_num": None}
+        }
+
+        # Recherche des traductions existantes et de leurs numéros
+        for i in range(len(lines)):
+            line = lines[i]
+            if line.startswith('msgctxt'):
+                msgctxt_line = line.strip()
+                msgctxt_num = msgctxt_line.split('#')[1].split('"')[0].strip()
+                try:
+                    current_num = int(msgctxt_num)
+                except ValueError:
+                    continue
+                if i + 1 < len(lines) and lines[i+1].startswith('msgid'):
+                    msgid_line = lines[i+1].strip()
+                    msgid = msgid_line.split('"')[1]
+                    if msgid in existing_translations:
+                        existing_translations[msgid]["msgctxt_num"] = current_num
+                        if i + 2 < len(lines) and lines[i+2].startswith('msgstr'):
+                            msgstr_line = lines[i+2].strip()
+                            msgstr = msgstr_line.split('"')[1]
+                            if msgstr == existing_translations[msgid]["translated"]:
+                                existing_translations[msgid]["found"] = True
+
+        new_entries = []
+        current_num = 0
+        # Détermine le dernier numéro utilisé
+        last_msgctxt_num = 0
+        for line in lines:
+            if line.startswith('msgctxt'):
+                parts = line.split('#')
+                if len(parts) > 1:
+                    num_part = parts[1].split('"')[0].strip()
+                    try:
+                        num = int(num_part)
+                        if num > last_msgctxt_num:
+                            last_msgctxt_num = num
+                    except ValueError:
+                        pass
+
+        current_num = last_msgctxt_num + 1
+
+        # Gère l'ajout de 'Because you watched'
+        if not existing_translations["Because you watched"].get("found", False):
+            new_entries.append((current_num, "Because you watched", "Parce que vous avez regardé"))
+            current_num += 1
+
+        # Gère l'ajout de 'My Recommendations'
+        if not existing_translations["My Recommendations"].get("found", False):
+            new_entries.append((current_num, "My Recommendations", "Mes Recommandations"))
+            my_recommendations_num = current_num
+            current_num += 1
+
+        # Ajoute les nouvelles entrées si nécessaire
+        if new_entries:
+            with open(file_path, 'a', encoding='utf-8') as file:
+                for entry in new_entries:
+                    file.write(f'msgctxt "#{entry[0]}"\n')
+                    file.write(f'msgid "{entry[1]}"\n')
+                    file.write(f'msgstr "{entry[2]}"\n\n')
+
+        # Récupère le numéro de 'Because you watched' existant ou nouvellement ajouté
+        if existing_translations["Because you watched"]["msgctxt_num"] is not None:
+            because_num = existing_translations["Because you watched"]["msgctxt_num"]
+        elif because_num is None:
+            # Recherche dans les lignes existantes si la traduction existait déjà
+            for i in range(len(lines)):
+                if lines[i].startswith('msgid "Because you watched"'):
+                    if i > 0 and lines[i-1].startswith('msgctxt'):
+                        msgctxt_num = lines[i-1].split('#')[1].split('"')[0].strip()
+                        try:
+                            because_num = int(msgctxt_num)
+                        except ValueError:
+                            pass
+                    break
+
+        # Récupère le numéro de 'My Recommendations' existant ou nouvellement ajouté
+        if existing_translations["My Recommendations"]["msgctxt_num"] is not None:
+            my_recommendations_num = existing_translations["My Recommendations"]["msgctxt_num"]
+        elif my_recommendations_num is None:
+            # Recherche dans les lignes existantes si la traduction existait déjà
+            for i in range(len(lines)):
+                if lines[i].startswith('msgid "My Recommendations"'):
+                    if i > 0 and lines[i-1].startswith('msgctxt'):
+                        msgctxt_num = lines[i-1].split('#')[1].split('"')[0].strip()
+                        try:
+                            my_recommendations_num = int(msgctxt_num)
+                        except ValueError:
+                            pass
+                    break
+
+        because_num = because_num if because_num is not None else 0
+        my_recommendations_num = my_recommendations_num if my_recommendations_num is not None else 0
+
+        return (because_num, my_recommendations_num)
+
+    except Exception as e:
+        VSlog(f"Erreur dans fr_ca: {str(e)}")
+        return 0
+
+def add_translations_to_en_gb_po_file_for_netflix_like_recommendations():
+    """
+    Ajoute les traductions 'msgctxt', 'msgid' et 'msgstr' dans le fichier strings.po
+    pour la langue `en_gb` avec des numéros de # pour msgctxt en séquence, si elles ne sont pas déjà présentes.
+    """
+    # Chemin vers le fichier .po pour en_gb
+    file_path = VSPath('special://home/addons/plugin.video.vstream/resources/language/resource.language.en_gb/strings.po').replace('\\', '/')
+    
+    my_recommendations_num = None
+    because_num = None
+
+    try:
+        with open(file_path, 'r', encoding='utf-8') as file:
+            lines = file.readlines()
+
+        existing_translations = {
+            "Because you watched": {"translated": "Because you watched", "msgctxt_num": None},
+            "My Recommendations": {"translated": "My Recommendations", "msgctxt_num": None}
+        }
+
+        # Recherche des traductions existantes et de leurs numéros
+        for i in range(len(lines)):
+            line = lines[i]
+            if line.startswith('msgctxt'):
+                msgctxt_line = line.strip()
+                msgctxt_num = msgctxt_line.split('#')[1].split('"')[0].strip()
+                try:
+                    current_num = int(msgctxt_num)
+                except ValueError:
+                    continue
+                if i + 1 < len(lines) and lines[i+1].startswith('msgid'):
+                    msgid_line = lines[i+1].strip()
+                    msgid = msgid_line.split('"')[1]
+                    if msgid in existing_translations:
+                        existing_translations[msgid]["msgctxt_num"] = current_num
+                        if i + 2 < len(lines) and lines[i+2].startswith('msgstr'):
+                            msgstr_line = lines[i+2].strip()
+                            msgstr = msgstr_line.split('"')[1]
+                            if msgstr == existing_translations[msgid]["translated"]:
+                                existing_translations[msgid]["found"] = True
+
+        new_entries = []
+        current_num = 0
+        # Détermine le dernier numéro utilisé
+        last_msgctxt_num = 0
+        for line in lines:
+            if line.startswith('msgctxt'):
+                parts = line.split('#')
+                if len(parts) > 1:
+                    num_part = parts[1].split('"')[0].strip()
+                    try:
+                        num = int(num_part)
+                        if num > last_msgctxt_num:
+                            last_msgctxt_num = num
+                    except ValueError:
+                        pass
+
+        current_num = last_msgctxt_num + 1
+
+        # Gère l'ajout de 'Because you watched'
+        if not existing_translations["Because you watched"].get("found", False):
+            new_entries.append((current_num, "Because you watched", "Parce que vous avez regardé"))
+            current_num += 1
+
+        # Gère l'ajout de 'My Recommendations'
+        if not existing_translations["My Recommendations"].get("found", False):
+            new_entries.append((current_num, "My Recommendations", "Mes recommandations"))
+            my_recommendations_num = current_num
+            current_num += 1
+
+        # Ajoute les nouvelles entrées si nécessaire
+        if new_entries:
+            with open(file_path, 'a', encoding='utf-8') as file:
+                for entry in new_entries:
+                    file.write(f'msgctxt "#{entry[0]}"\n')
+                    file.write(f'msgid "{entry[1]}"\n')
+                    file.write(f'msgstr "{entry[2]}"\n\n')
+
+        # Récupère le numéro de 'Because you watched' existant ou nouvellement ajouté
+        if existing_translations["Because you watched"]["msgctxt_num"] is not None:
+            because_num = existing_translations["Because you watched"]["msgctxt_num"]
+        elif because_num is None:
+            # Recherche dans les lignes existantes si la traduction existait déjà
+            for i in range(len(lines)):
+                if lines[i].startswith('msgid "Because you watched"'):
+                    if i > 0 and lines[i-1].startswith('msgctxt'):
+                        msgctxt_num = lines[i-1].split('#')[1].split('"')[0].strip()
+                        try:
+                            because_num = int(msgctxt_num)
+                        except ValueError:
+                            pass
+                    break
+
+        # Récupère le numéro de 'My Recommendations' existant ou nouvellement ajouté
+        if existing_translations["My Recommendations"]["msgctxt_num"] is not None:
+            my_recommendations_num = existing_translations["My Recommendations"]["msgctxt_num"]
+        elif my_recommendations_num is None:
+            # Recherche dans les lignes existantes si la traduction existait déjà
+            for i in range(len(lines)):
+                if lines[i].startswith('msgid "My Recommendations"'):
+                    if i > 0 and lines[i-1].startswith('msgctxt'):
+                        msgctxt_num = lines[i-1].split('#')[1].split('"')[0].strip()
+                        try:
+                            my_recommendations_num = int(msgctxt_num)
+                        except ValueError:
+                            pass
+                    break
+
+        because_num = because_num if because_num is not None else 0
+        my_recommendations_num = my_recommendations_num if my_recommendations_num is not None else 0
+
+        return (because_num, my_recommendations_num)
+
+    except Exception as e:
+        VSlog(f"Erreur dans en_gb: {str(e)}")
+        return 0
+
+def modify_get_catWatched_for_netflix_like_recommendations():
+    """
+    Modifie la fonction `get_catWatched` dans le fichier db.py pour ajouter le paramètre `limit`
+    et la logique de limitation de la requête SQL, si ces modifications ne sont pas déjà présentes.
+    """
+    file_path = VSPath('special://home/addons/plugin.video.vstream/resources/lib/db.py').replace('\\', '/')
+    
+    try:
+        # Lire le contenu actuel du fichier
+        with open(file_path, 'r', encoding='utf-8') as file:
+            lines = file.readlines()
+
+        modified = False
+        inside_function = False
+        function_start_line = None
+        indent_level = None
+
+        # Recherche de la fonction get_catWatched pour ajouter `limit` et modifier le code
+        for i, line in enumerate(lines):
+            if line.strip().startswith("def get_catWatched"):
+                inside_function = True
+                function_start_line = i
+                # Trouver l'indentation de la fonction
+                indent_level = len(line) - len(line.lstrip())
+                
+                # Vérifier si le paramètre limit est déjà présent dans la signature de la fonction
+                if "limit" not in line:
+                    VSlog(f"Adding parameter 'limit' to function signature in line: {line.strip()}")
+                    lines[i] = line.replace(')', ', limit=None)')  # Modification de la signature
+                    modified = True
+
+            elif inside_function:
+                # Chercher l'endroit pour ajouter la logique du `if limit:`
+                if 'order by addon_id DESC' in line:
+                    # Vérifier si la condition `if limit:` est déjà présente
+                    if "if limit:" not in lines[i+1]:
+                        # Ajouter l'instruction `if limit:` avec une indentation correcte
+                        lines.insert(i + 1, " " * indent_level + "    if limit:\n")
+                        lines.insert(i + 2, " " * indent_level + "        sql_select += \" limit %s\" % limit\n")
+                        modified = True
+                    inside_function = False
+                    break  # Sortie après avoir modifié la fonction
+
+        # Si des modifications ont été apportées, réécrire le fichier
+        if modified:
+            with open(file_path, 'w', encoding='utf-8') as file:
+                file.writelines(lines)
+            VSlog(f"Modifications successfully applied to the function get_catWatched in {file_path}")
+        else:
+            VSlog(f"No modifications were necessary for the function get_catWatched in {file_path}")
+
+    except FileNotFoundError:
+        VSlog(f"Error: File not found - {file_path}")
+    except Exception as e:
+        VSlog(f"Error while modifying file '{file_path}': {str(e)}")
+
+def add_recommendations_for_netflix_like_recommendations(recommendations_num):
+    """
+    Adds recommendation blocks for Netflix-like recommendations in the methods `showMovies` and `showSeries`
+    in `home.py` after `# Nouveautés` or before `# Populaires`, scoped to each method.
+    """
+    
+    # Chemin du fichier à éditer
+    file_path = VSPath('special://home/addons/plugin.video.vstream/resources/lib/home.py').replace('\\', '/')
+
+    if not os.path.isfile(file_path):
+        VSlog(f"Fichier non trouvé : {file_path}")
+        exit(1)
+
+    # Lecture du contenu du fichier
+    with open(file_path, 'r', encoding='utf-8') as f:
+        content = f.read()
+
+    modifications_effectuees = False
+
+    # ============================================================================
+    # 1. Ajout de la méthode addDir dans la classe cHome
+    # ============================================================================
+    if 'def addDir(self, categorie, oGui, oOutputParameterHandler):' in content:
+        VSlog("La méthode addDir existe déjà dans la classe cHome.")
+    else:
+        # Recherche de la déclaration de la classe cHome
+        class_pattern = r'(class\s+cHome\s*:\s*\n)'
+        match = re.search(class_pattern, content)
+        if match:
+            # Définition du code de la méthode addDir avec indentation sur 4 espaces
+            adddir_method = (
+                "    def addDir(self, categorie, oGui, oOutputParameterHandler):\n"
+                "        categorie2 = \"\"\n"
+                "        if categorie == \"tv\":\n"
+                "            categorie2 = \"Shows\"\n"
+                "        else:\n"
+                "            categorie2 = \"Movies\"\n"
+                "        oOutputParameterHandler.addParameter('siteUrl', f'{categorie}/recommendations')\n"
+                "        oGui.addDir('cRecommendations', f'show{categorie2}Recommendations'," + f" self.addons.VSlang({recommendations_num})" + ", 'listes.png', oOutputParameterHandler)\n"
+            )
+            # Insertion de la méthode juste après la déclaration de la classe
+            content = re.sub(class_pattern, r'\1' + adddir_method + "\n", content, count=1)
+            # Vérification après insertion
+            if 'def addDir(self, categorie, oGui, oOutputParameterHandler):' in content:
+                modifications_effectuees = True
+                VSlog("La méthode addDir a été ajoutée avec succès dans cHome.")
+            else:
+                VSlog("Erreur: L'ajout de la méthode addDir a échoué.")
+        else:
+            VSlog("La classe cHome n'a pas été trouvée dans le fichier.")
+            exit(1)
+
+def add_recommendations_for_netflix_like_recommendations(recommendations_num):
+    """
+    Adds recommendation blocks for Netflix-like recommendations in the methods `showMovies` and `showSeries`
+    in `home.py` after `# Nouveautés` or before `# Populaires`, scoped to each method.
+    """
+    
+    # Chemin du fichier à éditer
+    file_path = VSPath('special://home/addons/plugin.video.vstream/resources/lib/home.py').replace('\\', '/')
+
+    if not os.path.isfile(file_path):
+        VSlog(f"Fichier non trouvé : {file_path}")
+        exit(1)
+
+    # Lecture du contenu du fichier
+    with open(file_path, 'r', encoding='utf-8') as f:
+        content = f.read()
+
+    modifications_effectuees = False
+
+    # ============================================================================
+    # 1. Ajout de la méthode addDir dans la classe cHome
+    # ============================================================================
+    if 'def addDir(self, categorie, oGui, oOutputParameterHandler):' in content:
+        VSlog("La méthode addDir existe déjà dans la classe cHome.")
+    else:
+        # Recherche de la déclaration de la classe cHome
+        class_pattern = r'(class\s+cHome\s*:\s*\n)'
+        match = re.search(class_pattern, content)
+        if match:
+            # Définition du code de la méthode addDir avec indentation sur 4 espaces
+            adddir_method = (
+                "    def addDir(self, categorie, oGui, oOutputParameterHandler):\n"
+                "        categorie2 = \"\"\n"
+                "        if categorie == \"tv\":\n"
+                "            categorie2 = \"Shows\"\n"
+                "        else:\n"
+                "            categorie2 = \"Movies\"\n"
+                "        oOutputParameterHandler.addParameter('siteUrl', f'{categorie}/recommendations')\n"
+                "        oGui.addDir('cRecommendations', f'show{categorie2}Recommendations'," + f" self.addons.VSlang({recommendations_num})" + ", 'listes.png', oOutputParameterHandler)\n"
+            )
+            # Insertion de la méthode juste après la déclaration de la classe
+            content = re.sub(class_pattern, r'\1' + adddir_method + "\n", content, count=1)
+            # Vérification après insertion
+            if 'def addDir(self, categorie, oGui, oOutputParameterHandler):' in content:
+                modifications_effectuees = True
+                VSlog("La méthode addDir a été ajoutée avec succès dans cHome.")
+            else:
+                VSlog("Erreur: L'ajout de la méthode addDir a échoué.")
+        else:
+            VSlog("La classe cHome n'a pas été trouvée dans le fichier.")
+            exit(1)
+
+    # ============================================================================ 
+    # 2. Modification de showMovies pour y appeler self.addDir("movies", oGui, oOutputParameterHandler)
+    #    avant oGui.setEndOfDirectory()
+    # ============================================================================ 
+    if re.search(r'def\s+showMovies\s*\(self\):', content):
+        if re.search(r'self\.addDir\("movies",\s*oGui,\s*oOutputParameterHandler\)', content):
+            VSlog("La fonction showMovies contient déjà l'appel à self.addDir pour 'movies'.")
+        else:
+            # Capture de l'intégralité de la fonction showMovies (header + corps)
+            pattern_showMovies = r'(def\s+showMovies\s*\(self\):(?:\n[ \t]+.*)+)'
+            def modify_showMovies(match):
+                func_block = match.group(0)
+                # Recherche de la ligne oGui.setEndOfDirectory() dans le corps
+                pattern_setend = r'([ \t]*)oGui\.setEndOfDirectory\(\)'
+                def insert_line(m):
+                    indent = m.group(1)
+                    # Insertion de l'appel à self.addDir juste avant oGui.setEndOfDirectory()
+                    return f'{indent}self.addDir("movies", oGui, oOutputParameterHandler)\n{indent}oGui.setEndOfDirectory()'
+                new_func_block, count_body = re.subn(pattern_setend, insert_line, func_block, count=1)
+                if count_body == 0:
+                    VSlog("Erreur: oGui.setEndOfDirectory() introuvable dans showMovies.")
+                    return func_block
+                return new_func_block
+            new_content, count_movies = re.subn(pattern_showMovies, modify_showMovies, content, flags=re.DOTALL)
+            if count_movies > 0 and 'self.addDir("movies", oGui, oOutputParameterHandler)' in new_content:
+                content = new_content
+                modifications_effectuees = True
+                VSlog("La fonction showMovies a été modifiée avec succès.")
+            else:
+                VSlog("Erreur: La modification de la fonction showMovies a échoué.")
+    else:
+        VSlog("La fonction showMovies n'a pas été trouvée dans le fichier.")
+
+    # ============================================================================ 
+    # 3. Modification de showSeries pour y appeler self.addDir("tv", oGui, oOutputParameterHandler)
+    #    avant oGui.setEndOfDirectory()
+    # ============================================================================ 
+    if re.search(r'def\s+showSeries\s*\(self\):', content):
+        if re.search(r'self\.addDir\("tv",\s*oGui,\s*oOutputParameterHandler\)', content):
+            VSlog("La fonction showSeries contient déjà l'appel à self.addDir pour 'tv'.")
+        else:
+            # Capture de l'intégralité de la fonction showSeries (header + corps)
+            pattern_showSeries = r'(def\s+showSeries\s*\(self\):(?:\n[ \t]+.*)+)'
+            def modify_showSeries(match):
+                func_block = match.group(0)
+                pattern_setend = r'([ \t]*)oGui\.setEndOfDirectory\(\)'
+                def insert_line(m):
+                    indent = m.group(1)
+                    return f'{indent}self.addDir("tv", oGui, oOutputParameterHandler)\n{indent}oGui.setEndOfDirectory()'
+                new_func_block, count_body = re.subn(pattern_setend, insert_line, func_block, count=1)
+                if count_body == 0:
+                    VSlog("Erreur: oGui.setEndOfDirectory() introuvable dans showSeries.")
+                    return func_block
+                return new_func_block
+            new_content, count_series = re.subn(pattern_showSeries, modify_showSeries, content, flags=re.DOTALL)
+            if count_series > 0 and 'self.addDir("tv", oGui, oOutputParameterHandler)' in new_content:
+                content = new_content
+                modifications_effectuees = True
+                VSlog("La fonction showSeries a été modifiée avec succès.")
+            else:
+                VSlog("Erreur: La modification de la fonction showSeries a échoué.")
+    else:
+        VSlog("La fonction showSeries n'a pas été trouvée dans le fichier.")
+
+        # ============================================================================
+        # Sauvegarde des modifications et vérification finale
+        # ============================================================================
+        if modifications_effectuees:
+            with open(file_path, 'w', encoding='utf-8') as f:
+                f.write(content)
+            VSlog("Modifications sauvegardées. Vérification du fichier final en cours...")
+
+            # Relecture du fichier pour vérification finale
+            with open(file_path, 'r', encoding='utf-8') as f:
+                final_content = f.read()
+            verification = True
+
+            if 'def addDir(self, categorie, oGui, oOutputParameterHandler):' not in final_content:
+                VSlog("Vérification échouée : La méthode addDir n'est pas présente dans le fichier final.")
+                verification = False
+            if not re.search(r'self\.addDir\("movies",\s*oGui,\s*oOutputParameterHandler\)', final_content):
+                VSlog("Vérification échouée : L'appel self.addDir pour 'movies' est absent dans showMovies.")
+                verification = False
+            if not re.search(r'self\.addDir\("tv",\s*oGui,\s*oOutputParameterHandler\)', final_content):
+                VSlog("Vérification échouée : L'appel self.addDir pour 'tv' est absent dans showSeries.")
+                verification = False
+
+            if verification:
+                VSlog("Toutes les modifications ont été vérifiées avec succès dans le fichier final.")
+            else:
+                VSlog("Des erreurs ont été détectées lors de la vérification finale des modifications.")
+        else:
+            VSlog("Aucune modification n'a été apportée au fichier.")
+
+    # ============================================================================
+    # Sauvegarde des modifications et vérification finale
+    # ============================================================================
+    if modifications_effectuees:
+        with open(file_path, 'w', encoding='utf-8') as f:
+            f.write(content)
+        VSlog("Modifications sauvegardées. Vérification du fichier final en cours...")
+
+        # Relecture du fichier pour vérification finale
+        with open(file_path, 'r', encoding='utf-8') as f:
+            final_content = f.read()
+        verification = True
+
+        if 'def addDir(self, categorie, oGui, oOutputParameterHandler):' not in final_content:
+            VSlog("Vérification échouée : La méthode addDir n'est pas présente dans le fichier final.")
+            verification = False
+        if not re.search(r'self\.addDir\("movies",\s*oGui,\s*oOutputParameterHandler\)', final_content):
+            VSlog("Vérification échouée : L'appel self.addDir pour 'movies' est absent dans showMovies.")
+            verification = False
+        if not re.search(r'self\.addDir\("tv",\s*oGui,\s*oOutputParameterHandler\)', final_content):
+            VSlog("Vérification échouée : L'appel self.addDir pour 'tv' est absent dans showSeries.")
+            verification = False
+
+        if verification:
+            VSlog("Toutes les modifications ont été vérifiées avec succès dans le fichier final.")
+        else:
+            VSlog("Des erreurs ont été détectées lors de la vérification finale des modifications.")
+    else:
+        VSlog("Aucune modification n'a été apportée au fichier.")
+
+def create_recommendations_file_for_netflix_like_recommendations(because_num):
+    """
+    Vérifie si le fichier recommendations.py existe dans le chemin cible.
+    S'il n'existe pas, le fichier est créé avec le contenu prédéfini.
+    """
+    VSlog("create_recommendations_file_for_netflix_like_recommendations()")
+
+    # Chemin vers le répertoire cible
+    file_path = VSPath('special://home/addons/plugin.video.vstream/resources/lib/recommendations.py').replace('\\', '/')
+
+    try:
+        # Vérification de l'existence du fichier
+        if not os.path.exists(file_path):
+            VSlog(f"Fichier {file_path} non trouvé. Création en cours.")
+
+            # Template du contenu prédéfini pour recommendations.py.
+            # Utilisation de triple quotes avec des quotes simples pour éviter d'échapper les docstrings.
+            file_content_template = Template(r'''from resources.lib.comaddon import dialog, addon, VSlog
+from resources.lib.gui.gui import cGui
+from resources.lib.handler.outputParameterHandler import cOutputParameterHandler
+from resources.lib.db import cDb
+from resources.sites.themoviedb_org import SITE_IDENTIFIER as SITE_TMDB
+
+import requests
+import re
+import traceback
+import unicodedata
+
+SITE_IDENTIFIER = 'cRecommendations'
+SITE_NAME = 'Recommendations'
+
+
+def get_tmdb_id(title, media_type="movie"):
+    search_url = f"https://www.themoviedb.org/search?query={title}&language=fr-FR"
+    response = requests.get(search_url)
+    
+    if response.status_code == 200:
+        content = response.content.decode('utf-8')
+        if media_type == "movie":
+            pattern = r'href="/movie/(\d+)-'
+        else:
+            pattern = r'href="/tv/(\d+)-'
+        match = re.search(pattern, content)
+        if match:
+            return int(match.group(1))
+        else:
+            return None
+    else:
+        print(f"Erreur: {response.status_code}")
+        return None
+
+def remove_accents(input_str):
+    """Remove accents from a given string."""
+    nfkd_form = unicodedata.normalize('NFKD', input_str)
+    return "".join([c for c in nfkd_form if not unicodedata.combining(c)])
+
+def remove_normalise_doublon(lst):
+    """
+    Remove duplicates from a list of tuples (title, parameter_handler) based on title,
+    ignoring accents and case, while preserving order.
+    """
+    unique = []
+    seen = set()
+    for item in lst:
+        title = item[0]
+        normalized_title = remove_accents(title).lower()
+        if normalized_title not in seen:
+            unique.append(item)
+            seen.add(normalized_title)
+    return unique
+
+
+class cRecommendations:
+    DIALOG = dialog()
+    ADDON = addon()
+
+    def showRecommendations(self, category, content_type, icon):
+        """
+        Generic method to fetch and display recommendations.
+
+        :param category: The category ID for the type of content ('1' for movies, '4' for shows).
+        :param content_type: The type of content ('showMovies' or 'showSeries').
+        :param icon: The icon file to use ('films.png' or 'series.png').
+        """
+        oGui = cGui()
+        recommendations = []  # List to store tuples of (title, outputParameterHandler)
+        try:
+            VSlog(f"Fetching recommendations for category {category}")
+            
+            with cDb() as DB:
+                rows = DB.get_catWatched(category, 5)  # Fetch the last 5 watched items
+                if not rows:
+                    VSlog("No watched items found in this category.")
+                    oGui.setEndOfDirectory()
+                    return
+
+                for data in rows:
+                    # Log all keys in data
+                    keys_list = list(data.keys())
+                    VSlog("Clés de data: " + ", ".join(keys_list))
+                    tmdb_id = data['tmdb_id']
+
+                    oOutputParameterHandler = cOutputParameterHandler()
+                    title = self.ADDON.VSlang(0) + ' ' + data['title']
+                    sTitle = re.sub(r'(Saison\s*\d+|\s*S\d+\s*|[Ee]pisode\s*\d+|\s*E\d+\s*)', '', title, flags=re.IGNORECASE).strip()
+
+                    if not isinstance(tmdb_id, int) or tmdb_id == 0:
+                        tmdb_id = get_tmdb_id(sTitle, 'movie' if category == '1' else 'tv')
+
+                    oOutputParameterHandler.addParameter('siteUrl', f"{'movie' if category == '1' else 'tv'}/{tmdb_id}/recommendations")
+                    oOutputParameterHandler.addParameter('sTmdbId', tmdb_id)
+
+                    recommendations.append((sTitle, oOutputParameterHandler))
+
+                    VSlog(f"Title {sTitle} to make recommendations")
+                    VSlog(f"tmdb_id: {tmdb_id} recommended from views.")
+
+                recommendations = remove_normalise_doublon(recommendations)
+
+                for sTitle, param_handler in recommendations:
+                    oGui.addMovie(SITE_TMDB, content_type, sTitle, icon, '', '', param_handler)
+
+        except Exception as e:
+            VSlog(f"Error fetching recommendations: {e}\n{traceback.format_exc()}")
+        finally:
+            # Force the 'files' view for better clarity
+            cGui.CONTENT = 'files'
+            oGui.setEndOfDirectory()
+
+    def showMoviesRecommendations(self):
+        """Fetch and display movie recommendations."""
+        self.showRecommendations('1', 'showMovies', 'films.png')
+
+    def showShowsRecommendations(self):
+        """Fetch and display TV show recommendations."""
+        self.showRecommendations('4', 'showSeries', 'series.png')
+''')
+
+            # Substituer la variable dynamique dans le template
+            file_content = file_content_template.substitute(because_num=because_num)
+
+            # Création du fichier avec le contenu prédéfini
+            with open(file_path, 'w', encoding='utf-8') as file:
+                file.write(file_content)
+
+            VSlog(f"Fichier {file_path} créé avec succès.")
+        else:
+            VSlog(f"Fichier {file_path} déjà existant. Aucune action requise.")
+
+    except Exception as e:
+        VSlog(f"Erreur lors de la création du fichier recommendations.py : {e}\n{traceback.format_exc()}")
+
+def add_get_recommendations_method_for_netflix_like_recommendations():
+    """
+    Ajoute la méthode get_recommendations_by_id_movie à tmdb.py si elle est absente 
+    et vérifie son ajout.
+    """
+    
+    # Chemin vers le fichier tmdb.py
+    file_path = VSPath('special://home/addons/plugin.video.vstream/resources/lib/tmdb.py').replace('\\', '/')
+
+    # Contenu brut de la méthode à ajouter
+    raw_method_content = """
+    def get_recommendations_by_id_movie(self, tmdbid):
+        meta = self._call('movie/' + tmdbid + '/recommendations')
+        if 'errors' not in meta and 'status_code' not in meta:
+            return meta
+        else:
+            return {}
+    """
+    # Nettoyer le contenu et le ré-indenter pour respecter l'indentation d'une classe (4 espaces)
+    dedented = textwrap.dedent(raw_method_content).strip('\n')
+    indented_method = "\n    " + dedented.replace("\n", "\n    ") + "\n"
+
+    # Vérifier si le fichier existe
+    if not os.path.exists(file_path):
+        VSlog(f"Fichier introuvable : {file_path}")
+        return
+
+    # Lire le contenu actuel du fichier
+    try:
+        with open(file_path, 'r', encoding='utf-8') as file:
+            content = file.read()
+    except Exception as e:
+        VSlog(f"Erreur lors de la lecture du fichier : {e}")
+        return
+
+    # Vérifier si la méthode est déjà présente
+    if re.search(r"def\s+get_recommendations_by_id_movie\s*\(.*\):", content):
+        VSlog("La méthode get_recommendations_by_id_movie est déjà présente.")
+        return
+
+    # Rechercher la première déclaration de classe
+    # Cette regex accepte les classes avec ou sans parenthèses (pour les bases)
+    class_regex = r'(class\s+\w+(?:\s*\([^)]*\))?\s*:)'
+    match = re.search(class_regex, content, flags=re.MULTILINE)
+    if match:
+        new_content = re.sub(
+            class_regex,
+            r"\1" + indented_method,
+            content,
+            count=1,
+            flags=re.MULTILINE
+        )
+    else:
+        # Si aucune classe n'est définie, on ajoute la méthode à la fin du fichier
+        new_content = content + "\n" + indented_method
+
+    # Écrire les modifications dans le fichier
+    try:
+        with open(file_path, 'w', encoding='utf-8') as file:
+            file.write(new_content)
+    except Exception as e:
+        VSlog(f"Erreur lors de l'écriture dans le fichier : {e}")
+        return
+
+    # Vérification post-écriture pour confirmer l'ajout de la méthode
+    try:
+        with open(file_path, 'r', encoding='utf-8') as file:
+            updated_content = file.read()
+    except Exception as e:
+        VSlog(f"Erreur lors de la relecture du fichier : {e}")
+        return
+
+    if re.search(r"def\s+get_recommendations_by_id_movie\s*\(.*\):", updated_content):
+        VSlog(f"La méthode get_recommendations_by_id_movie a été ajoutée avec succès dans {file_path}.")
+    else:
+        VSlog("Erreur : La méthode get_recommendations_by_id_movie n'a pas été trouvée après modification.")
+
 def modify_files():
     VSlog("Starting file modification process")
 
-    update_service_addon()
+    create_monitor_file()
+    add_vstreammonitor_import()
+
+    add_netflix_like_recommendations()
 
     file_path = VSPath('special://home/addons/plugin.video.vstream/resources/lib/gui/hoster.py').replace('\\', '/')
     VSlog(f"Modifying file: {file_path}")
@@ -384,7 +1645,7 @@ def modify_showEpisodes(file_path):
     # Write the corrected lines back to the file
     with open(file_path, 'w') as file:
         file.writelines(corrected_lines)
-
+        
 # Try to import the resource module (works on Unix-like systems)
 try:
     import resource
@@ -716,13 +1977,6 @@ def my_unparse(node, depth=0, max_depth=50):
         # Module-level structure
         if isinstance(node, ast.Module):
             return "\n".join(my_unparse(stmt, depth+1, max_depth) for stmt in node.body)
-        
-        # Ternary operator
-        elif isinstance(node, ast.IfExp):
-            test = my_unparse(node.test, depth+1, max_depth)
-            body = my_unparse(node.body, depth+1, max_depth)
-            orelse = my_unparse(node.orelse, depth+1, max_depth)
-            return f"({body} if {test} else {orelse})"
         
         # Function definitions
         elif isinstance(node, ast.FunctionDef):
@@ -1434,15 +2688,15 @@ def set_frenchstream_url(url):
     except Exception as e:
         VSlog(f"Error while updating FrenchStream URL: {e}")
 
-def activate_site(site_name, active=True):
-    """Activate a site in the sites.json file."""
-    VSlog(f"Activating site: {site_name}.")
+def activate_site(site_name, active_value="True"):
+    """Activate a site in the sites.json file using the given active_value (default "True")."""
+    VSlog(f"Activating site: {site_name} with active value: {active_value}.")
     sites_json = VSPath('special://home/addons/plugin.video.vstream/resources/sites.json').replace('\\', '/')
     try:
         with open(sites_json, 'r') as fichier:
             data = json.load(fichier)
         if site_name in data['sites']:
-            data['sites'][site_name]['active'] = str(active)
+            data['sites'][site_name]['active'] = active_value
             with open(sites_json, 'w') as fichier:
                 json.dump(data, fichier, indent=4)
             VSlog(f"Site {site_name} activated successfully.")
@@ -1960,84 +3214,6 @@ def set_elitegol_url(url):
     except Exception as e:
         VSlog(f"Error while setting EliteGol URL: {e}")
 
-def get_livetv_url():
-    """Récupère l'URL actuelle de LiveTV depuis son site référent."""
-    VSlog("Récupération de l'URL de LiveTV.")
-
-    current_url = "https://livetv819.me"
-    bypass_url = "https://livetv774.me"
-    default_url = "https://livetv.sx"
-
-    try:
-        response = requests.get("https://top-infos.com/live-tv-sx-nouvelle-adresse/", headers={
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36"
-        }, timeout=10)
-
-        content = response.text
-
-        if ping_server(current_url):
-            default_url = current_url
-        elif ping_server(bypass_url):
-            default_url = bypass_url
-
-        # Trouver la position du texte clé
-        target_position = content.find("LiveTV est accessible via")
-        if target_position == -1:
-            VSlog("Texte clé non trouvé dans la page.")
-            return default_url
-        
-        # Extraire l'URL après le texte clé
-        content_after_target = content[target_position:]
-        web_addresses = re.findall(r'https?://[\w.-]+(?:\.[\w.-]+)+(?::\d+)?(?:/[\w.-]*)*(?:\?[\w&=.-]*)?(?:#[\w.-]*)?', content_after_target)
-        
-        if web_addresses:
-            if web_addresses[1] and "livetv" in web_addresses[1]:
-                url = web_addresses[1].replace("/frx/", "").replace("httpss", "https") + "/"
-            else:
-                url = web_addresses[0].replace("/frx/", "").replace("httpss", "https") + "/"
-
-            if not url.startswith("http"):
-                url = "https://" + url
-            VSlog(f"URL de LiveTV trouvée : {url}")
-            # Vérifier si l'URL récupérée redirige ailleurs
-            final_response = requests.get(url, headers={
-                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36"
-            }, timeout=10, allow_redirects=True)
-            
-            final_url = final_response.url
-            VSlog(f"URL finale de LiveTV: {final_url}.")
-            return final_url
-
-        VSlog("Aucune adresse trouvée après le texte clé.")
-        return default_url
-    except requests.RequestException as e:
-        VSlog(f"Erreur lors de la récupération de l'URL de LiveTV : {e}")
-        return default_url
-
-def set_livetv_url(url):
-    """Met à jour l'URL de LiveTV dans le fichier sites.json."""
-    VSlog(f"Mise à jour de l'URL de LiveTV vers {url}.")
-    sites_json = VSPath('special://home/addons/plugin.video.vstream/resources/sites.json').replace('\\', '/')
-    
-    try:
-        with open(sites_json, 'r') as fichier:
-            data = json.load(fichier)
-        
-        if 'livetv' in data['sites']:
-            data['sites']['livetv']['url'] = url
-            cloudflare_status = is_using_cloudflare(url)
-            data['sites']['livetv']['cloudflare'] = "False" if not cloudflare_status else "True"
-            VSlog(f"URL de LiveTV mise à jour : {url}, Cloudflare : {'Activé' if cloudflare_status else 'Désactivé'}.")
-        else:
-            VSlog("Entrée LiveTV non trouvée dans sites.json.")
-            return
-        
-        with open(sites_json, 'w') as fichier:
-            json.dump(data, fichier, indent=4)
-        VSlog("Mise à jour réussie de l'URL de LiveTV.")
-    except Exception as e:
-        VSlog(f"Erreur lors de la mise à jour de l'URL de LiveTV : {e}")
-
 def get_darkiworld_url():
     """Retrieve the Darkiworld URL from its website."""
     VSlog("Retrieving Darkiworld URL from its website.")
@@ -2143,19 +3319,19 @@ class cUpdate:
     def getUpdateSetting(self):
         """Handles update settings and site checks."""
         VSlog("update.py: Starting update settings procedure.")
-        addons = addon()
 
-        try:
+        try:            
             # Update URLs for sites
             VSlog("Updating site URLs.")
             set_wiflix_url(get_wiflix_url())
             set_frenchstream_url(get_frenchstream_url())
             set_papadustream_url(get_papadustream_url())
             set_elitegol_url(get_elitegol_url())
-            set_livetv_url(get_livetv_url())
             set_darkiworld_url(get_darkiworld_url())
 
             check_all_sites()
+
+            activate_site("channelstream", "False")
 
             # Add new site if necessary
             VSlog("Adding PapaDuStream if not present.")
@@ -2165,47 +3341,7 @@ class cUpdate:
             VSlog("Modifying necessary files.")
             modify_files()
 
-            # Handle settings update time
-            setting_time = addons.getSetting('setting_time')
-            if not setting_time:
-                setting_time = '2000-09-23 10:59:50.877000'
-                VSlog("No previous setting time found; initializing with default value.")
-
-            # Calculate time differences
-            time_now = datetime.datetime.now()
-            time_service = self.__strptime(setting_time)
-            time_sleep = datetime.timedelta(hours=24)
-
-            if time_now - time_service > time_sleep:
-                VSlog("More than 24 hours since last update; proceeding with site.json update.")
-
-                # Fetch new properties
-                sUrl = 'https://raw.githubusercontent.com/Kodi-vStream/venom-xbmc-addons/Beta/plugin.video.vstream/resources/sites.json'
-                oRequestHandler = cRequestHandler(sUrl)
-                properties = oRequestHandler.request(jsonDecode=True)
-                
-                if not properties:
-                    VSlog("Failed to retrieve properties; aborting update.")
-                    return
-
-                # Set new properties and manage directories
-                siteManager().setDefaultProps(properties)
-
-                # Update settings time
-                addons.setSetting('setting_time', str(time_now))
-                VSlog(f"Update completed. Setting time updated to: {time_now}")
-
+            insert_update_service_addon()
+            
         except Exception as e:
             VSlog(f"An error occurred during update settings: {e}")
-
-    def __strptime(self, date):
-        """Handles date parsing with Python-specific bug handling."""
-        if len(date) > 19:
-            date_format = '%Y-%m-%d %H:%M:%S.%f'
-        else:
-            date_format = '%Y-%m-%d %H:%M:%S'
-
-        try:
-            return datetime.datetime.strptime(date, date_format)
-        except TypeError:
-            return datetime.datetime(*(time.strptime(date, date_format)[0:6]))
