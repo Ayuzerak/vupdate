@@ -2791,7 +2791,7 @@ def set_darkiworld_url(url):
 def get_livetv_url():
     current_url = "https://livetv819.me"
     bypass_url = "https://livetv774.me"
-    default_url = "https://livetv.sx"
+    default_url = "https://livetv.sx/frx/"
     url = ""
 
     def good_live_tv_url(test_url):
