@@ -2760,6 +2760,34 @@ def get_darkiworld_url():
         VSlog(f"Error while retrieving Darkiworld URL: {e}")
         return None
 
+def set_darkiworld_url(url):
+    """Set a new URL for Darkworld in the sites.json file."""
+    VSlog(f"Setting new Darkiworld URL to {url}.")
+    sites_json = VSPath('special://home/addons/plugin.video.vstream/resources/sites.json').replace('\\', '/')
+    
+    try:
+        # Load the JSON file
+        with open(sites_json, 'r') as fichier:
+            data = json.load(fichier)
+        
+        # Update the URL and cloudflare status
+        if 'darkiworld' in data['sites']:
+            data['sites']['darkiworld']['url'] = url
+            cloudflare_status = is_using_cloudflare(url)
+            data['sites']['darkiworld']['cloudflare'] = "False" if not cloudflare_status else "True"
+            VSlog(f"Updated Darkiworld URL to {url} with Cloudflare status: {'Enabled' if cloudflare_status else 'Disabled'}.")
+        else:
+            VSlog("Failed to find the Darkiworld entry.")
+            return
+        
+        # Save changes to the JSON file
+        with open(sites_json, 'w') as fichier:
+            json.dump(data, fichier, indent=4)
+        VSlog("Darkiworld URL updated successfully.")
+    
+    except Exception as e:
+        VSlog(f"Error while setting Darkiworld URL: {e}")
+
 def get_livetv_url():
     """Récupère l'URL actuelle de LiveTV depuis son site référent."""
     VSlog("Récupération de l'URL de LiveTV.")
@@ -2837,35 +2865,6 @@ def set_livetv_url(url):
         VSlog("Mise à jour réussie de l'URL de LiveTV.")
     except Exception as e:
         VSlog(f"Erreur lors de la mise à jour de l'URL de LiveTV : {e}")
-
-    
-def set_darkiworld_url(url):
-    """Set a new URL for Darkworld in the sites.json file."""
-    VSlog(f"Setting new Darkiworld URL to {url}.")
-    sites_json = VSPath('special://home/addons/plugin.video.vstream/resources/sites.json').replace('\\', '/')
-    
-    try:
-        # Load the JSON file
-        with open(sites_json, 'r') as fichier:
-            data = json.load(fichier)
-        
-        # Update the URL and cloudflare status
-        if 'darkiworld' in data['sites']:
-            data['sites']['darkiworld']['url'] = url
-            cloudflare_status = is_using_cloudflare(url)
-            data['sites']['darkiworld']['cloudflare'] = "False" if not cloudflare_status else "True"
-            VSlog(f"Updated Darkiworld URL to {url} with Cloudflare status: {'Enabled' if cloudflare_status else 'Disabled'}.")
-        else:
-            VSlog("Failed to find the Darkiworld entry.")
-            return
-        
-        # Save changes to the JSON file
-        with open(sites_json, 'w') as fichier:
-            json.dump(data, fichier, indent=4)
-        VSlog("Darkiworld URL updated successfully.")
-    
-    except Exception as e:
-        VSlog(f"Error while setting Darkiworld URL: {e}")
 
 # Thread lock to ensure thread-safe file access
 file_lock = threading.Lock()
