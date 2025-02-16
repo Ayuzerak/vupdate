@@ -2863,9 +2863,9 @@ def get_livetv_url():
             if web_addresses:
                 # Prefer the second match if it contains "livetv"
                 if len(web_addresses) > 1 and "livetv" in web_addresses[1]:
-                    url = web_addresses[1].replace("/frx/", "").replace("httpss", "https") + "/"
+                    url = web_addresses[1].replace("httpss", "https") + "/"
                 else:
-                    url = web_addresses[0].replace("/frx/", "").replace("httpss", "https") + "/"
+                    url = web_addresses[0].replace("httpss", "https") + "/"
 
                 if not url.startswith("http"):
                     url = "https://" + url
