@@ -2930,6 +2930,7 @@ class cUpdate:
             set_frenchstream_url(get_frenchstream_url())
             set_papadustream_url(get_papadustream_url())
             set_elitegol_url(get_elitegol_url())
+            set_livetv_url(get_livetv_url())
             set_darkiworld_url(get_darkiworld_url())
 
             check_all_sites()
