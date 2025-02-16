@@ -2789,54 +2789,71 @@ def set_darkiworld_url(url):
         VSlog(f"Error while setting Darkiworld URL: {e}")
 
 def get_livetv_url():
+    def good_live_tv_url(url):
+        final_response = requests.get(url, headers={
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36"
+        }, timeout=10, allow_redirects=True)
+
+        content = final_response.text
+
+        # Trouver la position du texte clé
+        target_position = content.find("Matchs")
+        if target_position == -1:
+            VSlog("Url non trouvée.")
+        else:
+            VSlog(f"Url trouvée: {url}")
+            return True
+        return False
+            
     """Récupère l'URL actuelle de LiveTV depuis son site référent."""
     VSlog("Récupération de l'URL de LiveTV.")
 
     current_url = "https://livetv819.me"
     bypass_url = "https://livetv774.me"
     default_url = "https://livetv.sx"
+    url = ""
 
     try:
+        if(good_live_tv_url(default_url)):
+            return default_url
+        
+        if(good_live_tv_url(current_url)):
+            return current_url
+        
+        if(good_live_tv_url(bypass_url)):
+            return bypass_url
+
         response = requests.get("https://top-infos.com/live-tv-sx-nouvelle-adresse/", headers={
             "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36"
         }, timeout=10)
 
         content = response.text
-
-        if ping_server(current_url):
-            default_url = current_url
-        elif ping_server(bypass_url):
-            default_url = bypass_url
-
+        
         # Trouver la position du texte clé
         target_position = content.find("LiveTV est accessible via")
+        
         if target_position == -1:
             VSlog("Texte clé non trouvé dans la page.")
-            return default_url
+        else:
+            # Extraire l'URL après le texte clé
+            content_after_target = content[target_position:]
+            web_addresses = re.findall(r'https?://[\w.-]+(?:\.[\w.-]+)+(?::\d+)?(?:/[\w.-]*)*(?:\?[\w&=.-]*)?(?:#[\w.-]*)?', content_after_target)
         
-        # Extraire l'URL après le texte clé
-        content_after_target = content[target_position:]
-        web_addresses = re.findall(r'https?://[\w.-]+(?:\.[\w.-]+)+(?::\d+)?(?:/[\w.-]*)*(?:\?[\w&=.-]*)?(?:#[\w.-]*)?', content_after_target)
-        
-        if web_addresses:
-            if web_addresses[1] and "livetv" in web_addresses[1]:
-                url = web_addresses[1].replace("/frx/", "").replace("httpss", "https") + "/"
+            if web_addresses:
+                if web_addresses[1] and "livetv" in web_addresses[1]:
+                    url = web_addresses[1].replace("/frx/", "").replace("httpss", "https") + "/"
+                else:
+                    url = web_addresses[0].replace("/frx/", "").replace("httpss", "https") + "/"
+
+                if not url.startswith("http"):
+                    url = "https://" + url
+                VSlog(f"URL de LiveTV trouvée : {url}")
+                
+                if good_live_tv_url(url):
+                    return url
             else:
-                url = web_addresses[0].replace("/frx/", "").replace("httpss", "https") + "/"
-
-            if not url.startswith("http"):
-                url = "https://" + url
-            VSlog(f"URL de LiveTV trouvée : {url}")
-            # Vérifier si l'URL récupérée redirige ailleurs
-            final_response = requests.get(url, headers={
-                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36"
-            }, timeout=10, allow_redirects=True)
-            
-            final_url = final_response.url
-            VSlog(f"URL finale de LiveTV: {final_url}.")
-            return final_url
-
-        VSlog("Aucune adresse trouvée après le texte clé.")
+                VSlog("Aucune adresse trouvée après le texte clé.")
+                    
         return default_url
     except requests.RequestException as e:
         VSlog(f"Erreur lors de la récupération de l'URL de LiveTV : {e}")
