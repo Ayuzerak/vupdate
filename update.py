@@ -686,6 +686,12 @@ class RegexTransformer(ast.NodeTransformer):
 # File Rewriting & CLI Handling
 ######################################
 
+def convert_ast_code(tree):
+    """"Helper function to unparse AST using custom Unparser"""
+    buffer = StringIO()
+    Unparser(tree, file=buffer)
+    return buffer.getvalue()
+
 def rewrite_file_to_avoid_regex_infinite_loops(file_path, dry_run=False, backup=False):
     """
     Rewrites the given file to avoid infinite loops in regular expressions.
@@ -708,7 +714,7 @@ def rewrite_file_to_avoid_regex_infinite_loops(file_path, dry_run=False, backup=
             new_code = ast.unparse(new_tree)
         else:
             VSlog("ast.unparse() not available; using custom unparser.")
-            new_code = my_unparse(new_tree)
+            new_code = convert_ast_code(new_tree)
 
         try:
             compile(new_code, file_path, 'exec')
