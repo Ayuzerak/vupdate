@@ -1468,11 +1468,6 @@ def set_elitegol_url(url):
         VSlog(f"Error while setting EliteGol URL: {e}")
 
 def get_livetv_url():
-    current_url = load_current_url()
-    bypass_url = "https://livetv774.me"
-    default_url = "https://livetv.sx/frx/"
-    url = ""
-
     CONFIG_FILE = "livetv_config.ini"
 
     def load_current_url():
@@ -1522,6 +1517,11 @@ def get_livetv_url():
             return True
 
     VSlog("Récupération de l'URL de LiveTV.")
+
+    current_url = load_current_url()
+    bypass_url = "https://livetv774.me"
+    default_url = "https://livetv.sx/frx/"
+    url = ""
 
     try:
         if good_live_tv_url(default_url):
