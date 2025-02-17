@@ -1516,66 +1516,6 @@ def get_livetv_url():
             VSlog(f"Url trouvée: {effective_url}")
             return True
 
-    VSlog("Récupération de l'URL de LiveTV.")
-
-    current_url = load_current_url()
-    bypass_url = "https://livetv774.me"
-    default_url = "https://livetv.sx/frx/"
-    url = ""
-
-    try:
-        if good_live_tv_url(default_url):
-            return default_url
-
-        if good_live_tv_url(current_url):
-            return current_url
-
-        if good_live_tv_url(bypass_url):
-            return bypass_url
-
-        response = requests.get(
-            "https://top-infos.com/live-tv-sx-nouvelle-adresse/",
-            headers={
-                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-                              "AppleWebKit/537.36 (KHTML, like Gecko) "
-                              "Chrome/91.0.4472.124 Safari/537.36"
-            },
-            timeout=10
-        )
-
-        content = response.text
-        target_position = content.find("LiveTV est accessible via")
-
-        if target_position == -1:
-            VSlog("Texte clé non trouvé dans la page.")
-        else:
-            content_after_target = content[target_position:]
-            web_addresses = re.findall(
-                r'https?://[\w.-]+(?:\.[\w.-]+)+(?::\d+)?(?:/[\w.-]*)*(?:\?[\w&=.-]*)?(?:#[\w.-]*)?',
-                content_after_target
-            )
-
-            if web_addresses:
-                # Prefer the second match if it contains "livetv"
-                if len(web_addresses) > 1 and "livetv" in web_addresses[1]:
-                    url = web_addresses[1].replace("httpss", "https") + "/"
-                else:
-                    url = web_addresses[0].replace("httpss", "https") + "/"
-
-                if not url.startswith("http"):
-                    url = "https://" + url
-                VSlog(f"URL de LiveTV trouvée : {url}")
-
-                if good_live_tv_url(url):
-                    return url
-            else:
-                VSlog("Aucune adresse trouvée après le texte clé.")
-
-        return default_url
-    except requests.RequestException as e:
-        VSlog(f"Erreur lors de la récupération de l'URL de LiveTV : {e}")
-        return default_url
-
 def set_livetv_url(url):
     """Met à jour l'URL de LiveTV dans le fichier sites.json."""
     VSlog(f"Mise à jour de l'URL de LiveTV vers {url}.")
