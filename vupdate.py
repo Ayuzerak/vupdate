@@ -1,6 +1,7 @@
 # -*- coding: utf-8 -*-
 # https://github.com/Kodi-vStream/venom-xbmc-addons
 
+import configparser
 import datetime, time
 import xbmc
 import xbmcvfs
@@ -2787,15 +2788,31 @@ def set_darkiworld_url(url):
     
     except Exception as e:
         VSlog(f"Error while setting Darkiworld URL: {e}")
-
+        
 def get_livetv_url():
-    current_url = "https://livetv819.me"
+    current_url = load_current_url()
     bypass_url = "https://livetv774.me"
     default_url = "https://livetv.sx/frx/"
     url = ""
 
+    CONFIG_FILE = "livetv_config.ini"
+
+    def load_current_url():
+        config = configparser.ConfigParser()
+        if os.path.exists(CONFIG_FILE):
+            config.read(CONFIG_FILE)
+            if "LiveTV" in config and "current_url" in config["LiveTV"]:
+                return config["LiveTV"]["current_url"]
+        # Fallback default value if not found in config
+        return "https://livetv819.me"
+
+    def save_current_url(url):
+        config = configparser.ConfigParser()
+        config["LiveTV"] = {"current_url": url}
+        with open(CONFIG_FILE, "w") as configfile:
+            config.write(configfile)
+
     def good_live_tv_url(test_url):
-        nonlocal current_url  # so we can update current_url if needed
         try:
             final_response = requests.get(
                 test_url,
@@ -2822,7 +2839,7 @@ def get_livetv_url():
             # If we're testing current_url and it got redirected, update it.
             if test_url == current_url and effective_url != test_url:
                 VSlog(f"Redirection détectée: {test_url} -> {effective_url}")
-                current_url = effective_url
+                save_current_url(effective_url)
             VSlog(f"Url trouvée: {effective_url}")
             return True
 
