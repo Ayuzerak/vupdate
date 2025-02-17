@@ -24,6 +24,7 @@ import string
 import glob
 import concurrent.futures
 import threading
+import configparser
 from requests.exceptions import RequestException, SSLError
 
 def update_service_addon():
