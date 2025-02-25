@@ -2053,6 +2053,49 @@ def add_parameter_to_function(file_path, function_name, parameter):
     except Exception as e:
         VSlog(f"Error while modifying file '{file_path}': {str(e)}")
 
+def add_parameter_to_function_call(file_path, function_name, parameter):
+    VSlog(f"Starting to add parameter '{parameter}' to calls of function '{function_name}' in file: {file_path}")
+    try:
+        with open(file_path, 'r', encoding='utf-8') as file:
+            lines = file.readlines()
+
+        modified = False
+        # This regex matches a function call like: function_name( ... )
+        # It captures the opening part, the content inside, and the closing parenthesis.
+        pattern = re.compile(rf'({function_name}\()\s*(.*?)\s*(\))')
+
+        def replacer(match):
+            start, inner, end = match.groups()
+            # If the parameter already appears in the call, leave it unchanged.
+            if parameter in inner:
+                return match.group(0)
+            # If there are no existing arguments, simply insert the parameter.
+            if inner.strip() == '':
+                return f'{start}{parameter}{end}'
+            else:
+                return f'{start}{inner}, {parameter}{end}'
+
+        with open(file_path, 'w', encoding='utf-8') as file:
+            for line in lines:
+                # Skip lines that define the function (i.e. lines starting with "def")
+                if f'{function_name}(' in line and not line.strip().startswith('def'):
+                    new_line = pattern.sub(replacer, line)
+                    if new_line != line:
+                        VSlog(f"Modifying function call in line: {line.strip()}")
+                        line = new_line
+                        modified = True
+                file.write(line)
+
+        if modified:
+            VSlog(f"Parameter '{parameter}' successfully added to calls of function '{function_name}' in file: {file_path}")
+        else:
+            VSlog(f"No modifications needed for calls of function '{function_name}' in file: {file_path}")
+
+    except FileNotFoundError:
+        VSlog(f"Error: File not found - {file_path}")
+    except Exception as e:
+        VSlog(f"Error while modifying file '{file_path}': {str(e)}")
+
 def ping_server(server: str, timeout=10, retries=1, backoff_factor=2, verify_ssl=True):
     """
     Ping server to check if it's reachable, with retry mechanism and optional SSL verification.
