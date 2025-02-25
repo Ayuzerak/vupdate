@@ -153,6 +153,8 @@ def update_service_addon():
 def modify_files():
     VSlog("Starting file modification process")
 
+    edit_live_file()
+
     update_service_addon()
 
     file_path = VSPath('special://home/addons/plugin.video.vstream/resources/lib/gui/hoster.py').replace('\\', '/')
@@ -1639,6 +1641,36 @@ def check_site(site_name, data):
 
     except Exception as e:
         VSlog(f"Error while checking site {site_name}: {e}")
+
+def edit_live_file():
+    file_path = VSPath('special://home/addons/plugin.video.vstream/resources/sites/livetv.py').replace('\\', '/')
+    
+    try:
+        # Read the file contents
+        with open(file_path, 'r', encoding='utf-8') as f:
+            content = f.read()
+    except Exception as e:
+        VSlog(f"Error reading file: {e}")
+        return
+
+    # Check if the file already includes .replace('frx/', '')
+    if ".replace('frx/', '')" in content:
+        VSlog("The file is already modified.")
+        return
+
+    # Replace the target string with the appended .replace('frx/', '')
+    new_content = content.replace(
+        "siteManager().getUrlMain(SITE_IDENTIFIER)",
+        "siteManager().getUrlMain(SITE_IDENTIFIER).replace('frx/', '')"
+    )
+
+    try:
+        # Write the updated content back to the file
+        with open(file_path, 'w', encoding='utf-8') as f:
+            f.write(new_content)
+        VSlog("File modified successfully.")
+    except Exception as e:
+        VSlog(f"Error writing file: {e}")
 
 class cUpdate:
 
