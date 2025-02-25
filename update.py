@@ -873,6 +873,127 @@ def add_condition_to_statement(file_path, target_line, condition_to_insert):
     except Exception as e:
         VSlog(f"Error while modifying file '{file_path}': {str(e)}")
 
+def add_codeblock_after_block(file_path, block_header, codeblock, insert_after_line=None):
+    """
+    Searches for a block in the file that starts with `block_header` (e.g. "def addVstreamVoiceControl():"),
+    then inserts the provided multi-line `codeblock` after a specified line within that block or (if not provided)
+    at the end of the block. The inserted code block is re-indented to match the insertion point. No changes are
+    made if an identical code block (line by line) is already present.
+    
+    :param file_path: Path to the file to modify.
+    :param block_header: A string representing the header of the block (e.g. "def addVstreamVoiceControl():").
+    :param codeblock: A multi-line string containing the code block to insert.
+    :param insert_after_line: (Optional) A string representing the line within the block after which to insert
+                              the code block. If not provided, the code block is added at the end of the block.
+    """
+    VSlog(f"Starting to add code block after block '{block_header}' in file: {file_path}")
+    try:
+        with open(file_path, 'r', encoding='utf-8') as f:
+            lines = f.readlines()
+
+        new_lines = []
+        modified = False
+        block_found = False
+        i = 0
+
+        while i < len(lines):
+            line = lines[i]
+            new_lines.append(line)
+
+            # Look for the block header
+            if not block_found and line.strip() == block_header.strip():
+                block_found = True
+                header_indent = len(line) - len(line.lstrip())
+                insertion_done = False
+                i += 1
+
+                # Process the block's body (lines indented more than the header)
+                while i < len(lines):
+                    next_line = lines[i]
+                    # Add blank lines without special processing.
+                    if next_line.strip() == "":
+                        new_lines.append(next_line)
+                        i += 1
+                        continue
+
+                    next_indent = len(next_line) - len(next_line.lstrip())
+                    if next_indent > header_indent:
+                        # Within the block.
+                        if (insert_after_line is not None and not insertion_done and 
+                            next_line.strip() == insert_after_line.strip()):
+                            # Found the specified insertion line.
+                            new_lines.append(next_line)
+                            i += 1
+                            insertion_indent = next_indent
+                            # Format the code block to be inserted with the insertion line's indent.
+                            formatted_codeblock_lines = []
+                            for cb_line in codeblock.splitlines():
+                                if cb_line.strip() == "":
+                                    formatted_codeblock_lines.append("\n")
+                                else:
+                                    formatted_codeblock_lines.append(" " * insertion_indent + cb_line.strip() + "\n")
+                            
+                            # Check if the code block is already present immediately after.
+                            already_present = True
+                            for j, fcbl in enumerate(formatted_codeblock_lines):
+                                if i + j >= len(lines) or lines[i + j].rstrip("\n") != fcbl.rstrip("\n"):
+                                    already_present = False
+                                    break
+                            
+                            if already_present:
+                                VSlog("Code block already present after the specified insertion line; skipping insertion.")
+                                i += len(formatted_codeblock_lines)
+                            else:
+                                new_lines.extend(formatted_codeblock_lines)
+                                VSlog("Inserted code block after the specified insertion line.")
+                                modified = True
+                            insertion_done = True
+                        else:
+                            new_lines.append(next_line)
+                            i += 1
+                    else:
+                        # End of the block reached.
+                        break
+
+                # If no insertion line was provided or it wasn't found, insert at the end of the block.
+                if (insert_after_line is None or not insertion_done):
+                    # Use a typical indent level for block bodies.
+                    insertion_indent = header_indent + 4
+                    formatted_codeblock_lines = []
+                    for cb_line in codeblock.splitlines():
+                        if cb_line.strip() == "":
+                            formatted_codeblock_lines.append("\n")
+                        else:
+                            formatted_codeblock_lines.append(" " * insertion_indent + cb_line.strip() + "\n")
+                    
+                    # Check if the code block is already present.
+                    already_present = True
+                    for j, fcbl in enumerate(formatted_codeblock_lines):
+                        if i + j >= len(lines) or lines[i + j].rstrip("\n") != fcbl.rstrip("\n"):
+                            already_present = False
+                            break
+                    if already_present:
+                        VSlog("Code block already present at the end of the block; skipping insertion.")
+                        i += len(formatted_codeblock_lines)
+                    else:
+                        new_lines.extend(formatted_codeblock_lines)
+                        VSlog("Inserted code block at the end of the block.")
+                        modified = True
+                continue  # Continue processing the rest of the file after handling the block
+            i += 1
+
+        if modified:
+            with open(file_path, 'w', encoding='utf-8') as f:
+                f.writelines(new_lines)
+            VSlog(f"File updated successfully with new code block after '{block_header}'.")
+        else:
+            VSlog("No modifications made to file.")
+
+    except FileNotFoundError:
+        VSlog(f"Error: File not found - {file_path}")
+    except Exception as e:
+        VSlog(f"Error while modifying file '{file_path}': {str(e)}")
+
 def ping_server(server: str, timeout=10, retries=1, backoff_factor=2, verify_ssl=True):
     """
     Ping server to check if it's reachable, with retry mechanism and optional SSL verification.
