@@ -875,13 +875,13 @@ def add_condition_to_statement(file_path, target_line, condition_to_insert):
 
 def add_codeblock_after_block(file_path, block_header, codeblock, insert_after_line=None):
     """
-    Searches for a block in the file that starts with `block_header` (e.g. "def addVstreamVoiceControl():"),
+    Searches for a block in the file that starts with `block_header` (e.g., "def addVstreamVoiceControl():"),
     then inserts the provided multi-line `codeblock` after a specified line within that block or (if not provided)
-    at the end of the block. The inserted code block is re-indented to match the insertion point. No changes are
+    at the end of the block. The inserted code block is re-indented to match the insertion point, preserving its internal indentation. No changes are
     made if an identical code block (line by line) is already present.
     
     :param file_path: Path to the file to modify.
-    :param block_header: A string representing the header of the block (e.g. "def addVstreamVoiceControl():").
+    :param block_header: A string representing the header of the block (e.g., "def addVstreamVoiceControl():").
     :param codeblock: A multi-line string containing the code block to insert.
     :param insert_after_line: (Optional) A string representing the line within the block after which to insert
                               the code block. If not provided, the code block is added at the end of the block.
@@ -928,10 +928,10 @@ def add_codeblock_after_block(file_path, block_header, codeblock, insert_after_l
                             # Format the code block to be inserted with the insertion line's indent.
                             formatted_codeblock_lines = []
                             for cb_line in codeblock.splitlines():
-                                if cb_line.strip() == "":
+                                if not cb_line.strip():
                                     formatted_codeblock_lines.append("\n")
                                 else:
-                                    formatted_codeblock_lines.append(" " * insertion_indent + cb_line.strip() + "\n")
+                                    formatted_codeblock_lines.append(" " * insertion_indent + cb_line + "\n")
                             
                             # Check if the code block is already present immediately after.
                             already_present = True
@@ -961,10 +961,10 @@ def add_codeblock_after_block(file_path, block_header, codeblock, insert_after_l
                     insertion_indent = header_indent + 4
                     formatted_codeblock_lines = []
                     for cb_line in codeblock.splitlines():
-                        if cb_line.strip() == "":
+                        if not cb_line.strip():
                             formatted_codeblock_lines.append("\n")
                         else:
-                            formatted_codeblock_lines.append(" " * insertion_indent + cb_line.strip() + "\n")
+                            formatted_codeblock_lines.append(" " * insertion_indent + cb_line + "\n")
                     
                     # Check if the code block is already present.
                     already_present = True
