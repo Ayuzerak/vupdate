@@ -2098,14 +2098,29 @@ def add_parameter_to_function_call(file_path, function_name, parameter):
 
 def add_condition_to_statement(file_path, target_line, condition_to_insert):
     """
-    Searches for lines that exactly match `target_line` and inserts the
-    `condition_to_insert` immediately above them if not already present.
-    The target line's indent is increased by one level (4 spaces) to nest it under the new condition.
+    Searches for lines that exactly match `target_line and inserts the`condition_to_insert` 
+    above them if not already present. The target line's indent is increased 
+    by one level to nest it under the new condition. Handles indentation
+    (tabs/spaces) and line endings correctly.
     """
+
     VSlog(f"Starting to insert condition '{condition_to_insert}' before lines containing '{target_line}' in file: {file_path}")
+    
     try:
-        with open(file_path, 'r', encoding='utf-8') as file:
-            lines = file.readlines()
+        # Read file with original line endings preserved
+        with open(file_path, 'rb') as file:
+            content = file.read().decode('utf-8')
+            lines = content.splitlines(True)  # Keep original line endings
+
+        # Detect dominant line ending
+        line_ending = '\n'
+        for line in lines:
+            if line.endswith('\r\n'):
+                line_ending = '\r\n'
+                break
+            elif line.endswith('\n'):
+                line_ending = '\n'
+                break
 
         modified = False
         new_lines = []
@@ -2113,37 +2128,53 @@ def add_condition_to_statement(file_path, target_line, condition_to_insert):
 
         while i < len(lines):
             line = lines[i]
-            # Check if the line (ignoring whitespace) matches the target line.
+            original_line_ending = line[-len(line_ending):] if line.endswith(line_ending) else line_ending
+            
+            # Original intentional behavior: match via line.strip()
             if line.strip() == target_line:
-                # Determine the current indentation of the target line.
-                current_indent = len(line) - len(line.lstrip())
-                # Check if the condition is already immediately above this target line.
-                if new_lines and new_lines[-1].strip() == condition_to_insert:
-                    new_lines.append(line)
-                else:
-                    # Insert the condition with the same base indentation.
-                    condition_line = " " * current_indent + condition_to_insert + "\n"
+                # Get existing indentation (spaces/tabs)
+                leading_whitespace = line[:len(line) - len(line.lstrip())]
+                uses_tabs = '\t' in leading_whitespace
+
+                # Check previous NON-BLANK lines for existing condition
+                condition_exists = False
+                for j in range(len(new_lines)-1, -1, -1):
+                    prev_line = new_lines[j].strip()
+                    if not prev_line:
+                        continue  # Skip blank lines
+                    # Match condition with same base indentation
+                    if prev_line == (leading_whitespace + condition_to_insert).strip():
+                        condition_exists = True
+                    break  # Stop at first non-blank line
+
+                if not condition_exists:
+                    # Use existing indentation type (tabs/spaces)
+                    indent = leading_whitespace + ('\t' if uses_tabs else '    ')
+                    
+                    # Preserve original line ending
+                    condition_line = f"{leading_whitespace}{condition_to_insert}{line_ending}"
+                    new_target_line = f"{indent}{line.lstrip().rstrip(line_ending)}{original_line_ending}"
+                    
                     new_lines.append(condition_line)
-                    # Increase the indent of the target line by one level (4 spaces)
-                    new_target_line = " " * (current_indent + 4) + line.lstrip()
                     new_lines.append(new_target_line)
-                    VSlog(f"Inserted condition '{condition_to_insert}' before: {target_line}")
                     modified = True
+                    VSlog(f"Inserted condition '{condition_to_insert}' before: {target_line}")
+                else:
+                    new_lines.append(line)
             else:
                 new_lines.append(line)
             i += 1
 
         if modified:
-            with open(file_path, 'w', encoding='utf-8') as file:
-                file.writelines(new_lines)
-            VSlog(f"Condition '{condition_to_insert}' inserted successfully before lines containing '{target_line}' in file: {file_path}")
-        else:
-            VSlog(f"No modifications needed in file: {file_path}")
+            # Write back with original line endings
+            with open(file_path, 'wb') as file:
+                file.write(''.join(new_lines).encode('utf-8'))
+            VSlog(f"Condition inserted successfully in file: {file_path}")
 
     except FileNotFoundError:
         VSlog(f"Error: File not found - {file_path}")
     except Exception as e:
-        VSlog(f"Error while modifying file '{file_path}': {str(e)}")
+        VSlog(f"Error modifying file: {str(e)}")
 
 def add_codeblock_after_block(file_path, block_header, codeblock, insert_after_line=None):
     """
