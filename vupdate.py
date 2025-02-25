@@ -2098,9 +2098,9 @@ def add_parameter_to_function_call(file_path, function_name, parameter):
 
 def add_condition_to_statement(file_path, target_line, condition_to_insert):
     """
-    Searches for lines that exactly match `target_line and inserts the`condition_to_insert` 
+    Searches for lines that match `target_line and inserts the`condition_to_insert` 
     above them if not already present. The target line's indent is increased 
-    by one level to nest it under the new condition. Handles indentation
+    by one level from it to nest it under the new condition. Handles indentation
     (tabs/spaces) and line endings correctly.
     """
 
