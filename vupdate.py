@@ -2096,6 +2096,55 @@ def add_parameter_to_function_call(file_path, function_name, parameter):
     except Exception as e:
         VSlog(f"Error while modifying file '{file_path}': {str(e)}")
 
+def add_condition_to_statement(file_path, target_line, condition_to_insert):
+    """
+    Searches for lines that exactly match `target_line` and inserts the
+    `condition_to_insert` immediately above them if not already present.
+    The target line's indent is increased by one level (4 spaces) to nest it under the new condition.
+    """
+    VSlog(f"Starting to insert condition '{condition_to_insert}' before lines containing '{target_line}' in file: {file_path}")
+    try:
+        with open(file_path, 'r', encoding='utf-8') as file:
+            lines = file.readlines()
+
+        modified = False
+        new_lines = []
+        i = 0
+
+        while i < len(lines):
+            line = lines[i]
+            # Check if the line (ignoring whitespace) matches the target line.
+            if line.strip() == target_line:
+                # Determine the current indentation of the target line.
+                current_indent = len(line) - len(line.lstrip())
+                # Check if the condition is already immediately above this target line.
+                if new_lines and new_lines[-1].strip() == condition_to_insert:
+                    new_lines.append(line)
+                else:
+                    # Insert the condition with the same base indentation.
+                    condition_line = " " * current_indent + condition_to_insert + "\n"
+                    new_lines.append(condition_line)
+                    # Increase the indent of the target line by one level (4 spaces)
+                    new_target_line = " " * (current_indent + 4) + line.lstrip()
+                    new_lines.append(new_target_line)
+                    VSlog(f"Inserted condition '{condition_to_insert}' before: {target_line}")
+                    modified = True
+            else:
+                new_lines.append(line)
+            i += 1
+
+        if modified:
+            with open(file_path, 'w', encoding='utf-8') as file:
+                file.writelines(new_lines)
+            VSlog(f"Condition '{condition_to_insert}' inserted successfully before lines containing '{target_line}' in file: {file_path}")
+        else:
+            VSlog(f"No modifications needed in file: {file_path}")
+
+    except FileNotFoundError:
+        VSlog(f"Error: File not found - {file_path}")
+    except Exception as e:
+        VSlog(f"Error while modifying file '{file_path}': {str(e)}")
+
 def ping_server(server: str, timeout=10, retries=1, backoff_factor=2, verify_ssl=True):
     """
     Ping server to check if it's reachable, with retry mechanism and optional SSL verification.
