@@ -751,7 +751,7 @@ def rewrite_file_to_avoid_regex_infinite_loops(file_path, dry_run=False, backup=
     except Exception as e:
         VSlog(f"Unexpected error while modifying file: {e}")
 
-def add_parameter_to_function(file_path, function_name, parameter):
+def add_parameter_to_function(file_path, function_name, parameter, after_parameter=None):
     VSlog(f"Starting to add parameter '{parameter}' to function '{function_name}' in file: {file_path}")
     try:
         with open(file_path, 'r', encoding='utf-8') as file:
@@ -761,13 +761,34 @@ def add_parameter_to_function(file_path, function_name, parameter):
 
         with open(file_path, 'w', encoding='utf-8') as file:
             for line in lines:
-                if line.strip().startswith(f'def {function_name}('):
+                stripped_line = line.strip()
+                if stripped_line.startswith(f"def {function_name}("):
+                    # Only modify if the parameter isn't already present
                     if parameter not in line:
-                        VSlog(f"Modifying line: {line.strip()}")
-                        # Find the position of the closing parenthesis
+                        VSlog(f"Modifying line: {stripped_line}")
+                        start_paren_index = line.find('(')
                         closing_paren_index = line.rfind(')')
-                        # Insert the new parameter before the closing parenthesis
-                        line = line[:closing_paren_index] + f', {parameter}' + line[closing_paren_index:]
+                        
+                        # Fallback if the parenthesis aren't found as expected
+                        if start_paren_index == -1 or closing_paren_index == -1:
+                            VSlog("Warning: Couldn't parse the function signature correctly. Appending parameter.")
+                            line = line.rstrip('\n')[:-1] + f', {parameter})\n'
+                        else:
+                            # Extract the existing parameters
+                            param_list_str = line[start_paren_index+1:closing_paren_index]
+                            params = [p.strip() for p in param_list_str.split(',') if p.strip()]
+                            
+                            if after_parameter and after_parameter in params:
+                                # Insert the new parameter right after the specified one
+                                index = params.index(after_parameter)
+                                params.insert(index + 1, parameter)
+                            else:
+                                # Append if no after_parameter is provided or it's not found
+                                params.append(parameter)
+                            
+                            # Reassemble the function definition with the new parameter list
+                            new_param_list = ', '.join(params)
+                            line = line[:start_paren_index+1] + new_param_list + line[closing_paren_index:]
                         modified = True
                 file.write(line)
 
