@@ -2096,89 +2096,126 @@ def add_parameter_to_function_call(file_path, function_name, parameter):
     except Exception as e:
         VSlog(f"Error while modifying file '{file_path}': {str(e)}")
 
-def add_condition_to_statement(file_path, target_line, condition_to_insert):
+def add_condition_to_statement(file_path, condition_to_insert, target_line, encoding='utf-8'):
     """
-    Reliably inserts condition before target lines while preserving file structure.
-    - Proper existing condition detection
-    - Accurate indentation handling
-    - Correct line ending preservation
+    Inserts a condition line before the target statement and re-indents the target line so it falls
+    inside the new block, but only if the condition is not already present in an outer block.
+    
+    Examples:
+    
+    1. Top-Level Statement
+       Before:
+           print("Hello, World!")
+       Call:
+           add_condition_to_statement(file_path, 'if condition:', 'print("Hello, World!")')
+       After:
+           if condition:
+               print("Hello, World!")
+    
+    2. Inside a Function
+       Before:
+           def foo():
+               print("Hello, World!")
+       Call:
+           add_condition_to_statement(file_path, 'if condition:', 'print("Hello, World!")')
+       After:
+           def foo():
+               if condition:
+                   print("Hello, World!")
+    
+    3. No Insertion When the Condition Exists in an Outer Block
+       Before:
+           if condition:
+               print("Hello, World!")
+       Call:
+           add_condition_to_statement(file_path, 'if condition:', 'print("Hello, World!")')
+       After:
+           if condition:
+               print("Hello, World!")
     """
     
     def detect_line_ending(content):
-        """Detects dominant line ending in file"""
+        """Detects the dominant line ending in the file."""
         crlf = content.count('\r\n')
         lf = content.count('\n') - crlf
         return '\r\n' if crlf > lf else '\n'
 
-    def find_existing_condition(lines, current_idx, condition, indent):
-        """Checks if condition exists above current line with same indentation"""
-        for i in range(current_idx-1, -1, -1):
-            stripped = lines[i].lstrip(' \t')
-            if not stripped:
+    def find_existing_condition(existing_lines, target_indent, condition):
+        """
+        Checks if a line equivalent to the condition exists in an outer block.
+        Only lines with indentation less than the target are considered.
+        """
+        condition_stripped = condition.strip()
+        target_indent_len = len(target_indent)
+        for line in existing_lines:
+            if not line.strip():
                 continue  # Skip blank lines
-            
-            # Check if line matches condition with exact indentation
-            if lines[i].startswith(indent) and stripped.startswith(condition):
+            line_indent = line[:len(line) - len(line.lstrip(' \t'))]
+            if len(line_indent) < target_indent_len and line.strip() == condition_stripped:
                 return True
-            break  # Stop at first non-blank line
         return False
 
     def determine_indentation(original_indent):
-        """Determines indentation strategy from existing whitespace"""
-        if '\t' in original_indent and ' ' in original_indent:
-            # Mixed: preserve existing pattern
-            return original_indent + original_indent[-1] * 4
-        elif '\t' in original_indent:
+        """
+        Determines the new indentation by following the existing pattern.
+        Appends one tab if tabs are used, or the same number of spaces if spaces are used.
+        """
+        if '\t' in original_indent:
             return original_indent + '\t'
-        else:  # Space-based
-            return original_indent + (' ' * 4)
+        else:
+            if not original_indent:
+                # Default to 4 spaces if no original indentation (top-level)
+                return '    '
+            # Append the same number of spaces as the original indentation
+            return original_indent + ' ' * len(original_indent)
 
     try:
-        # Read file with original structure
+        VSlog(f"Starting processing file: {file_path}")
+        # Read the file preserving its structure with the specified encoding.
         with open(file_path, 'rb') as f:
-            content = f.read().decode('utf-8')
-            line_ending = detect_line_ending(content)
-            lines = content.splitlines(True)  # Keep line endings
-
+            content = f.read().decode(encoding)
+        line_ending = detect_line_ending(content)
+        VSlog(f"Detected line ending as: {repr(line_ending)} in file: {file_path}")
+        lines = content.splitlines(True)  # Keep line endings
+        
         modified = False
         new_lines = []
-        line_iter = enumerate(lines)
 
-        for idx, line in line_iter:
-            # Check if current line matches target (ignore surrounding whitespace)
+        for line in lines:
+            # Check if the current line matches the target_line when both are stripped of whitespace.
             if line.rstrip('\r\n').strip() == target_line.strip():
-                # Capture original line ending
-                original_ending = line[len(line.rstrip('\r\n')):] if line.rstrip('\r\n') else line_ending
-
-                # Extract original indentation
+                # Determine the original indentation of the target line.
                 original_indent = line[:len(line) - len(line.lstrip(' \t'))]
-                required_condition = original_indent + condition_to_insert.lstrip(' \t') + original_ending
-                new_indent = determine_indentation(original_indent)
-
-                # Check for existing condition
-                if not find_existing_condition(new_lines, len(new_lines), condition_to_insert, original_indent):
-                    # Build modified lines
-                    condition_line = required_condition
-                    modified_line = new_indent + line.lstrip(' \t').rstrip('\r\n') + original_ending
-
+                # Check for existing condition in outer blocks.
+                if not find_existing_condition(new_lines, original_indent, condition_to_insert):
+                    # Build the condition line with the same indentation.
+                    condition_line = original_indent + condition_to_insert.strip() + line_ending
                     new_lines.append(condition_line)
+                    VSlog(f"Inserted condition line: '{condition_line.strip()}' before target line in file: {file_path}")
+                    # Increase the target line's indentation.
+                    new_indent = determine_indentation(original_indent)
+                    modified_line = new_indent + line.lstrip(' \t').rstrip('\r\n') + line_ending
                     new_lines.append(modified_line)
                     modified = True
                 else:
+                    VSlog(f"Condition already present in outer block for target line: '{line.rstrip()}'")
                     new_lines.append(line)
             else:
                 new_lines.append(line)
 
         if modified:
-            # Preserve original line endings for all lines
             with open(file_path, 'wb') as f:
-                f.write(''.join(new_lines).encode('utf-8'))
+                f.write(''.join(new_lines).encode(encoding))
+            VSlog(f"File '{file_path}' updated successfully with the new condition.")
             return True
+        else:
+            VSlog(f"No changes made to file '{file_path}' (condition may already exist or target not found).")
+            return False
 
     except Exception as e:
-        print(f"Error modifying file: {str(e)}")
+        VSlog(f"Error modifying file: {str(e)}")
         return False
-
+        
 def add_codeblock_after_block(file_path, block_header, codeblock, insert_after_line=None):
     """
     Searches for a block in the file that starts with `block_header` (e.g., "def addVstreamVoiceControl():"),
