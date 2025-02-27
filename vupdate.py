@@ -421,7 +421,6 @@ class VStreamMonitor(Monitor):
             update_instance = cUpdate()
             update_instance.getUpdateSetting()
         elif "plugin.video.kodiconnect" in sender:
-            return
             # Call the function to launch a search in VStream
             from resources.lib.search import cSearch
             # Create an instance of the cSearch class
