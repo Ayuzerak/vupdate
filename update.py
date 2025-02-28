@@ -1722,29 +1722,91 @@ def set_papadustream_url(url):
     except Exception as e:
         VSlog(f"Error while setting PapaDuStream URL: {e}")
 
+def get_darkiworld_url():
+    """Retrieve the Darkiworld URL from its website."""
+    VSlog("Retrieving Darkiworld URL from its website.")
+    try:
+        response = requests.get("https://www.julsa.fr/darkiworld-la-nouvelle-adresse-url-pour-acceder-au-site/")
+        content = response.text
+        target_position = content.find("Darkiworld, rendez-vous sur")
+        if target_position == -1:
+            VSlog("Target position 'Darkiworld, rendez-vous sur' not found in the response.")
+            return None
+        content_after_target = content[target_position:]
+        web_addresses = re.findall('href="(https?://[\\w.-]+(?:\\.[\\w\\.-]+)+(?:/[\\w\\.-]*)*)', content_after_target) 
+        if web_addresses:
+            url = web_addresses[0].replace("http", "https").replace("httpss", "https")
+            VSlog(f"Darkiworld URL found: {url}")
+            return url
+        VSlog("No web addresses found after 'Darkiworld'.")
+        return None
+    except requests.RequestException as e:
+        VSlog(f"Error while retrieving Darkiworld URL: {e}")
+        return None
+        
+def set_darkiworld_url(url):
+    """Set a new URL for Darkworld in the sites.json file."""
+    VSlog(f"Setting new Darkiworld URL to {url}.")
+    sites_json = VSPath('special://home/addons/plugin.video.vstream/resources/sites.json').replace('\\', '/')
+    
+    try:
+        # Load the JSON file
+        with open(sites_json, 'r') as fichier:
+            data = json.load(fichier)
+        
+        # Update the URL and cloudflare status
+        if 'darkiworld' in data['sites']:
+            data['sites']['darkiworld']['url'] = url
+            cloudflare_status = is_using_cloudflare(url)
+            data['sites']['darkiworld']['cloudflare'] = "False" if not cloudflare_status else "True"
+            VSlog(f"Updated Darkiworld URL to {url} with Cloudflare status: {'Enabled' if cloudflare_status else 'Disabled'}.")
+        else:
+            VSlog("Failed to find the Darkiworld entry.")
+            return
+        
+        # Save changes to the JSON file
+        with open(sites_json, 'w') as fichier:
+            json.dump(data, fichier, indent=4)
+        VSlog("Darkiworld URL updated successfully.")
+    
+    except Exception as e:
+        VSlog(f"Error while setting Darkiworld URL: {e}")
+
 def get_elitegol_url():
     """Retrieve EliteGol URL with content validation and fallback to saved URL."""
     VSlog("Starting EliteGol URL retrieval process")
     
+    CONFIG_FILE = VSPath('special://home/addons/service.vstreamupdate/site_config.ini').replace('\\', '/')
+
     def save_valid_url(url):
         try:
-            with open('last_valid.txt', 'w') as f:
-                f.write(url)
-                VSlog(f"Saved new valid URL: {url}")
-        except Exception as e:
-            VSlog(f"URL save error: {str(e)}")
+            config = configparser.ConfigParser()
+            config["elitgol"] = {"current_url": url}
+            with open(CONFIG_FILE, "w") as configfile:
+                config.write(configfile)
     
     def load_and_validate_url():
+
+        default_url = 'https://jokertv.ru/'
+
+        def load_and_validate_default_url():
+            if validate_url_content(default_url):
+                return default_url
+
         try:
-            with open('last_valid.txt', 'r') as f:
-                saved_url = f.read().strip()
-                if validate_url_content(saved_url):
-                    return saved_url
+            config = configparser.ConfigParser()
+            if os.path.exists(CONFIG_FILE):
+                config.read(CONFIG_FILE)
+                if "elitgol" in config and "current_url" in config["elitgol"]:
+                    saved_url = config["elitgol"]["current_url"]
+                else:
+                    load_and_validate_default_url()
         except FileNotFoundError:
             VSlog("No saved URL file found")
+            load_and_validate_default_url()
         except Exception as e:
             VSlog(f"URL load error: {str(e)}")
-        return None
+            load_and_validate_default_url()
     
     def validate_url_content(url):
         try:
@@ -1836,22 +1898,22 @@ def set_elitegol_url(url):
     
     except Exception as e:
         VSlog(f"Error while setting EliteGol URL: {e}")
-
+        
 def get_livetv_url():
-    CONFIG_FILE = "livetv_config.ini"
+    CONFIG_FILE = VSPath('special://home/addons/service.vstreamupdate/site_config.ini').replace('\\', '/')
 
     def load_current_url():
         config = configparser.ConfigParser()
         if os.path.exists(CONFIG_FILE):
             config.read(CONFIG_FILE)
-            if "LiveTV" in config and "current_url" in config["LiveTV"]:
-                return config["LiveTV"]["current_url"]
+            if "livetv" in config and "current_url" in config["livetv"]:
+                return config["livetv"]["current_url"]
         # Fallback default value if not found in config
         return "https://livetv819.me"
 
     def save_current_url(url):
         config = configparser.ConfigParser()
-        config["LiveTV"] = {"current_url": url}
+        config["livetv"] = {"current_url": url}
         with open(CONFIG_FILE, "w") as configfile:
             config.write(configfile)
 
@@ -1969,56 +2031,6 @@ def set_livetv_url(url):
         VSlog("Mise à jour réussie de l'URL de LiveTV.")
     except Exception as e:
         VSlog(f"Erreur lors de la mise à jour de l'URL de LiveTV : {e}")
-
-def get_darkiworld_url():
-    """Retrieve the Darkiworld URL from its website."""
-    VSlog("Retrieving Darkiworld URL from its website.")
-    try:
-        response = requests.get("https://www.julsa.fr/darkiworld-la-nouvelle-adresse-url-pour-acceder-au-site/")
-        content = response.text
-        target_position = content.find("Darkiworld, rendez-vous sur")
-        if target_position == -1:
-            VSlog("Target position 'Darkiworld, rendez-vous sur' not found in the response.")
-            return None
-        content_after_target = content[target_position:]
-        web_addresses = re.findall('href="(https?://[\\w.-]+(?:\\.[\\w\\.-]+)+(?:/[\\w\\.-]*)*)', content_after_target) 
-        if web_addresses:
-            url = web_addresses[0].replace("http", "https").replace("httpss", "https")
-            VSlog(f"Darkiworld URL found: {url}")
-            return url
-        VSlog("No web addresses found after 'Darkiworld'.")
-        return None
-    except requests.RequestException as e:
-        VSlog(f"Error while retrieving Darkiworld URL: {e}")
-        return None
-    
-def set_darkiworld_url(url):
-    """Set a new URL for Darkworld in the sites.json file."""
-    VSlog(f"Setting new Darkiworld URL to {url}.")
-    sites_json = VSPath('special://home/addons/plugin.video.vstream/resources/sites.json').replace('\\', '/')
-    
-    try:
-        # Load the JSON file
-        with open(sites_json, 'r') as fichier:
-            data = json.load(fichier)
-        
-        # Update the URL and cloudflare status
-        if 'darkiworld' in data['sites']:
-            data['sites']['darkiworld']['url'] = url
-            cloudflare_status = is_using_cloudflare(url)
-            data['sites']['darkiworld']['cloudflare'] = "False" if not cloudflare_status else "True"
-            VSlog(f"Updated Darkiworld URL to {url} with Cloudflare status: {'Enabled' if cloudflare_status else 'Disabled'}.")
-        else:
-            VSlog("Failed to find the Darkiworld entry.")
-            return
-        
-        # Save changes to the JSON file
-        with open(sites_json, 'w') as fichier:
-            json.dump(data, fichier, indent=4)
-        VSlog("Darkiworld URL updated successfully.")
-    
-    except Exception as e:
-        VSlog(f"Error while setting Darkiworld URL: {e}")
 
 # Thread lock to ensure thread-safe file access
 file_lock = threading.Lock()
