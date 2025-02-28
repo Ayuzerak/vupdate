@@ -1688,9 +1688,9 @@ class cSearch:
         values = searchResults.values()
         for result in values:
             numberResult += len(result)
-        message = "\n"
+        message = "\\n"
         message += (self.addons.VSlang(31209) % numberResult)
-        message += "\n"
+        message += "\\n"
         message += (self.addons.VSlang(31208) % (", ".join(self.listRemainingPlugins[0:7])))
         if len(self.listRemainingPlugins) > 7:
             message += ", ..."
