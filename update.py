@@ -1194,20 +1194,25 @@ def set_wiflix_url(url):
 def get_wiflix_url():
     """Retrieve the Wiflix URL from its website."""
     VSlog("Retrieving Wiflix URL from its website.")
+    sites_json = VSPath('special://home/addons/plugin.video.vstream/resources/sites.json').replace('\\','/')
     try:
-        response = requests.get("http://www.wiflix.name")
-        content = response.text
-        target_position = content.find("NOS SITES")
-        if target_position == -1:
-            VSlog("Target position 'NOS SITES' not found in the response.")
-            return None
-        content_before_target = content[target_position:]
-        web_addresses = re.findall('href="(https?://[\\w.-]+(?:\\.[\\w\\.-]+)+(?:/[\\w\\.-]*)*)', content_before_target)
-        if web_addresses:
-            url = web_addresses[0].replace("http", "https").replace("httpss", "https") + "/"
+        with open(sites_json, 'r') as fichier:
+            data = json.load(fichier)
+        if 'wiflix' in data['sites']:
+            site_info_new_address = data['sites']['wiflix']['site_info']
+
+        response = requests.get(site_info_new_address)
+        html_content = response.text
+
+        # Rechercher l'URL dans l'attribut onclick
+        match = re.search(r"window\.location\.href='(.*?)'", html_content)
+
+        # Extraire et afficher l'URL si elle existe
+        if match:
+            url = match.group(1).replace("http", "https").replace("httpss", "https") + "/"
             VSlog(f"Wiflix URL found: {url}")
             return url
-        VSlog("No web addresses found after 'NOS SITES'.")
+        VSlog("No web addresses found..")
         return None
     except requests.RequestException as e:
         VSlog(f"Error while retrieving Wiflix URL: {e}")
