@@ -3,6 +3,7 @@
 
 import configparser
 import datetime, time
+from datetime import datetime
 import xbmc
 import xbmcvfs
 import shutil
@@ -21,13 +22,15 @@ from string import Template
 import glob
 import concurrent.futures
 import threading
+import tokenize
 import xml.etree.ElementTree as ET
 
 from requests.exceptions import RequestException, SSLError
 from resources.lib import logger
 from resources.lib.logger import VSlog, VSPath
 
-from io import StringIO
+from io import StringIO, BytesIO
+from functools import lru_cache
 
 from resources.lib.unparser import Unparser
 
