@@ -845,125 +845,131 @@ def add_parameter_to_function_call(file_path, function_name, parameter):
     except Exception as e:
         VSlog(f"Error while modifying file '{file_path}': {str(e)}")
 
-def add_condition_to_statement(file_path, condition_to_insert, target_line, encoding='utf-8'):
+def add_condition_to_statement(file_path, condition_to_insert, target_line, 
+                               parent_blocks=None, encoding='utf-8'):
     """
-    Inserts a condition line before the target statement and re-indents the target line so it falls
-    inside the new block, but only if the condition is not already present in an outer block.
-    
-    Examples:
-    
-    1. Top-Level Statement
-       Before:
-           print("Hello, World!")
-       Call:
-           add_condition_to_statement(file_path, 'if condition:', 'print("Hello, World!")')
-       After:
-           if condition:
-               print("Hello, World!")
-    
-    2. Inside a Function
-       Before:
-           def foo():
-               print("Hello, World!")
-       Call:
-           add_condition_to_statement(file_path, 'if condition:', 'print("Hello, World!")')
-       After:
-           def foo():
-               if condition:
-                   print("Hello, World!")
-    
-    3. No Insertion When the Condition Exists in an Outer Block
-       Before:
-           if condition:
-               print("Hello, World!")
-       Call:
-           add_condition_to_statement(file_path, 'if condition:', 'print("Hello, World!")')
-       After:
-           if condition:
-               print("Hello, World!")
-    """
-    
-    def detect_line_ending(content):
-        """Detects the dominant line ending in the file."""
-        crlf = content.count('\r\n')
-        lf = content.count('\n') - crlf
-        return '\r\n' if crlf > lf else '\n'
+    Inserts a conditional statement before a target line if variables of the condition
+    are defined in accessible scopes; then reindents the target accordingly.
+    If the condition is already present immediately above the target line, no insertion is made.
 
-    def find_existing_condition(existing_lines, target_indent, condition):
-        """
-        Checks if a line equivalent to the condition exists in an outer block.
-        Only lines with indentation less than the target are considered.
-        """
-        condition_stripped = condition.strip()
-        target_indent_len = len(target_indent)
-        for line in existing_lines:
-            if not line.strip():
-                continue  # Skip blank lines
-            line_indent = line[:len(line) - len(line.lstrip(' \t'))]
-            if len(line_indent) < target_indent_len and line.strip() == condition_stripped:
-                return True
+    Parameters:
+    - file_path (str): Path to the Python file to modify.
+    - condition_to_insert (str): Condition line to add (e.g., "if user.is_admin:", "for ...", "with ...", etc).
+    - target_line (str): Line of code (or part of it) to wrap in the condition.
+    - parent_blocks (list): Required relative parent block hierarchy 
+          (e.g., ["class User:", "def save():"] or ["def save():"]).
+    - encoding (str): File encoding (default: 'utf-8').
+
+    Returns:
+    - bool: True if file was modified, False otherwise.
+    """
+    try:
+        with open(file_path, 'r', encoding=encoding) as f:
+            lines = f.readlines()
+    except Exception as e:
+        VSlog(f"Failed to read file {file_path}: {e}")
         return False
 
-    def determine_indentation(original_indent):
-        """
-        Determines the new indentation by following the existing pattern.
-        Appends one tab if tabs are used, or the same number of spaces if spaces are used.
-        """
-        if '\t' in original_indent:
-            return original_indent + '\t'
+    # Determine the starting index and indent for the target’s parent block.
+    parent_start_idx = 0
+    parent_indent = 0
+    if parent_blocks:
+        # Use the last block header as the enclosing block.
+        last_parent = parent_blocks[-1].strip()
+        for idx, line in enumerate(lines):
+            if line.strip() == last_parent:
+                parent_start_idx = idx
+                parent_indent = len(line) - len(line.lstrip())
+                break
         else:
-            if not original_indent:
-                # Default to 4 spaces if no original indentation (top-level)
-                return '    '
-            # Append the same number of spaces as the original indentation
-            return original_indent + ' ' * len(original_indent)
-
-    try:
-        VSlog(f"Starting processing file: {file_path}")
-        # Read the file preserving its structure with the specified encoding.
-        with open(file_path, 'rb') as f:
-            content = f.read().decode(encoding)
-        line_ending = detect_line_ending(content)
-        VSlog(f"Detected line ending as: {repr(line_ending)} in file: {file_path}")
-        lines = content.splitlines(True)  # Keep line endings
-        
-        modified = False
-        new_lines = []
-
-        for line in lines:
-            # Check if the current line matches the target_line when both are stripped of whitespace.
-            if line.rstrip('\r\n').strip() == target_line.strip():
-                # Determine the original indentation of the target line.
-                original_indent = line[:len(line) - len(line.lstrip(' \t'))]
-                # Check for existing condition in outer blocks.
-                if not find_existing_condition(new_lines, original_indent, condition_to_insert):
-                    # Build the condition line with the same indentation.
-                    condition_line = original_indent + condition_to_insert.strip() + line_ending
-                    new_lines.append(condition_line)
-                    VSlog(f"Inserted condition line: '{condition_line.strip()}' before target line in file: {file_path}")
-                    # Increase the target line's indentation.
-                    new_indent = determine_indentation(original_indent)
-                    modified_line = new_indent + line.lstrip(' \t').rstrip('\r\n') + line_ending
-                    new_lines.append(modified_line)
-                    modified = True
-                else:
-                    VSlog(f"Condition already present in outer block for target line: '{line.rstrip()}'")
-                    new_lines.append(line)
-            else:
-                new_lines.append(line)
-
-        if modified:
-            with open(file_path, 'wb') as f:
-                f.write(''.join(new_lines).encode(encoding))
-            VSlog(f"File '{file_path}' updated successfully with the new condition.")
-            return True
-        else:
-            VSlog(f"No changes made to file '{file_path}' (condition may already exist or target not found).")
+            VSlog(f"Parent block {last_parent} not found in file {file_path}.")
             return False
 
-    except Exception as e:
-        VSlog(f"Error modifying file: {str(e)}")
+    # Find the target line index using a substring match.
+    target_idx = None
+    for idx in range(parent_start_idx, len(lines)):
+        # Remove inline comments and trailing whitespace.
+        line_content = lines[idx].split("#")[0].rstrip()
+        if target_line.strip() in line_content.strip():
+            target_idx = idx
+            break
+
+    if target_idx is None:
+        VSlog(f"Target line containing '{target_line.strip()}' not found in file {file_path}.")
         return False
+
+    # Check if the condition is already present immediately above the target line.
+    if target_idx > 0 and lines[target_idx - 1].strip() == condition_to_insert.strip():
+        VSlog(f"Condition '{condition_to_insert.strip()}' already present above target line in file {file_path}. No insertion needed.")
+        return False
+
+    # For "if" conditions, extract variable names from the condition expression.
+    condition_vars = []
+    cond_strip = condition_to_insert.strip()
+    if cond_strip.startswith("if ") and cond_strip.endswith(":"):
+        cond_expr_str = cond_strip[3:-1].strip()
+        try:
+            expr_ast = ast.parse(cond_expr_str, mode='eval')
+            condition_vars = [node.id for node in ast.walk(expr_ast) if isinstance(node, ast.Name)]
+        except Exception:
+            condition_vars = []
+    # For non-"if" statements, we assume condition is allowed.
+    
+    # Helper: check if a given variable appears in an assignment in a line.
+    def var_assigned_in_line(var, line):
+        pattern = r'\b' + re.escape(var) + r'\s*='
+        return re.search(pattern, line) is not None
+
+    # Determine accessible scope:
+    # Global scope: lines before the parent's block header (indent == 0)
+    # Local scope: lines within the parent's block (between parent's header and target line)
+    def is_var_accessible(var):
+        if var == "self":
+            parent_line = lines[parent_start_idx]
+            if parent_line.lstrip().startswith("def ") and re.search(r'\bself\b', parent_line):
+                return True
+            return False
+
+        # Check global scope.
+        for i in range(0, parent_start_idx):
+            stripped = lines[i].strip()
+            if stripped and (len(lines[i]) - len(lines[i].lstrip()) == 0):
+                if var_assigned_in_line(var, lines[i]):
+                    return True
+
+        # Check local scope.
+        for i in range(parent_start_idx, target_idx):
+            if (len(lines[i]) - len(lines[i].lstrip())) > parent_indent:
+                if var_assigned_in_line(var, lines[i]):
+                    return True
+        return False
+
+    # Verify that each variable used in the condition is accessible.
+    for var in condition_vars:
+        if not is_var_accessible(var):
+            VSlog(f"Variable '{var}' is not accessible in file {file_path}. Aborting condition insertion.")
+            return False
+
+    # At this point, insert the condition.
+    target_line_str = lines[target_idx]
+    target_indent_str = target_line_str[:len(target_line_str) - len(target_line_str.lstrip())]
+
+    new_condition_line = target_indent_str + condition_to_insert.rstrip() + "\n"
+    indent_unit = " " * 4
+    new_target_line = target_indent_str + indent_unit + target_line_str.lstrip()
+
+    lines[target_idx] = new_target_line
+    lines.insert(target_idx, new_condition_line)
+
+    try:
+        with open(file_path, 'w', encoding=encoding) as f:
+            f.writelines(lines)
+    except Exception as e:
+        VSlog(f"Failed to write file {file_path}: {e}")
+        return False
+
+    VSlog(f"Condition inserted successfully in file {file_path}.")
+    return True
 
 def add_codeblock_after_block(file_path, block_header, codeblock, insert_after_line=None):
     """
