@@ -4401,20 +4401,20 @@ def set_darkiworld_url(url):
         VSlog(f"Error while setting Darkiworld URL: {e}")
         
 def get_livetv_url():
-    CONFIG_FILE = "livetv_config.ini"
+    CONFIG_FILE = VSPath('special://home/addons/service.vstreamupdate/site_config.ini').replace('\\', '/')
 
     def load_current_url():
         config = configparser.ConfigParser()
         if os.path.exists(CONFIG_FILE):
             config.read(CONFIG_FILE)
-            if "LiveTV" in config and "current_url" in config["LiveTV"]:
-                return config["LiveTV"]["current_url"]
+            if "livetv" in config and "current_url" in config["livetv"]:
+                return config["livetv"]["current_url"]
         # Fallback default value if not found in config
         return "https://livetv819.me"
 
     def save_current_url(url):
         config = configparser.ConfigParser()
-        config["LiveTV"] = {"current_url": url}
+        config["livetv"] = {"current_url": url}
         with open(CONFIG_FILE, "w") as configfile:
             config.write(configfile)
 
