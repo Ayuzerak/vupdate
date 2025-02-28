@@ -2024,7 +2024,7 @@ class cSearch:
                     VSlog(f"New search results from site: {siteId}: {pluginResult}")
 
                     for newSearchResult in pluginResult[siteId]:
-                        if self._continueToSearch() and siteId is not 'cHosterGui':  # Continue only if allowed
+                        if self._continueToSearch() and siteId != 'cHosterGui':  # Continue only if allowed
                             # Merge additional parameters into the new result
                             for nSearchResult in pluginResult['cHosterGui']:
                                 gui_element = nSearchResult['guiElement']
