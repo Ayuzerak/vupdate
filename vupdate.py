@@ -4170,9 +4170,6 @@ def get_elitegol_url():
     def load_and_validate_url():
 
         VSlog("load_and_validate_url()")
-        
-        def load_and_validate_default_url():
-            return default_url if validate_url_content(default_url) else None
 
         try:
             config = configparser.ConfigParser()
@@ -4180,14 +4177,16 @@ def get_elitegol_url():
                 config.read(CONFIG_FILE)
                 if "elitegol" in config and "current_url" in config["elitegol"]:
                     saved_url = config["elitegol"]["current_url"]
+                    if validate_url_content(saved_url):
+                        return saved_url
                 else:
-                    load_and_validate_default_url()
+                    return default_url
         except FileNotFoundError:
             VSlog("No saved URL file found")
-            load_and_validate_default_url()
+            return default_url
         except Exception as e:
             VSlog(f"URL load error: {str(e)}")
-            load_and_validate_default_url()
+            return default_url
     
     def validate_url_content(url):
         try:
