@@ -4291,20 +4291,23 @@ def get_elitegol_url():
     
     CONFIG_FILE = VSPath('special://home/addons/service.vstreamupdate/site_config.ini').replace('\\', '/')
 
+    default_url = 'https://jokertv.ru/'
+
     def save_valid_url(url):
         try:
             config = configparser.ConfigParser()
             config["elitgol"] = {"current_url": url}
             with open(CONFIG_FILE, "w") as configfile:
                 config.write(configfile)
+        except Exception as e:
+            VSlog(f"Cannot save valid url: {str(e)}")
     
     def load_and_validate_url():
 
-        default_url = 'https://jokertv.ru/'
-
+        VSlog("load_and_validate_url()")
+        
         def load_and_validate_default_url():
-            if validate_url_content(default_url):
-                return default_url
+            return default_url if validate_url_content(default_url) else None
 
         try:
             config = configparser.ConfigParser()
@@ -4381,8 +4384,8 @@ def get_elitegol_url():
 
     except Exception as e:
         VSlog(f"Critical error: {str(e)}")
-        saved_url = load_and_validate_url()
-        return saved_url if saved_url else None
+        default_url = load_and_validate_default_url()
+        return default_url if default_url else None
     
 def set_elitegol_url(url):
     """Set a new URL for EliteGol in the sites.json file."""
