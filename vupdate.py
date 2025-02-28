@@ -1522,73 +1522,75 @@ class cSearch:
         VSlog("End of directory set.")
 
     def searchGlobal(self, sSearchText='', sCat=''):
-        """
-        Performs a global search across multiple plugins.
-
-        :param sSearchText: The text to search for.
-        :param sCat: The category of the search.
-        :return: True if the search completes successfully.
-        """
         try:
-            VSlog("Starting global search.")
-            
-            # Retrieve search text and category if not provided
             if not sSearchText:
                 oInputParameterHandler = cInputParameterHandler()
                 sSearchText = oInputParameterHandler.getValue('searchtext')
                 sCat = oInputParameterHandler.getValue('sCat')
-                VSlog(f"Retrieved search text: {sSearchText} and category: {sCat} from input parameters.")
 
-            sSearchText = sSearchText.replace(':', ' ')
-            VSlog(f"Formatted search text: {sSearchText}")
+            sSearchText = sSearchText.replace(':', ' ').strip()
+            # vire doubles espaces
+            sSearchText = re.sub(' +', ' ', sSearchText)
 
-            # Initialize search with the provided text and category
             listPlugins = self._initSearch(sSearchText, sCat)
-            VSlog(f"Initialized search with plugins: {listPlugins}")
 
             if len(listPlugins) == 0:
-                VSlog("No plugins available for search.")
                 return True
 
-            # Launch search threads for each plugin
-            listThread = self._launchSearch(listPlugins, self._pluginSearch, [Quote(sSearchText), True])
-            VSlog("Launched search threads.")
+            # une seule source de sélectionée, on allege l'interface de résultat
+            multiSource = len(listPlugins) != 1
 
-            # Wait for all threads to complete
+            listThread = self._launchSearch(listPlugins, self._pluginSearch, [Quote(sSearchText), multiSource])
             self._finishSearch(listThread)
-            VSlog("Finished search threads.")
 
-            # Display search results in the GUI
             oGui = cGui()
-            oGui.addText('globalSearch', self.addons.VSlang(30081) % sSearchText, 'search.png')
-            VSlog("Added global search text to GUI.")
+            if multiSource:
+                oGui.addText('globalSearch', self.addons.VSlang(30081) % sSearchText, 'search.png')
 
-            count = 0
-            searchResults = cGui().getSearchResult()
-            for plugin in listPlugins:
-                pluginId = plugin['identifier']
-                if pluginId in searchResults.keys() and (len(searchResults[pluginId]) > 0):  # At least one result
-                    count += 1
-                    VSlog(f"Results found for plugin: {pluginId}")
-
-                    # Display site name
-                    oGui.addText(pluginId, '%s. [COLOR olive]%s[/COLOR]' % (count, plugin['name']),
-                                 'sites/%s.png' % (pluginId))
-                    for result in searchResults[pluginId]:
-                        oGui.addFolder(result['guiElement'], result['params'])
-                        VSlog(f"Added result to GUI for plugin: {pluginId}")
-
-            if not count:  # No sources returned results
-                oGui.addText('globalSearch')  # "Aucune information"
-                VSlog("No results found for any plugin.")
-
+            total = count = 0
+            searchResults = oGui.getSearchResult()
+            values = searchResults.values()
+            for result in values:
+                total += len(result)
             self._progressClose()
+
+
+            if total:
+                if multiSource:
+                    xbmc.sleep(500)    # Nécessaire pour enchainer deux progressBar
+                # Progress de chargement des metadata
+                progressMeta = progress().VScreate(self.addons.VSlang(30076) + ' - ' + sSearchText, large=total > 50)
+                for plugin in listPlugins:
+                    pluginId = plugin['identifier']
+                    if pluginId not in searchResults.keys():
+                        continue
+                    results = searchResults[pluginId]
+                    if len(results) == 0:
+                        continue
+                    if multiSource:
+                        # nom du site
+                        count += 1
+                        oGui.addText(pluginId, '%s. [COLOR olive]%s[/COLOR]' % (count, plugin['name']),
+                                 'sites/%s.png' % pluginId)
+
+                    # résultats du site
+                    for result in results:
+                        progressMeta.VSupdate(progressMeta, total)
+                        oGui.addFolder(result['guiElement'], result['params'])
+                        if progressMeta.iscanceled():
+                            break
+
+                progressMeta.VSclose(progressMeta)
+
+            else:  # aucune source ne retourne de résultat
+                oGui.addText('globalSearch')  # "Aucune information"
+
             cGui.CONTENT = 'files'
+
             oGui.setEndOfDirectory()
-            VSlog("Set end of directory for GUI.")
 
         except Exception as error:
-            VSlog(f"Error with searchGlobal: {error}")
+            VSlog('Error with searchGlobal: ' + str(error))
             traceback.print_exc()
             self._progressForceClose()
 
@@ -1606,31 +1608,6 @@ class cSearch:
         xbmc.executebuiltin("Notification(VStream,Recherche VStream en cours)")
         return self.quickSearch(True, title, sCat)
 
-    def _progressInit(self):
-        """
-        Initializes the progress bar if autoPlayVideo is not enabled.
-        """
-        if not self.autoPlayVideo:
-            VSlog("Initializing progress bar.")
-            self.progress_ = progress().VScreate(large=True)
-            VSlog("Progress bar created.")
-
-    def _progressUpdate(self, numberResult):
-        """
-        Updates the progress bar with the current number of results.
-
-        :param numberResult: The number of results found so far.
-        """
-        if not self.autoPlayVideo and not self._progressIsCancel():
-            VSlog(f"Updating progress bar with {numberResult} results.")
-            message = "\\n"
-            message += (self.addons.VSlang(31209) % numberResult)
-            message += "\\n"
-            message += (self.addons.VSlang(31208) % (", ".join(self.listRemainingPlugins[0:7])))
-            if len(self.listRemainingPlugins) > 7:
-                message += ", ..."
-            self.progress_.VSupdate(self.progress_, self.progressTotal, message, True)
-            VSlog("Progress bar updated.")
 
     def quickSearch(self, autoPlayVideo=False, title='', sCat='movie'):
         """
@@ -1689,21 +1666,6 @@ class cSearch:
 
         return True
 
-    def _progressInit(self):
-        """
-        Initializes the progress bar if autoPlayVideo is not enabled.
-        """
-        if not self.autoPlayVideo:
-            VSlog("Initializing progress bar.")
-            # Kodi 17 closes the busy dialog that appears above the progress bar
-            try:
-                xbmc.executebuiltin('Dialog.Close(busydialog)')
-                VSlog("Closed busy dialog.")
-            except Exception as e:
-                VSlog(f"Failed to close busy dialog: {e}")
-
-            self.progress_ = progress().VScreate(large=True)
-            VSlog("Progress bar created.")
 
     def _progressIsCancel(self):
         """
@@ -1717,22 +1679,28 @@ class cSearch:
             VSlog("AutoPlayVideo is enabled, progress bar not checked for cancellation.")
             return False
 
+    def _progressInit(self, large=True):
+        self.progress_ = progress().VScreate(large=large)
+
+    def _progressUpdate(self):
+        searchResults = cGui().getSearchResult()
+        numberResult = 0
+        values = searchResults.values()
+        for result in values:
+            numberResult += len(result)
+        message = "\n"
+        message += (self.addons.VSlang(31209) % numberResult)
+        message += "\n"
+        message += (self.addons.VSlang(31208) % (", ".join(self.listRemainingPlugins[0:7])))
+        if len(self.listRemainingPlugins) > 7:
+            message += ", ..."
+        self.progress_.VSupdate(self.progress_, self.progressTotal, message, True)
+
     def _progressClose(self):
-        """
-        Closes the progress bar if autoPlayVideo is not enabled.
-        """
-        if not self.autoPlayVideo:
-            VSlog("Closing progress bar.")
-            self.progress_.VSclose(self.progress_)
-            VSlog("Progress bar closed.")
+        self.progress_.VSclose(self.progress_)
 
     def _progressForceClose(self):
-        """
-        Forces the progress bar to close.
-        """
-        VSlog("Forcing progress bar to close.")
-        progress().VSclose()
-        VSlog("Progress bar forced to close.")
+        self.progress_.VSclose()
 
     def _monitorAbortRequest(self):
         """
@@ -1757,126 +1725,30 @@ class cSearch:
         return shouldContinue
 
     def _getAvailablePlugins(self, searchText, categorie):
-        """
-        Retrieves the list of available plugins based on the search text and category.
-
-        :param searchText: The text to search for.
-        :param categorie: The category of the search.
-        :return: A list of available plugins.
-        """
-
-        VSlog(f"Getting available plugins for: '{searchText}' in category '{categorie}'")
-
-        # Initialize the search handler
         oHandler = cRechercheHandler()
-        VSlog("Initialized cRechercheHandler")
-
-        # Set the search text and category
         oHandler.setText(searchText)
-        VSlog(f"Set search text: {searchText}")
         oHandler.setCat(categorie)
-        VSlog(f"Set search category: {categorie}")
+        return oHandler.getAvailablePlugins()
 
-        # Retrieve and return the available plugins
-        availablePlugins = oHandler.getAvailablePlugins()
-        VSlog(f"Found {len(availablePlugins)} available plugins")
 
-        return availablePlugins
 
     def _initSearch(self, searchText, searchCat):
-        """
-        Initializes the search process by retrieving available plugins and setting up progress tracking.
-
-        :param searchText: The text to search for.
-        :param searchCat: The category of the search.
-        :return: A list of plugins that will be used for the search.
-        """
-        VSlog(f"Initializing search with text: {searchText} and category: {searchCat}")
-
         try:
-            # Retrieve the list of available plugins based on the search text and category
             listPlugins = self._getAvailablePlugins(searchText, searchCat)
-            VSlog(f"Available plugins: {listPlugins}")
-
             if not listPlugins:
-                VSlog("No plugins available for the given search criteria.")
                 return []
 
-            # Set the total progress based on the number of plugins
             self.progressTotal = len(listPlugins)
-            VSlog(f"Total progress set to: {self.progressTotal}")
+            self._progressInit(self.progressTotal > 1)
 
-            # Initialize the progress bar
-            self._progressInit()
-            VSlog("Progress bar initialized.")
-
-            # Store the names of the remaining plugins to search
             self.listRemainingPlugins = [plugin['name'] for plugin in listPlugins]
-            VSlog(f"Remaining plugins to search: {self.listRemainingPlugins}")
-
-            # Reset the search results in the GUI
             cGui().resetSearchResult()
-            VSlog("Search results in GUI reset.")
-
             return listPlugins
-
         except Exception as error:
-            # Log the error details if an exception occurs
-            VSlog(f"Error when search is initiated: {error}")
+            VSlog('Error when search is initiate: ' + str(error))
             traceback.print_exc()
             self._progressForceClose()
             return []
-
-    def _launchSearch(self, listPlugins, targetFunction, argsList):
-        """
-        Launches search threads for the given list of plugins.
-
-        Args:
-            listPlugins (list): A list of plugin dictionaries. Each dictionary should contain plugin-specific details, such as 'name'.
-            targetFunction (function): The function to be executed by each thread.
-            argsList (list): Additional arguments to be passed to the targetFunction.
-
-        Returns:
-            list: A list of thread objects that have been started.
-        """
-        VSlog("Starting to launch search threads.")
-        listThread = []  # Container for threads
-        window(10101).setProperty('search', 'true')  # Signal search start in Kodi UI
-        VSlog("Set Kodi window property 'search' to 'true'.")
-
-        # Create and start a thread for each plugin
-        for plugin in listPlugins:
-            VSlog(f"Preparing to launch thread for plugin: {plugin['name']} (ID: {plugin['identifier']})")
-            # Prepare thread arguments
-            threadArgs = tuple([plugin] + argsList)
-            VSlog(f"Thread arguments for plugin {plugin['name']}: {threadArgs}")
-            # Create thread
-            thread = threading.Thread(target=targetFunction, name=plugin['name'], args=threadArgs)
-            thread.start()  # Start thread execution
-            VSlog(f"Started thread for plugin: {plugin['name']}")
-            listThread.append(thread)  # Add thread to the list
-
-        VSlog("All threads have been launched.")
-        return listThread
-
-    def _finishSearch(self, listThread):
-        """
-        Waits for all threads in the provided list to complete and marks the search as finished.
-
-        Args:
-            listThread (list): A list of threads to wait for.
-        """
-        VSlog("Starting to finish search. Waiting for all threads to complete.")
-        
-        # Wait for each thread in the list to finish execution
-        for thread in listThread:
-            VSlog(f"Waiting for thread: {thread.name}")
-            thread.join()  # Blocks until the thread completes
-            VSlog(f"Thread {thread.name} has completed.")
-
-        # Update the Kodi window property to indicate that the search has concluded
-        window(10101).setProperty('search', 'false')
-        VSlog("Search has concluded. Updated Kodi window property.")
 
     def _tryToAutoPlay(self):
         """
@@ -2053,8 +1925,7 @@ class cSearch:
                             VSlog(f"Merged parameters into new search result: {newSearchResult}")
 
                             # Avoid infinite recursion on the same function
-                            if newSearchResult['guiElement'].getSiteName() == siteId and \
-                               newSearchResult['guiElement'].getFunction() == functionName:
+                            if newSearchResult['guiElement'].getSiteName() == siteId and                                newSearchResult['guiElement'].getFunction() == functionName:
                                 VSlog(f"Will not loop on the same function: {siteId}.{functionName}")
                             else:
                                 # Recursively navigate deeper
@@ -2535,52 +2406,46 @@ class cSearch:
 
         VSlog("Finished displaying a single result.")
 
+    def _launchSearch(self, listPlugins, targetFunction, argsList):
+
+        # active le mode "recherche globale"
+        window(10101).setProperty('search', 'true')
+
+        listThread = []
+        if self.progressTotal > 1:
+            for plugin in listPlugins:
+                thread = threading.Thread(target=targetFunction, name=plugin['name'], args=tuple([plugin] + argsList))
+                thread.start()
+                listThread.append(thread)
+        else:
+            self._pluginSearch(listPlugins[0], argsList[0], argsList[1])
+        return listThread
+
+    def _finishSearch(self, listThread):
+        # On attend que les thread soient finis
+        for thread in listThread:
+            thread.join()
+
+        window(10101).setProperty('search', 'false')
+
     def _pluginSearch(self, plugin, sSearchText, updateProcess=False):
-        """
-        Performs a search using a specified plugin.
-
-        :param plugin: Dictionary containing plugin information.
-        :param sSearchText: The text to search for.
-        :param updateProcess: Flag to indicate if the process should be updated.
-        """
-        VSlog(f"Starting search with plugin: {plugin['name']} (ID: {plugin['identifier']})")
-        VSlog(f"Search text: {sSearchText}")
-        VSlog(f"Update process flag is {'enabled' if updateProcess else 'disabled'}")
-
         try:
-            # Attempt to import the plugin module
-            VSlog(f"Importing module for plugin: {plugin['identifier']}")
-            plugins = __import__(f'resources.sites.{plugin["identifier"]}', fromlist=[plugin['identifier']])
-            VSlog(f"Successfully imported plugin module: {plugin['identifier']}")
+            plugins = __import__('resources.sites.%s' % plugin['identifier'], fromlist=[plugin['identifier']])
+            function = getattr(plugins, plugin['search'][1])
+            urlSearch = plugin['search'][0]
+            if '%s' in urlSearch:
+                sUrl = urlSearch % str(sSearchText)
+            else:
+                sUrl = urlSearch + str(sSearchText)
 
-            # Retrieve the search function
-            function_name = plugin['search'][1]
-            VSlog(f"Retrieving search function: {function_name}")
-            function = getattr(plugins, function_name)
-            VSlog(f"Search function '{function_name}' successfully retrieved.")
-
-            # Construct the search URL
-            sUrl = plugin['search'][0] + str(sSearchText)
-            VSlog(f"Constructed search URL: {sUrl}")
-
-            # Execute the search function
-            VSlog(f"Executing search function '{function_name}' with URL: {sUrl}")
             function(sUrl)
-            VSlog(f"Search function '{function_name}' executed successfully.")
-
-            # Update the process if the flag is enabled
             if updateProcess:
-                VSlog(f"Update process is enabled. Removing plugin '{plugin['name']}' from the remaining list.")
                 self.listRemainingPlugins.remove(plugin['name'])
-                VSlog("Updating progress based on the current search results.")
-                self._progressUpdate(sum(map(len, cGui().getSearchResult().values())))
+                self._progressUpdate()
 
-            VSlog(f"Search completed for plugin: {plugin['name']} (ID: {plugin['identifier']})")
-
+            VSlog('Load Search: ' + str(plugin['identifier']))
         except Exception as e:
-            # Log the error details if an exception occurs
-            VSlog(f"Error during search with plugin '{plugin['name']}' (ID: {plugin['identifier']}): {e}")
-            traceback.print_exc()
+            VSlog(plugin['identifier'] + ': search failed (' + str(e) + ')')
 
     def _executePluginForSearch(self, sSiteName, sFunction, parameters):
         """
