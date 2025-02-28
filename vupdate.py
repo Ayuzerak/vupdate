@@ -3051,7 +3051,7 @@ def get_elitegol_url():
             try:
                 response = requests.get("https://lefoot.ru/", timeout=10)
                 content = response.text
-                urls = re.findall(r'href="(https?://[\w.-]+(?:\.[\w.-]+)+(?:/[\w.-]*)*', content)
+                urls = re.findall(r'href="(https?://[^"]+)"', content)
                 if urls:
                     raw_url = urls[0]
                     processed_url = raw_url.replace("http", "https").replace("httpss", "https").rstrip('/') + '/'
