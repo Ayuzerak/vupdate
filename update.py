@@ -1919,10 +1919,15 @@ def get_livetv_url():
         return "https://livetv819.me"
 
     def save_current_url(url):
-        config = configparser.ConfigParser()
-        config["livetv"] = {"current_url": url}
-        with open(CONFIG_FILE, "w") as configfile:
-            config.write(configfile)
+        try:
+            config = configparser.ConfigParser()
+            config["livetv"] = {"current_url": url}
+            VSlog(f"Trying to write to {CONFIG_FILE}")  # Debug statement
+            with open(CONFIG_FILE, "w") as configfile:
+                config.write(configfile)
+            VSlog(f"URL saved successfully: {url}")  # Confirmation log
+        except Exception as e:
+            VSlog(f"Failed to save URL: {e}")
 
     def good_live_tv_url(test_url):
         try:
