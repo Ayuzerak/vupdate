@@ -1418,6 +1418,1245 @@ def add_get_recommendations_method_for_netflix_like_recommendations():
     else:
         VSlog("Erreur : La méthode get_recommendations_by_id_movie n'a pas été trouvée après modification.")
 
+def addVstreamVoiceControl():
+    # Recherche de tous les fichiers .py dans le répertoire
+    file_paths = glob.glob(os.path.join(VSPath('special://home/addons/plugin.video.vstream/resources/sites/').replace('\\', '/'), "*.py"))
+
+    for path in file_paths:
+        file_path = VSPath(path).replace('\\', '/')
+        VSlog(f"Processing file: {file_path}")
+        add_parameter_to_function(file_path, 'showHosters', 'oInputParameterHandler=False')
+        add_condition_to_statement(file_path, 'if not oInputParameterHandler:', 'oInputParameterHandler = cInputParameterHandler()')
+        add_parameter_to_function_call(file_path, 'cHosterGui().showHoster', 'oInputParameterHandler=oInputParameterHandler')
+
+    # Recherche de tous les fichiers .py dans le répertoire
+    file_paths = glob.glob(os.path.join(VSPath('special://home/addons/plugin.video.vstream/resources/hosters/').replace('\\', '/'), "*.py"))
+
+    for path in file_paths:
+        file_path = VSPath(path).replace('\\', '/')
+        VSlog(f"Processing file: {file_path}")
+        add_parameter_to_function(file_path, 'getMediaLink', 'autoPlay=False')
+        add_parameter_to_function(file_path, '_getMediaLinkForGuest', 'autoPlay=False')
+        add_parameter_to_function_call(file_path, '_getMediaLinkForGuest', 'autoPlay')
+        add_condition_to_statement(file_path, 'if not autoPlay:', 'oDialog = dialog().VSok')
+
+    file_path = VSPath('special://home/addons/plugin.video.vstream/resources/lib/gui/gui.py').replace('\\', '/')
+    codeblock = """
+def emptySearchResult(self, siteName):
+    cGui.searchResultsSemaphore.acquire()
+    cGui.searchResults[siteName] = []  # vider le tableau de résultats
+    cGui.searchResultsSemaphore.release()
+    """
+
+    codeblock2 = """
+# On n'affiche pas si on fait une recherche
+if window(10101).getProperty('playVideo') == 'true':
+    return
+    """
+
+    add_parameter_to_function(file_path, 'addLink', 'oInputParameterHandler = False')
+    add_condition_to_statement(file_path, 'if not oInputParameterHandler:', 'oInputParameterHandler = cInputParameterHandler()')
+    add_codeblock_after_block(file_path, 'class cGui:', codeblock, 'searchResultsSemaphore = threading.Semaphore()')
+    add_codeblock_after_block(file_path, 'def setEndOfDirectory(self, forceViewMode=False):', codeblock2)
+
+    file_path = VSPath('special://home/addons/plugin.video.vstream/resources/lib/gui/hoster.py').replace('\\', '/')
+
+    add_parameter_to_function(file_path, 'showHoster', 'oInputParameterHandler=False')
+    add_condition_to_statement(file_path, 'if not oInputParameterHandler:', 'oInputParameterHandler = cInputParameterHandler()')
+    add_parameter_to_function(file_path, 'play', 'oInputParameterHandler=False')
+    add_parameter_to_function(file_path, 'play', 'autoPlay = False')
+    add_condition_to_statement(file_path, 'if not autoPlay:', 'oDialog.VSinfo')
+    add_parameter_to_function_call(file_path, 'oHoster.getMediaLink', 'autoPlay')
+    add_parameter_to_function_call(file_path, 'cPlayer', 'oInputParameterHandler')
+    add_condition_to_statement(file_path, 'if not autoPlay:', 'oDialog.VSerror')
+    add_condition_to_statement(file_path, 'if not autoPlay:', 'oGui.setEndOfDirectory()')
+
+    file_path = VSPath('special://home/addons/plugin.video.vstream/resources/lib/player.py').replace('\\', '/')
+    add_parameter_to_function(file_path, '__init__', 'oInputParameterHandler=False', 'self')
+    add_condition_to_statement(file_path, 'if not oInputParameterHandler:', 'oInputParameterHandler = cInputParameterHandler()')
+
+    file_path = VSPath('special://home/addons/plugin.video.vstream/resources/lib/search.py').replace('\\', '/')
+
+    new_content = '''
+# -*- coding: utf-8 -*-
+# vStream https://github.com/Kodi-vStream/venom-xbmc-addons
+import re
+import traceback
+import threading
+import xbmc
+import json
+import random
+
+from resources.lib.gui.gui import cGui
+from resources.lib.handler.rechercheHandler import cRechercheHandler
+from resources.lib.handler.inputParameterHandler import cInputParameterHandler
+from resources.lib.comaddon import progress, VSlog, addon, window, VSPath
+from resources.lib.util import Quote
+
+SITE_IDENTIFIER = 'cSearch'
+SITE_NAME = 'Search'
+
+# Chemins vers les fichiers JSON des films et séries les plus récents
+FILMS_JSON = VSPath('special://home/addons/plugin.video.vstream/20filmslesplusrecents.json')
+SERIES_JSON = VSPath('special://home/addons/plugin.video.vstream/20serieslesplusrecents.json')
+
+class cSearch:
+
+    MAX_NUMBER_CRITERIA = 5
+
+    def __init__(self):
+        self.addons = addon()
+        self.autoPlayVideo = False
+        self.findAndPlay = False
+        self.allVideoLink = {}
+
+    def load(self):
+        """
+        Sets the end of the directory for the GUI.
+        """
+        VSlog("Setting end of directory for GUI.")
+        cGui().setEndOfDirectory()
+        VSlog("End of directory set.")
+
+    def searchGlobal(self, sSearchText='', sCat=''):
+        """
+        Performs a global search across multiple plugins.
+
+        :param sSearchText: The text to search for.
+        :param sCat: The category of the search.
+        :return: True if the search completes successfully.
+        """
+        try:
+            VSlog("Starting global search.")
+            
+            # Retrieve search text and category if not provided
+            if not sSearchText:
+                oInputParameterHandler = cInputParameterHandler()
+                sSearchText = oInputParameterHandler.getValue('searchtext')
+                sCat = oInputParameterHandler.getValue('sCat')
+                VSlog(f"Retrieved search text: {sSearchText} and category: {sCat} from input parameters.")
+
+            sSearchText = sSearchText.replace(':', ' ')
+            VSlog(f"Formatted search text: {sSearchText}")
+
+            # Initialize search with the provided text and category
+            listPlugins = self._initSearch(sSearchText, sCat)
+            VSlog(f"Initialized search with plugins: {listPlugins}")
+
+            if len(listPlugins) == 0:
+                VSlog("No plugins available for search.")
+                return True
+
+            # Launch search threads for each plugin
+            listThread = self._launchSearch(listPlugins, self._pluginSearch, [Quote(sSearchText), True])
+            VSlog("Launched search threads.")
+
+            # Wait for all threads to complete
+            self._finishSearch(listThread)
+            VSlog("Finished search threads.")
+
+            # Display search results in the GUI
+            oGui = cGui()
+            oGui.addText('globalSearch', self.addons.VSlang(30081) % sSearchText, 'search.png')
+            VSlog("Added global search text to GUI.")
+
+            count = 0
+            searchResults = cGui().getSearchResult()
+            for plugin in listPlugins:
+                pluginId = plugin['identifier']
+                if pluginId in searchResults.keys() and (len(searchResults[pluginId]) > 0):  # At least one result
+                    count += 1
+                    VSlog(f"Results found for plugin: {pluginId}")
+
+                    # Display site name
+                    oGui.addText(pluginId, '%s. [COLOR olive]%s[/COLOR]' % (count, plugin['name']),
+                                 'sites/%s.png' % (pluginId))
+                    for result in searchResults[pluginId]:
+                        oGui.addFolder(result['guiElement'], result['params'])
+                        VSlog(f"Added result to GUI for plugin: {pluginId}")
+
+            if not count:  # No sources returned results
+                oGui.addText('globalSearch')  # "Aucune information"
+                VSlog("No results found for any plugin.")
+
+            self._progressClose()
+            cGui.CONTENT = 'files'
+            oGui.setEndOfDirectory()
+            VSlog("Set end of directory for GUI.")
+
+        except Exception as error:
+            VSlog(f"Error with searchGlobal: {error}")
+            traceback.print_exc()
+            self._progressForceClose()
+
+        return True
+
+    def playVideo(self, title='', sCat='movie'):
+        """
+        Initiates video playback by performing a quick search.
+
+        :param title: Title of the video to play.
+        :param sCat: Category of the video (default is 'movie').
+        :return: Result of the quick search.
+        """
+        VSlog('Playing video')
+        xbmc.executebuiltin("Notification(VStream,Recherche VStream en cours)")
+        return self.quickSearch(True, title, sCat)
+
+    def _progressInit(self):
+        """
+        Initializes the progress bar if autoPlayVideo is not enabled.
+        """
+        if not self.autoPlayVideo:
+            VSlog("Initializing progress bar.")
+            self.progress_ = progress().VScreate(large=True)
+            VSlog("Progress bar created.")
+
+    def _progressUpdate(self, numberResult):
+        """
+        Updates the progress bar with the current number of results.
+
+        :param numberResult: The number of results found so far.
+        """
+        if not self.autoPlayVideo and not self._progressIsCancel():
+            VSlog(f"Updating progress bar with {numberResult} results.")
+            message = "\\n"
+            message += (self.addons.VSlang(31209) % numberResult)
+            message += "\\n"
+            message += (self.addons.VSlang(31208) % (", ".join(self.listRemainingPlugins[0:7])))
+            if len(self.listRemainingPlugins) > 7:
+                message += ", ..."
+            self.progress_.VSupdate(self.progress_, self.progressTotal, message, True)
+            VSlog("Progress bar updated.")
+
+    def quickSearch(self, autoPlayVideo=False, title='', sCat='movie'):
+        """
+        Performs a quick search for videos and attempts to auto-play if enabled.
+
+        :param autoPlayVideo: Flag to enable auto-play.
+        :param title: Title of the video to search for.
+        :param sCat: Category of the video (default is 'movie').
+        :return: True if the search completes successfully.
+        """
+        try:
+            VSlog("Starting quick search.")
+            self.autoPlayVideo = autoPlayVideo
+
+            searchInfo = self._getSearchInfo(title, sCat)
+            VSlog(f"Search info: {searchInfo}")
+            listPlugins = self._initSearch(searchInfo['title'], searchInfo['cat'])
+            VSlog(f"List of plugins: {listPlugins}")
+
+            if len(listPlugins) == 0:
+                VSlog("No plugins available for search.")
+                return True
+
+            self.findAndPlay = False
+            self.allVideoLink = {}
+            self.eventFindOneLink = threading.Event()
+
+            window(10101).setProperty('playVideo', 'true')
+            VSlog("Set property 'playVideo' to 'true'.")
+
+            listThread = self._launchSearch(listPlugins, self._quickSearchForPlugin, [searchInfo])
+            VSlog("Launched search threads.")
+
+            if autoPlayVideo:
+                while len(self.listRemainingPlugins) > 0 and self._continueToSearch():
+                    self.eventFindOneLink.wait()
+                    self.eventFindOneLink.clear()
+                    self._tryToAutoPlaySpecificCriteria(cSearch.MAX_NUMBER_CRITERIA)
+
+                if self._continueToSearch():
+                    self._tryToAutoPlay()
+
+            self._finishSearch(listThread)
+            window(10101).setProperty('playVideo', 'false')
+            VSlog("Set property 'playVideo' to 'false'.")
+
+            self._progressClose()
+
+            if not self.findAndPlay:
+                self._displayAllResult(searchInfo)
+
+        except Exception as error:
+            VSlog(f"Error with quickSearch: {error}")
+            traceback.print_exc()
+            self._progressForceClose()
+
+        return True
+
+    def _progressInit(self):
+        """
+        Initializes the progress bar if autoPlayVideo is not enabled.
+        """
+        if not self.autoPlayVideo:
+            VSlog("Initializing progress bar.")
+            # Kodi 17 closes the busy dialog that appears above the progress bar
+            try:
+                xbmc.executebuiltin('Dialog.Close(busydialog)')
+                VSlog("Closed busy dialog.")
+            except Exception as e:
+                VSlog(f"Failed to close busy dialog: {e}")
+
+            self.progress_ = progress().VScreate(large=True)
+            VSlog("Progress bar created.")
+
+    def _progressIsCancel(self):
+        """
+        Checks if the progress bar has been canceled.
+        """
+        if not self.autoPlayVideo:
+            isCanceled = self.progress_.iscanceled()
+            VSlog(f"Progress bar canceled: {isCanceled}")
+            return isCanceled
+        else:
+            VSlog("AutoPlayVideo is enabled, progress bar not checked for cancellation.")
+            return False
+
+    def _progressClose(self):
+        """
+        Closes the progress bar if autoPlayVideo is not enabled.
+        """
+        if not self.autoPlayVideo:
+            VSlog("Closing progress bar.")
+            self.progress_.VSclose(self.progress_)
+            VSlog("Progress bar closed.")
+
+    def _progressForceClose(self):
+        """
+        Forces the progress bar to close.
+        """
+        VSlog("Forcing progress bar to close.")
+        progress().VSclose()
+        VSlog("Progress bar forced to close.")
+
+    def _monitorAbortRequest(self):
+        """
+        Checks if an abort request has been made.
+        """
+        abortRequested = xbmc.Monitor().abortRequested()
+        VSlog(f"Abort requested: {abortRequested}")
+        return abortRequested
+
+    def _continueToSearch(self):
+        """
+        Checks if the search process should continue based on various conditions.
+
+        :return: True if the search should continue, False otherwise.
+        """
+        VSlog("Checking if search should continue")
+        
+        # Determine if the search should continue
+        shouldContinue = not (self.findAndPlay or self._monitorAbortRequest() or self._progressIsCancel())
+        
+        VSlog(f"Search should {'continue' if shouldContinue else 'stop'}")
+        return shouldContinue
+
+    def _getAvailablePlugins(self, searchText, categorie):
+        """
+        Retrieves the list of available plugins based on the search text and category.
+
+        :param searchText: The text to search for.
+        :param categorie: The category of the search.
+        :return: A list of available plugins.
+        """
+
+        VSlog(f"Getting available plugins for: '{searchText}' in category '{categorie}'")
+
+        # Initialize the search handler
+        oHandler = cRechercheHandler()
+        VSlog("Initialized cRechercheHandler")
+
+        # Set the search text and category
+        oHandler.setText(searchText)
+        VSlog(f"Set search text: {searchText}")
+        oHandler.setCat(categorie)
+        VSlog(f"Set search category: {categorie}")
+
+        # Retrieve and return the available plugins
+        availablePlugins = oHandler.getAvailablePlugins()
+        VSlog(f"Found {len(availablePlugins)} available plugins")
+
+        return availablePlugins
+
+    def _initSearch(self, searchText, searchCat):
+        """
+        Initializes the search process by retrieving available plugins and setting up progress tracking.
+
+        :param searchText: The text to search for.
+        :param searchCat: The category of the search.
+        :return: A list of plugins that will be used for the search.
+        """
+        VSlog(f"Initializing search with text: {searchText} and category: {searchCat}")
+
+        try:
+            # Retrieve the list of available plugins based on the search text and category
+            listPlugins = self._getAvailablePlugins(searchText, searchCat)
+            VSlog(f"Available plugins: {listPlugins}")
+
+            if not listPlugins:
+                VSlog("No plugins available for the given search criteria.")
+                return []
+
+            # Set the total progress based on the number of plugins
+            self.progressTotal = len(listPlugins)
+            VSlog(f"Total progress set to: {self.progressTotal}")
+
+            # Initialize the progress bar
+            self._progressInit()
+            VSlog("Progress bar initialized.")
+
+            # Store the names of the remaining plugins to search
+            self.listRemainingPlugins = [plugin['name'] for plugin in listPlugins]
+            VSlog(f"Remaining plugins to search: {self.listRemainingPlugins}")
+
+            # Reset the search results in the GUI
+            cGui().resetSearchResult()
+            VSlog("Search results in GUI reset.")
+
+            return listPlugins
+
+        except Exception as error:
+            # Log the error details if an exception occurs
+            VSlog(f"Error when search is initiated: {error}")
+            traceback.print_exc()
+            self._progressForceClose()
+            return []
+
+    def _launchSearch(self, listPlugins, targetFunction, argsList):
+        """
+        Launches search threads for the given list of plugins.
+
+        Args:
+            listPlugins (list): A list of plugin dictionaries. Each dictionary should contain plugin-specific details, such as 'name'.
+            targetFunction (function): The function to be executed by each thread.
+            argsList (list): Additional arguments to be passed to the targetFunction.
+
+        Returns:
+            list: A list of thread objects that have been started.
+        """
+        VSlog("Starting to launch search threads.")
+        listThread = []  # Container for threads
+        window(10101).setProperty('search', 'true')  # Signal search start in Kodi UI
+        VSlog("Set Kodi window property 'search' to 'true'.")
+
+        # Create and start a thread for each plugin
+        for plugin in listPlugins:
+            VSlog(f"Preparing to launch thread for plugin: {plugin['name']} (ID: {plugin['identifier']})")
+            # Prepare thread arguments
+            threadArgs = tuple([plugin] + argsList)
+            VSlog(f"Thread arguments for plugin {plugin['name']}: {threadArgs}")
+            # Create thread
+            thread = threading.Thread(target=targetFunction, name=plugin['name'], args=threadArgs)
+            thread.start()  # Start thread execution
+            VSlog(f"Started thread for plugin: {plugin['name']}")
+            listThread.append(thread)  # Add thread to the list
+
+        VSlog("All threads have been launched.")
+        return listThread
+
+    def _finishSearch(self, listThread):
+        """
+        Waits for all threads in the provided list to complete and marks the search as finished.
+
+        Args:
+            listThread (list): A list of threads to wait for.
+        """
+        VSlog("Starting to finish search. Waiting for all threads to complete.")
+        
+        # Wait for each thread in the list to finish execution
+        for thread in listThread:
+            VSlog(f"Waiting for thread: {thread.name}")
+            thread.join()  # Blocks until the thread completes
+            VSlog(f"Thread {thread.name} has completed.")
+
+        # Update the Kodi window property to indicate that the search has concluded
+        window(10101).setProperty('search', 'false')
+        VSlog("Search has concluded. Updated Kodi window property.")
+
+    def _tryToAutoPlay(self):
+        """
+        Attempts to auto-play video links, prioritizing those with the highest criteria scores.
+        """
+        VSlog("Attempting to auto-play video links.")
+        
+        if len(self.allVideoLink) > 0:  # Check if there are any video links to process
+            numberMaxCriteria = max(self.allVideoLink.keys())  # Get the highest criteria score
+            VSlog(f"Highest criteria score found: {numberMaxCriteria}")
+
+            # Iterate from the highest score to the lowest score
+            for iNumberCriteria in range(numberMaxCriteria, 0, -1):
+                VSlog(f"Attempting to auto-play videos with criteria score: {iNumberCriteria}")
+                self._tryToAutoPlaySpecificCriteria(iNumberCriteria)  # Attempt to play videos for the current score
+        else:
+            VSlog("No video links found to auto-play.")
+
+    def _tryToAutoPlaySpecificCriteria(self, numberCriteria):
+        """
+        Attempts to auto-play video links with a specific criteria score.
+
+        :param numberCriteria: The criteria score of the video links to attempt to play.
+        """
+        VSlog(f"Attempting to auto-play video links with criteria score: {numberCriteria}")
+
+        if numberCriteria in self.allVideoLink:  # Check if there are links with the given criteria score
+            VSlog(f"Found video links with criteria score: {numberCriteria}")
+
+            for searchResult in self.allVideoLink[numberCriteria]:
+                VSlog(f"Processing search result: {searchResult}")
+
+                # Check if search should continue and the result hasn't been tested yet
+                if self._continueToSearch() and searchResult['params'].getValue('playTest') == 'false':
+                    VSlog("Search should continue and result has not been tested yet")
+
+                    # Mark the result as tested
+                    searchResult['params'].addParameter('playTest', 'true')
+                    VSlog("Marked result as tested")
+
+                    # Attempt to play the video
+                    find = self._playHosterGui(
+                        'play', 
+                        [searchResult['params'], True]
+                    )
+                    VSlog(f"Attempted to play video, result: {find}")
+
+                    if find:  # If playback is successful
+                        self.findAndPlay = True  # Indicate that a video was successfully found and played
+                        VSlog("Playback successful, video found and played")
+                        return
+        else:
+            VSlog(f"No video links found with criteria score: {numberCriteria}")
+
+    def _deepSearchLoop(self, searchResult, searchInfo):
+        """
+        Recursively navigates plugin menus to locate video links based on search criteria.
+
+        :param searchResult: Dictionary representing the current search result.
+        :param searchInfo: Dictionary containing search parameters like title, year, etc.
+        """
+        VSlog(f"Starting deep search loop for search result: {searchResult} with search info: {searchInfo}")
+
+        if self._continueToSearch() or searchResult['guiElement'].getSiteName() != 'cHosterGui':  # Check if the search process should continue
+            numberOfCriteria = self._getScoreOfThisResult(searchResult, searchInfo)
+            VSlog(f"Number of criteria met: {numberOfCriteria}")
+
+            if numberOfCriteria > 0:  # If the result meets minimum criteria
+                videoParams = searchResult['params']  # OutputParameter object
+                siteId = searchResult['guiElement'].getSiteName()
+                functionName = searchResult['guiElement'].getFunction()
+                gui_element = searchResult['guiElement']
+
+                VSlog(f"Processing result from site: {siteId} with function: {functionName}")
+
+                # If the result is from cHosterGui, process as a video link
+
+                sHosterIdentifier = videoParams.getValue('sHosterIdentifier')
+                VSlog('_deepSearchLoop: OutputParameter: sHosterIdentifier: {}'.format(sHosterIdentifier))
+
+                sMediaUrl = videoParams.getValue('sMediaUrl')
+                VSlog('_deepSearchLoop: OutputParameter: sMediaUrl: {}'.format(sMediaUrl))
+
+                bGetRedirectUrl = videoParams.getValue('bGetRedirectUrl')
+                VSlog('_deepSearchLoop: OutputParameter: bGetRedirectUrl: {}'.format(bGetRedirectUrl))
+
+                sFileName = videoParams.getValue('sFileName')
+                VSlog('_deepSearchLoop: OutputParameter: sFileName: {}'.format(sFileName))
+
+                sTitle = videoParams.getValue('sTitle')
+                VSlog('_deepSearchLoop: OutputParameter: sTitle: {}'.format(sTitle))
+
+                siteUrl = videoParams.getValue('siteUrl')
+                VSlog('_deepSearchLoop: OutputParameter: siteUrl: {}'.format(siteUrl))
+
+                sCat = videoParams.getValue('sCat')
+                VSlog('_deepSearchLoop: OutputParameter: sCat: {}'.format(sCat))
+
+                sMeta = videoParams.getValue('sMeta')
+                VSlog('_deepSearchLoop: OutputParameter: sMeta: {}'.format(sMeta))
+
+                VSlog(f"_deepSearchLoop: gui_element : Type: {gui_element.getType()}")
+                VSlog(f"_deepSearchLoop: gui_element : Catégorie: {gui_element.getCat()}")
+                VSlog(f"_deepSearchLoop: gui_element : Meta Addon: {gui_element.getMetaAddon()}")
+                VSlog(f"_deepSearchLoop: gui_element : Trailer: {gui_element.getTrailer()}")
+                VSlog(f"_deepSearchLoop: gui_element : TMDb ID: {gui_element.getTmdbId()}")
+                VSlog(f"_deepSearchLoop: gui_element : IMDb ID: {gui_element.getImdbId()}")
+                VSlog(f"_deepSearchLoop: gui_element : Année: {gui_element.getYear()}")
+                VSlog(f"_deepSearchLoop: gui_element : Résolution: {gui_element.getRes()}")
+                VSlog(f"_deepSearchLoop: gui_element : Genre: {gui_element.getGenre()}")
+                VSlog(f"_deepSearchLoop: gui_element : Saison: {gui_element.getSeason()}")
+                VSlog(f"_deepSearchLoop: gui_element : Épisode: {gui_element.getEpisode()}")
+                VSlog(f"_deepSearchLoop: gui_element : Temps total: {gui_element.getTotalTime()}")
+                VSlog(f"_deepSearchLoop: gui_element : Temps de reprise: {gui_element.getResumeTime()}")
+                VSlog(f"_deepSearchLoop: gui_element : Meta: {gui_element.getMeta()}")
+                VSlog(f"_deepSearchLoop: gui_element : URL Média: {gui_element.getMediaUrl()}")
+                VSlog(f"_deepSearchLoop: gui_element : URL Site: {gui_element.getSiteUrl()}")
+                VSlog(f"_deepSearchLoop: gui_element : Nom du site: {gui_element.getSiteName()}")
+                VSlog(f"_deepSearchLoop: gui_element : Nom du fichier: {gui_element.getFileName()}")
+                VSlog(f"_deepSearchLoop: gui_element : Fonction: {gui_element.getFunction()}")
+
+
+                if siteId == 'cHosterGui':
+                    if numberOfCriteria not in self.allVideoLink:
+                        self.allVideoLink[numberOfCriteria] = []
+
+                    # Mark this result as not yet tested for playback
+                    searchResult['params'].addParameter('playTest', 'false')
+                    self.allVideoLink[numberOfCriteria].append(searchResult)
+                    VSlog(f"Added result to allVideoLink with criteria: {numberOfCriteria}")
+
+                    # Auto-play video if it matches the maximum number of criteria
+                    if self.autoPlayVideo and numberOfCriteria == cSearch.MAX_NUMBER_CRITERIA:
+                        VSlog("Auto-play video as it matches the maximum number of criteria")
+                        self.eventFindOneLink.set()  # Signal to launch the video
+
+                else:  # Otherwise, it's a plugin menu, navigate deeper
+                    videoParams.addParameter('searchSiteId', siteId)  # Retain the original site
+                    cGui().emptySearchResult(siteId)  # Clear previous results from this site
+                    VSlog(f"Executing plugin search for site: {siteId} with function: {functionName}")
+                    self._executePluginForSearch(siteId, functionName, videoParams)  # Execute the search
+
+                    # Retrieve the new search results from the executed function
+                    pluginResult = cGui().getSearchResult()
+                    VSlog(f"New search results from site: {siteId}: {pluginResult}")
+
+                    for newSearchResult in pluginResult[siteId]:
+                        if self._continueToSearch() and siteId is not 'cHosterGui':  # Continue only if allowed
+                            # Merge additional parameters into the new result
+                            for nSearchResult in pluginResult['cHosterGui']:
+                                gui_element = nSearchResult['guiElement']
+                                VSlog(f"_deepSearchLoop2: gui_element : Type: {gui_element.getType()}")
+                                VSlog(f"_deepSearchLoop2: gui_element : Catégorie: {gui_element.getCat()}")
+                                VSlog(f"_deepSearchLoop2: gui_element : Meta Addon: {gui_element.getMetaAddon()}")
+                                VSlog(f"_deepSearchLoop2: gui_element : Trailer: {gui_element.getTrailer()}")
+                                VSlog(f"_deepSearchLoop2: gui_element : TMDb ID: {gui_element.getTmdbId()}")
+                                VSlog(f"_deepSearchLoop2: gui_element : IMDb ID: {gui_element.getImdbId()}")
+                                VSlog(f"_deepSearchLoop2: gui_element : Année: {gui_element.getYear()}")
+                                VSlog(f"_deepSearchLoop2: gui_element : Résolution: {gui_element.getRes()}")
+                                VSlog(f"_deepSearchLoop2: gui_element : Genre: {gui_element.getGenre()}")
+                                VSlog(f"_deepSearchLoop2: gui_element : Saison: {gui_element.getSeason()}")
+                                VSlog(f"_deepSearchLoop2: gui_element : Épisode: {gui_element.getEpisode()}")
+                                VSlog(f"_deepSearchLoop2: gui_element : Temps total: {gui_element.getTotalTime()}")
+                                VSlog(f"_deepSearchLoop2: gui_element : Temps de reprise: {gui_element.getResumeTime()}")
+                                VSlog(f"_deepSearchLoop2: gui_element : Meta: {gui_element.getMeta()}")
+                                VSlog(f"_deepSearchLoop2: gui_element : URL Média: {gui_element.getMediaUrl()}")
+                                VSlog(f"_deepSearchLoop2: gui_element : URL Site: {gui_element.getSiteUrl()}")
+                                VSlog(f"_deepSearchLoop2: gui_element : Nom du site: {gui_element.getSiteName()}")
+                                VSlog(f"_deepSearchLoop2: gui_element : Nom du fichier: {gui_element.getFileName()}")
+                                VSlog(f"_deepSearchLoop2: gui_element : Fonction: {gui_element.getFunction()}")
+
+                            newSearchResult['params'].mergeUnexistingInfos(videoParams)
+                            newSearchResult['params'].addParameter('searchSiteId', siteId)
+                            VSlog(f"Merged parameters into new search result: {newSearchResult}")
+
+                            # Avoid infinite recursion on the same function
+                            if newSearchResult['guiElement'].getSiteName() == siteId and \
+                               newSearchResult['guiElement'].getFunction() == functionName:
+                                VSlog(f"Will not loop on the same function: {siteId}.{functionName}")
+                            else:
+                                # Recursively navigate deeper
+                                self._deepSearchLoop(newSearchResult, searchInfo)
+                        else:
+                            VSlog("Search process stopped")
+                            break
+
+    def _quickSearchForPlugin(self, plugin, searchInfo):
+        """
+        Perform a quick search for a given plugin and process its results.
+
+        :param plugin: Dictionary containing plugin information ('identifier', 'name', etc.).
+        :param searchInfo: Dictionary containing search information ('title', 'year', etc.).
+        """
+        VSlog(f"Starting quick search for plugin: {plugin['name']} (ID: {plugin['identifier']})")
+        VSlog(f"Search information: {searchInfo}")
+
+        pluginId = plugin['identifier']
+        pluginName = plugin['name']
+
+        if self._continueToSearch():  # Check if the search should proceed
+            VSlog(f"Initiating plugin search with title: {searchInfo['title']}")
+            # Initiate plugin search with the quoted search title
+            self._pluginSearch(plugin, Quote(searchInfo['title']))
+            searchResults = cGui().getSearchResult()  # Retrieve results from GUI search
+
+            VSlog(f"Search results for plugin {pluginName} (ID: {pluginId}): {searchResults}")
+
+            if pluginId in searchResults and len(searchResults[pluginId]) > 0:  # If there are results for this plugin
+                pluginResult = searchResults[pluginId][:]  # Copy results to avoid modifying the original
+                VSlog(f"Results found for plugin {pluginName}: {pluginResult}")
+
+                for searchResult in pluginResult:
+                    # Add plugin name as a parameter to the result
+                    searchResult['params'].addParameter('searchSiteName', pluginName)
+                    VSlog(f"Added plugin name to search result parameters: {searchResult['params']}")
+
+                    # Perform deep search loop on the result
+                    self._deepSearchLoop(searchResult, searchInfo)
+
+                    # Break if search should stop
+                    if not self._continueToSearch():
+                        VSlog("Search stopped by user or system.")
+                        break
+            else:
+                VSlog(f"No result for plugin: {pluginId}")  # Log if no results are found for this plugin
+
+        # Remove the plugin from the list of remaining plugins to search
+        self.listRemainingPlugins.remove(pluginName)
+        VSlog(f"Removed plugin {pluginName} from remaining plugins list.")
+
+        # Update the progress bar or any other progress indicators
+        self._progressUpdate(sum(map(len, self.allVideoLink.values())))
+        VSlog("Updated progress bar with current search results.")
+
+        # If all plugins have been processed and autoplay is enabled, signal the event
+        if len(self.listRemainingPlugins) == 0 and self.autoPlayVideo:
+            VSlog("All plugins processed and autoplay is enabled. Signaling event to find one link.")
+            self.eventFindOneLink.set()
+
+    def _removeNonLetterCaracter(self, word):
+        """
+        Removes non-alphanumeric characters from a string and normalizes accented characters.
+
+        :param word: The input string to process.
+        :return: A cleaned string with non-alphanumeric characters replaced by spaces 
+                 and accented characters normalized.
+        """
+        VSlog(f"Original word: {word}")
+
+        # Replace non-alphanumeric characters with spaces
+        result = re.sub(r'[^a-zA-Z0-9]', ' ', word, flags=re.I)
+        VSlog(f"After replacing non-alphanumeric characters: {result}")
+
+        # Normalize accented characters
+        result = re.sub(r'[éèêë]', 'e', result, flags=re.I)
+        VSlog(f"After normalizing 'éèêë' to 'e': {result}")
+        result = re.sub(r'à', 'a', result, flags=re.I)
+        VSlog(f"After normalizing 'à' to 'a': {result}")
+        result = re.sub(r'ô', 'o', result, flags=re.I)
+        VSlog(f"After normalizing 'ô' to 'o': {result}")
+        result = re.sub(r'ù', 'u', result, flags=re.I)
+        VSlog(f"After normalizing 'ù' to 'u': {result}")
+        result = re.sub(r'œ', 'oe', result, flags=re.I)
+        VSlog(f"After normalizing 'œ' to 'oe': {result}")
+
+        # Remove extra spaces introduced by replacements
+        result = re.sub(r'\s+', ' ', result).strip()
+        VSlog(f"After removing extra spaces: {result}")
+
+        return result
+
+    def _convert_category(self, sCat):
+        """
+        Converts a string category to its corresponding integer value.
+
+        :param sCat: String representation of the category (e.g., "movie", "series").
+        :return: Integer value representing the category, or 0 if not found.
+        """
+        category_mapping = {
+            "movie": 1,
+            "series": random.choice([2, 4]),  # Randomly choose between 2 (TV Series) and 4 (Mini-Series)
+            # Add more categories as needed in the format: "category_name": category_value
+        }
+
+        # Normalize input category to lowercase and retrieve mapped value
+        category_value = category_mapping.get(sCat.lower(), 0)
+
+        VSlog(f"Converted category '{sCat}' to value: {category_value}")
+        return category_value
+
+
+    def _getSearchInfo(self, title='', sCat="movie"):
+        """
+        Retrieves search information including title, category, and year.
+
+        :param title: Title of the content to search for (default is empty).
+        :param sCat: Category of content ("movie" or "series").
+        :return: Dictionary containing search information or error details.
+        """
+        oInputParameterHandler = cInputParameterHandler()
+
+        # Validate content type
+        if sCat not in ["movie", "series"]:
+            VSlog('Invalid content type. Expected "movie" or "series".')
+            return {"error": "Invalid content type. Use 'movie' or 'series'."}
+
+        # Initialize search text
+        sSearchText = title.strip()
+        if not sSearchText:
+            json_file = FILMS_JSON if sCat == "movie" else SERIES_JSON
+            try:
+                with open(json_file, "r", encoding="utf-8") as f:
+                    suggestions = json.load(f)
+                sSearchText = random.choice(suggestions)  # Use a random title if none provided
+                VSlog(f'Loaded random title: {sSearchText}')
+            except FileNotFoundError:
+                error_message = f"File not found: {json_file}"
+                VSlog(error_message)
+                return {"error": error_message}
+            except json.JSONDecodeError:
+                error_message = f"Failed to decode JSON from file: {json_file}"
+                VSlog(error_message)
+                return {"error": error_message}
+
+        # Determine category
+        if oInputParameterHandler.exist('cat'):
+            searchCat = int(oInputParameterHandler.getValue('cat'))
+            VSlog(f'Category retrieved from input parameters: {searchCat}')
+        else:
+            searchCat = self._convert_category(sCat)
+            VSlog(f'Category converted from sCat parameter: {searchCat}')
+
+        # Determine title
+        if oInputParameterHandler.exist('title'):
+            searchTitle = self._removeNonLetterCaracter(oInputParameterHandler.getValue('title'))
+            VSlog(f'Title retrieved from input parameters: {searchTitle}')
+        else:
+            searchTitle = self._removeNonLetterCaracter(sSearchText)
+            VSlog(f'Title processed from input or default: {searchTitle}')
+
+        # Determine year
+        if oInputParameterHandler.exist('year'):
+            searchYear = str(oInputParameterHandler.getValue('year'))
+            VSlog(f'Year retrieved from input parameters: {searchYear}')
+        else:
+            searchYear = ""
+            VSlog('Year not provided; defaulting to empty.')
+
+        # Return search info
+        search_info = {'title': searchTitle, 'cat': searchCat, 'year': searchYear}
+        VSlog(f'Constructed search info: {search_info}')
+        return search_info
+
+    def _isYearCorrect(self, result, searchInfo):
+        """
+        Checks if the year of the search result matches the search criteria.
+
+        :param result: The search result to check.
+        :param searchInfo: The search information containing user preferences.
+        :return: 1 if the year does not match, -1 if it matches, 0 if neutral.
+        """
+        resultYear = result['params'].getValue('sYear')
+        searchYear = searchInfo.get('year', '')
+
+        VSlog("Checking year correctness:")
+        VSlog(f"Search Year: {searchYear}, Result Year: {resultYear}")
+
+        if resultYear:
+            if resultYear != searchYear:
+                VSlog(f"Year mismatch: Result Year ({resultYear}) does not match Search Year ({searchYear}).")
+                return 1
+            else:
+                VSlog(f"Year match excluded: Exact match found with year {resultYear}.")
+                return -1
+        else:
+            VSlog("Result year is missing. Defaulting to neutral (1).")
+            return 1
+
+    def _isMovieTitleCorrect(self, result, searchInfo):
+        """
+        Checks if the movie title of the search result matches the search criteria.
+
+        :param result: The search result to check.
+        :param searchInfo: The search information containing user preferences.
+        :return: 2 if the title matches exactly, 1 if it partially matches, -1 if it does not match, 0 if neutral.
+        """
+        resultTitle = result['params'].getValue('sMovieTitle')
+        VSlog("Checking movie title correctness:")
+        VSlog(f"Search title: {searchInfo['title']}, Result title: {resultTitle}")
+
+        if resultTitle:
+            if self._checkAllSearchWordInTitle(searchInfo['title'], resultTitle):
+                normalizedSearchTitle = searchInfo['title'].lower()
+                normalizedResultTitle = self._removeNonLetterCaracter(resultTitle).lower()
+                
+                VSlog("All search words found in result title. Normalized titles for comparison:")
+                VSlog(f"Normalized Search Title: {normalizedSearchTitle}")
+                VSlog(f"Normalized Result Title: {normalizedResultTitle}")
+
+                if normalizedSearchTitle == normalizedResultTitle:
+                    VSlog("Exact title match found.")
+                    return 2
+                else:
+                    VSlog("Partial title match found.")
+                    return 1
+            else:
+                VSlog(f"Exclude result because not all search words are in the title: {resultTitle}")
+                return -1
+        else:
+            VSlog("Result title is missing. Defaulting to neutral (0).")
+            return 0
+
+    def _isLangCorrect(self, result, searchInfo):
+        """
+        Checks if the language of the search result matches the user's language preferences.
+
+        :param result: The search result to check.
+        :param searchInfo: The search information containing user preferences.
+        :return: 1 if the language matches, -1 if it doesn't, 0 if neutral.
+        """
+        resultLang = str(result['params'].getValue('sLang')).lower()
+        autoPlayLang = self.addons.getSetting('autoPlayLang')  # 0 = fr, vostfr; 1 = fr; 2 = all
+
+        VSlog("Checking language correctness:")
+        VSlog(f"Result language: {resultLang}, AutoPlay language setting: {autoPlayLang}")
+
+        if resultLang and resultLang != 'false':
+            if autoPlayLang == '1':
+                if 'vf' in resultLang or 'truefrench' in resultLang:
+                    VSlog(f"Language match: 'fr' detected in resultLang: {resultLang}")
+                    return 1
+                elif 'en' in resultLang or 'vostfr' in resultLang:
+                    VSlog(f"Exclude result due to 'en' or 'vostfr' in resultLang: {resultLang}")
+                    return -1
+            elif autoPlayLang == '0':
+                if 'vf' in resultLang or 'truefrench' in resultLang or 'vostfr' in resultLang:
+                    VSlog(f"Language match: 'vf', 'truefrench', or 'vostfr' detected in resultLang: {resultLang}")
+                    return 1
+            elif autoPlayLang == '2':
+                VSlog(f"Language setting allows all. Accepting resultLang: {resultLang}")
+                return 1
+        else:
+            VSlog("Result language is empty or marked as 'false'. Defaulting to neutral.")
+
+        VSlog("Language correctness check resulted in no match.")
+        return 0
+
+
+    def _isCategorieCorrect(self, result, searchInfo):
+        """
+        Checks if the category of the search result matches the search criteria.
+
+        :param result: The search result to check.
+        :param searchInfo: The search information containing user preferences.
+        :return: 1 if the category matches, -1 if it doesn't, 0 if neutral.
+        """
+        searchCat = searchInfo['cat']
+        try:
+            resultMeta = int(result['params'].getValue('sMeta'))
+        except (ValueError, TypeError):
+            VSlog("Error converting result meta value to integer. Defaulting to 0.")
+            resultMeta = 0
+
+        VSlog("Checking category correctness:")
+        VSlog(f"Search category: {searchCat}, Result meta: {resultMeta}")
+
+        if searchCat >= 0 and resultMeta != 0:
+            if searchCat == 1 and resultMeta != 1:
+                VSlog(f"Exclude result because it is not a movie (meta: {resultMeta})")
+                return -1
+            # Currently, series validation is limited
+            elif searchCat in [2, 4] and resultMeta not in [2, 5]:
+                VSlog(f"Exclude result because it is not a series (meta: {resultMeta})")
+                return -1
+            else:
+                VSlog("Category is correct.")
+                return 1
+
+        VSlog("Category is neutral or does not match any exclusion criteria.")
+        return 0
+
+    def _getScoreOfThisResult(self, result, searchInfo):
+        """
+        Calculates the score for a search result based on various criteria.
+
+        :param result: The search result to score.
+        :param searchInfo: The search information containing user preferences.
+        :return: The total score for the result.
+        """
+        VSlog("Calculating score for the result:")
+        VSlog(f"Search info: {searchInfo}")
+        VSlog(f"Result params: {result['params']}")
+
+        yearScore = self._isYearCorrect(result, searchInfo)
+        VSlog(f"Year score: {yearScore}")
+
+        titleScore = self._isMovieTitleCorrect(result, searchInfo)
+        VSlog(f"Title score: {titleScore}")
+
+        langScore = self._isLangCorrect(result, searchInfo)
+        VSlog(f"Language score: {langScore}")
+
+        catScore = self._isCategorieCorrect(result, searchInfo)
+        VSlog(f"Category score: {catScore}")
+
+        # Check if any individual score disqualifies the result
+        if yearScore < 0:
+            VSlog("Year score is negative. Excluding result.")
+        if titleScore < 0:
+            VSlog("Title score is negative. Excluding result.")
+        if langScore < 0:
+            VSlog("Language score is negative. Excluding result.")
+        if catScore < 0:
+            VSlog("Category score is negative. Excluding result.")
+
+        if yearScore < 0 or titleScore < 0 or langScore < 0 or catScore < 0:
+            VSlog("Result disqualified due to negative scores.")
+            return 0
+
+        totalScore = yearScore + titleScore + langScore + catScore
+        if totalScore == 4: #rigged it
+            totalScore = 5
+        VSlog(f"Total score for this result: {totalScore}")
+        return totalScore
+
+    def _checkAllSearchWordInTitle(self, searchTitle, resultTitle):
+        """
+        Checks if all words in the search title are present in the result title.
+
+        :param searchTitle: The search title to check.
+        :param resultTitle: The result title to check against.
+        :return: True if all words are present, False otherwise.
+        """
+        VSlog("Checking if all words in search title are in result title.")
+        VSlog(f"Original search title: '{searchTitle}', Result title: '{resultTitle}'")
+        
+        searchTitle = searchTitle.lower()
+        resultTitle = resultTitle.lower()
+        
+        VSlog(f"Lowercased search title: '{searchTitle}', Lowercased result title: '{resultTitle}'")
+
+        for word in searchTitle.split():
+            if word not in resultTitle:
+                VSlog(f"Word '{word}' not found in result title.")
+                return False
+            VSlog(f"Word '{word}' found in result title.")
+        
+        VSlog("All words in the search title are present in the result title.")
+        return True
+
+    def _displayAllResult(self, searchInfo):
+        """
+        Displays all search results in the GUI.
+
+        :param searchInfo: The search information containing user preferences.
+        """
+        VSlog("Starting to display all results.")
+        
+        try:
+            # Initialize GUI and display the global search info
+            searchGui = cGui()
+            allSearchInfo = f"{searchInfo['title']} {searchInfo['year']}"
+            VSlog(f"Search info: {allSearchInfo}")
+            searchGui.addText('globalSearch', self.addons.VSlang(30081) % allSearchInfo, 'search.png')
+            VSlog("Added global search info to the GUI.")
+
+            # Check if there are any video links
+            if len(self.allVideoLink) == 0:
+                VSlog("No video links found. Displaying 'no information' message.")
+                searchGui.addText('globalSearch')  # "Aucune information"
+            else:
+                # Iterate over results by criteria
+                maxCriteria = max(self.allVideoLink.keys(), default=0)
+                VSlog(f"Maximum criteria found: {maxCriteria}")
+                
+                for numCriteria in range(maxCriteria, 0, -1):
+                    if numCriteria in self.allVideoLink.keys():
+                        VSlog(f"Processing results with {numCriteria} criteria.")
+                        for result in self.allVideoLink[numCriteria]:
+                            VSlog(f"Displaying result: {result}")
+                            self._displayOneResult(searchGui, result)
+
+            # Set content type and end directory
+            cGui.CONTENT = 'files'
+            searchGui.setEndOfDirectory()
+            VSlog("Finished displaying all results. End of directory set.")
+
+        except Exception as e:
+            VSlog(f"Error while displaying all results: {e}")
+            traceback.print_exc()
+
+        VSlog("Finished execution of _displayAllResult.")
+
+    def _displayOneResult(self, searchGui, result):
+        """
+        Displays a single search result in the GUI.
+
+        :param searchGui: The GUI object to display the result.
+        :param result: The search result to display.
+        """
+        VSlog("Starting to display a single result.")
+        
+        try:
+            # Retrieve result parameters
+            resultParams = result['params']
+            VSlog(f"Retrieved result parameters: {resultParams}")
+
+            # Initialize the title with the main title
+            title = resultParams.getValue('sTitle')
+            if not title:
+                VSlog("No title found for the result. Skipping this result.")
+                return
+            VSlog(f"Initial title: {title}")
+
+            # Add language information to the title
+            lang = resultParams.getValue('sLang')
+            if lang:
+                title += f" ({lang})"
+                VSlog(f"Added language to title: {lang}")
+
+            # Add year information to the title
+            year = resultParams.getValue('sYear')
+            if year:
+                title += f" {year}"
+                VSlog(f"Added year to title: {year}")
+
+            # Add hoster information to the title
+            hoster = resultParams.getValue('sHosterIdentifier')
+            if hoster:
+                title += f" - [COLOR skyblue]{hoster}[/COLOR]"
+                VSlog(f"Added hoster to title: {hoster}")
+
+            # Add quality information to the title
+            quality = resultParams.getValue('sQual')
+            if quality:
+                title += f" [{quality.upper()}]"
+                VSlog(f"Added quality to title: {quality}")
+
+            # Add search site name information to the title
+            searchSiteName = resultParams.getValue('searchSiteName')
+            if searchSiteName:
+                title += f" - [COLOR olive]{searchSiteName}[/COLOR]"
+                VSlog(f"Added search site name to title: {searchSiteName}")
+
+            # Set the title for the result
+            result['guiElement'].setTitle(title)
+            VSlog(f"Final title set for the result: {title}")
+
+            # Add the result to the GUI
+            searchGui.addFolder(result['guiElement'], result['params'], False)
+            VSlog("Added result to the GUI.")
+
+        except Exception as e:
+            VSlog(f"Error while displaying result: {e}")
+            traceback.print_exc()
+
+        VSlog("Finished displaying a single result.")
+
+    def _pluginSearch(self, plugin, sSearchText, updateProcess=False):
+        """
+        Performs a search using a specified plugin.
+
+        :param plugin: Dictionary containing plugin information.
+        :param sSearchText: The text to search for.
+        :param updateProcess: Flag to indicate if the process should be updated.
+        """
+        VSlog(f"Starting search with plugin: {plugin['name']} (ID: {plugin['identifier']})")
+        VSlog(f"Search text: {sSearchText}")
+        VSlog(f"Update process flag is {'enabled' if updateProcess else 'disabled'}")
+
+        try:
+            # Attempt to import the plugin module
+            VSlog(f"Importing module for plugin: {plugin['identifier']}")
+            plugins = __import__(f'resources.sites.{plugin["identifier"]}', fromlist=[plugin['identifier']])
+            VSlog(f"Successfully imported plugin module: {plugin['identifier']}")
+
+            # Retrieve the search function
+            function_name = plugin['search'][1]
+            VSlog(f"Retrieving search function: {function_name}")
+            function = getattr(plugins, function_name)
+            VSlog(f"Search function '{function_name}' successfully retrieved.")
+
+            # Construct the search URL
+            sUrl = plugin['search'][0] + str(sSearchText)
+            VSlog(f"Constructed search URL: {sUrl}")
+
+            # Execute the search function
+            VSlog(f"Executing search function '{function_name}' with URL: {sUrl}")
+            function(sUrl)
+            VSlog(f"Search function '{function_name}' executed successfully.")
+
+            # Update the process if the flag is enabled
+            if updateProcess:
+                VSlog(f"Update process is enabled. Removing plugin '{plugin['name']}' from the remaining list.")
+                self.listRemainingPlugins.remove(plugin['name'])
+                VSlog("Updating progress based on the current search results.")
+                self._progressUpdate(sum(map(len, cGui().getSearchResult().values())))
+
+            VSlog(f"Search completed for plugin: {plugin['name']} (ID: {plugin['identifier']})")
+
+        except Exception as e:
+            # Log the error details if an exception occurs
+            VSlog(f"Error during search with plugin '{plugin['name']}' (ID: {plugin['identifier']}): {e}")
+            traceback.print_exc()
+
+    def _executePluginForSearch(self, sSiteName, sFunction, parameters):
+        """
+        Executes a specified function from a plugin for a given site.
+
+        :param sSiteName: The name of the site.
+        :param sFunction: The function to execute.
+        :param parameters: The parameters to pass to the function.
+        :return: True if the execution is successful, False otherwise.
+        """
+        VSlog(f"Starting execution of plugin for site: {sSiteName}, function: {sFunction} with parameters: {parameters}")
+
+        try:
+            # Import the specified site module dynamically
+            VSlog(f"Attempting to import plugin module for site: {sSiteName}")
+            plugins = __import__(f'resources.sites.{sSiteName}', fromlist=[sSiteName])
+            VSlog(f"Successfully imported module for site: {sSiteName}")
+
+            # Retrieve the specified function from the imported module
+            VSlog(f"Retrieving function '{sFunction}' from the module.")
+            function = getattr(plugins, sFunction)
+            VSlog(f"Function '{sFunction}' successfully retrieved from module '{sSiteName}'.")
+
+            # Execute the function with the provided parameters
+            VSlog(f"Executing function '{sFunction}' with parameters: {parameters}")
+            function(parameters)
+            VSlog(f"Function '{sFunction}' executed successfully.")
+
+            result = True
+
+        except Exception as error:
+            # Log the error details if an exception occurs
+            VSlog(f"Error while executing plugin for site: {sSiteName}, function: {sFunction}. Error: {error}")
+            traceback.print_exc()
+            result = False
+
+        VSlog(f"Execution of plugin for site: {sSiteName} complete. Result: {'Success' if result else 'Failure'}")
+        return result
+
+    def _playHosterGui(self, sFunction, parameters=None):
+        """
+        Executes a specified function from the cHosterGui class.
+
+        :param sFunction: The function to execute.
+        :param parameters: The parameters to pass to the function (optional).
+        :return: The result of the function execution, or None if an error occurs.
+        """
+        try:
+            VSlog(f"Initializing hoster GUI import for function '{sFunction}' with parameters: {parameters}")
+            
+            # Import the cHosterGui class from the hoster module
+            plugins = __import__('resources.lib.gui.hoster', fromlist=['cHosterGui']).cHosterGui()
+            VSlog("Successfully imported cHosterGui class.")
+
+            # Retrieve the specified function from the cHosterGui instance
+            function = getattr(plugins, sFunction)
+            VSlog(f"Successfully retrieved function '{sFunction}' from cHosterGui.")
+
+            # Call the function with or without parameters
+            if parameters:
+                VSlog(f"Calling function '{sFunction}' with parameters: {parameters}")
+                result = function(*parameters)
+            else:
+                VSlog(f"Calling function '{sFunction}' with no parameters.")
+                result = function()
+
+            VSlog(f"Function '{sFunction}' executed successfully. Result: {result}")
+            return result
+
+        except Exception as e:
+            # Log any exception that occurs during the process
+            VSlog(f"Error occurred while executing '{sFunction}' in _playHosterGui: {e}")
+            traceback.print_exc()
+            return None
+'''
+
+    with open(file_path, 'w', encoding='utf-8') as f:
+        f.write(new_content)
+
 def modify_files():
     VSlog("Starting file modification process")
 
