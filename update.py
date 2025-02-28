@@ -1783,7 +1783,7 @@ def get_elitegol_url():
     def save_valid_url(url):
         try:
             config = configparser.ConfigParser()
-            config["elitgol"] = {"current_url": url}
+            config["elitegol"] = {"current_url": url}
             with open(CONFIG_FILE, "w") as configfile:
                 config.write(configfile)
         except Exception as e:
@@ -1800,8 +1800,8 @@ def get_elitegol_url():
             config = configparser.ConfigParser()
             if os.path.exists(CONFIG_FILE):
                 config.read(CONFIG_FILE)
-                if "elitgol" in config and "current_url" in config["elitgol"]:
-                    saved_url = config["elitgol"]["current_url"]
+                if "elitegol" in config and "current_url" in config["elitegol"]:
+                    saved_url = config["elitegol"]["current_url"]
                 else:
                     load_and_validate_default_url()
         except FileNotFoundError:
