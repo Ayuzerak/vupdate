@@ -2732,7 +2732,7 @@ def showSeries(sSearch=''):
             sTitle = aEntry[1]
 
             if sSearch:
-                if not oUtil.CheckOccurence(sSearchText, sTitle):
+                if not cUtil.CheckOccurence(sSearchText, sTitle):
                     continue  # Filtre de recherche
 
             sDisplayTitle = sTitle
