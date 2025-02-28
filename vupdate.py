@@ -2994,55 +2994,84 @@ def set_papadustream_url(url):
         VSlog(f"Error while setting PapaDuStream URL: {e}")
 
 def get_elitegol_url():
-    """Retrieve the EliteGol URL from its website, or use the last valid one."""
-    VSlog("Retrieving EliteGol URL from its website.")
-
-    CONFIG_FILE = "config_elitegol.json"
-
-    def save_last_valid_url(url):
-        """Save the last valid URL to a config file."""
-        with open(CONFIG_FILE, "w") as file:
-            json.dump({"last_valid_url": url}, file)
-
-    def load_last_valid_url():
-        """Load the last valid URL from the config file."""
+    """Retrieve the EliteGol URL, using the first valid found or the last saved."""
+    VSlog("Retrieving EliteGol URL from websites or saved file.")
+    valid_urls = []
+    
+    # Function to save URL to file
+    def save_url(url):
         try:
-            with open(CONFIG_FILE, "r") as file:
-                data = json.load(file)
-                return data.get("last_valid_url")
-        except (FileNotFoundError, json.JSONDecodeError):
+            with open('last_valid_url.txt', 'w') as f:
+                f.write(url)
+        except Exception as e:
+            VSlog(f"Error saving URL to file: {e}")
+    
+    # Function to load URL from file
+    def load_url():
+        try:
+            with open('last_valid_url.txt', 'r') as f:
+                saved_url = f.read().strip()
+                return saved_url if saved_url else None
+        except FileNotFoundError:
+            VSlog("No saved EliteGol URL file found.")
             return None
-
-    def is_valid_url(url):
-        """Check if the webpage of the given URL contains the word 'match'."""
-        try:
-            response = requests.get(url)
-            return "match" in response.text.lower()
-        except requests.RequestException as e:
-            VSlog(f"Error checking URL validity: {e}")
-            return False
-    sources = [
-        "https://fulldeals.fr/streamonsport/",
-        "https://lefoot.ru/"
-    ]
+        except Exception as e:
+            VSlog(f"Error reading saved URL file: {e}")
+            return None
     
-    for source in sources:
+    try:
+        # Attempt to retrieve from first website: fulldeals.fr/streamonsport/
         try:
-            response = requests.get(source)
+            response = requests.get("https://fulldeals.fr/streamonsport/", timeout=10)
+            response.raise_for_status()
             content = response.text
-            web_addresses = re.findall('href="(https?://[\\w.-]+(?:\\.[\\w\\.-]+)+(?:/[\\w\\.-]*)*)', content)
-            
-            for url in web_addresses:
-                url = url.replace("http", "https").replace("httpss", "https") + "/"
-                if is_valid_url(url):
-                    VSlog(f"Valid EliteGol URL found: {url}")
-                    save_last_valid_url(url)
-                    return url
+            target_pos = content.find("<strong>la vraie adresse")
+            if target_pos != -1:
+                content_part = content[target_pos:]
+                urls = re.findall(r'href="(https?://[^"]+)"', content_part)
+                valid_urls.extend([url for url in urls if 'match' in url.lower()])
         except requests.RequestException as e:
-            VSlog(f"Error while retrieving EliteGol URL from {source}: {e}")
-    
-    VSlog("No valid EliteGol URL found. Using last known valid URL if available.")
-    return load_last_valid_url()
+            VSlog(f"Error fetching fulldeals.fr: {e}")
+        
+        # Attempt to retrieve from second website: lefoot.ru/
+        try:
+            response = requests.get("https://lefoot.ru/", timeout=10)
+            response.raise_for_status()
+            content = response.text
+            urls = re.findall(r'href="(https?://[^"]+)"', content)
+            valid_urls.extend([url for url in urls if 'match' in url.lower()])
+        except requests.RequestException as e:
+            VSlog(f"Error fetching lefoot.ru: {e}")
+        
+        # Check if any valid URLs were found in this run
+        if valid_urls:
+            first_valid = valid_urls[0]
+            # Ensure URL uses HTTPS and ends with a slash
+            first_valid = first_valid.replace("http://", "https://")
+            if not first_valid.endswith('/'):
+                first_valid += '/'
+            save_url(first_valid)
+            VSlog(f"Using new EliteGol URL: {first_valid}")
+            return first_valid
+        else:
+            # No new valid URLs, attempt to load from file
+            saved_url = load_url()
+            if saved_url:
+                VSlog(f"Using saved EliteGol URL: {saved_url}")
+                return saved_url
+            else:
+                VSlog("No valid EliteGol URL found in current run or saved file.")
+                return None
+    except Exception as e:
+        VSlog(f"Unexpected error: {e}")
+        # Attempt to load saved URL even on unexpected errors
+        saved_url = load_url()
+        if saved_url:
+            VSlog(f"Using saved EliteGol URL after error: {saved_url}")
+            return saved_url
+        else:
+            VSlog("No saved EliteGol URL available.")
+            return None
     
 def set_elitegol_url(url):
     """Set a new URL for EliteGol in the sites.json file."""
