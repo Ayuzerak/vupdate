@@ -1723,88 +1723,91 @@ def set_papadustream_url(url):
         VSlog(f"Error while setting PapaDuStream URL: {e}")
 
 def get_elitegol_url():
-    """Retrieve EliteGol URL using original extraction logic with fallback to saved URL."""
-    VSlog("Retrieving EliteGol URL using original extraction logic.")
+    """Retrieve EliteGol URL with content validation and fallback to saved URL."""
+    VSlog("Starting EliteGol URL retrieval process")
     
-    def save_url(url):
+    def save_valid_url(url):
         try:
-            with open('last_elitegol.txt', 'w') as f:
+            with open('last_valid.txt', 'w') as f:
                 f.write(url)
+                VSlog(f"Saved new valid URL: {url}")
         except Exception as e:
-            VSlog(f"Error saving URL: {e}")
-
-    def load_url():
+            VSlog(f"URL save error: {str(e)}")
+    
+    def load_and_validate_url():
         try:
-            with open('last_elitegol.txt', 'r') as f:
-                return f.read().strip()
+            with open('last_valid.txt', 'r') as f:
+                saved_url = f.read().strip()
+                if validate_url_content(saved_url):
+                    return saved_url
         except FileNotFoundError:
-            return None
+            VSlog("No saved URL file found")
         except Exception as e:
-            VSlog(f"Error loading URL: {e}")
-            return None
-
+            VSlog(f"URL load error: {str(e)}")
+        return None
+    
+    def validate_url_content(url):
+        try:
+            response = requests.get(url, timeout=15)
+            return 'match' in response.text.lower()
+        except Exception as e:
+            VSlog(f"Content validation failed for {url}: {str(e)}")
+            return False
+    
+    current_valid_url = None
+    
     try:
-        valid_urls = []
-        
-        # First check fulldeals.fr/streamonsport/ with original logic
+        # First source: fulldeals.fr
         try:
             response = requests.get("https://fulldeals.fr/streamonsport/", timeout=10)
             content = response.text
-            target_position = content.find("<strong>la vraie adresse")
+            target_pos = content.find("<strong>la vraie adresse")
             
-            if target_position != -1:
-                content_after_target = content[target_position:]
-                # Original regex pattern from user's code
-                web_addresses = re.findall(r'href="(https?://[\w.-]+(?:\.[\w.-]+)+(?:/[\w.-]*)*', content_after_target)
-                
-                # Process URLs exactly as original code
-                if web_addresses:
-                    url = web_addresses[0]
-                    url = url.replace("http", "https").replace("httpss", "https") + "/"
-                    if 'match' in url.lower():
-                        valid_urls.append(url)
+            if target_pos != -1:
+                section = content[target_pos:]
+                urls = re.findall(r'href="(https?://[\w.-]+(?:\.[\w.-]+)+(?:/[\w.-]*)*', section)
+                if urls:
+                    raw_url = urls[0]
+                    processed_url = raw_url.replace("http", "https").replace("httpss", "https").rstrip('/') + '/'
+                    VSlog(f"Found fulldeals URL candidate: {processed_url}")
+                    if validate_url_content(processed_url):
+                        current_valid_url = processed_url
         except Exception as e:
-            VSlog(f"Error processing fulldeals.fr: {e}")
-
-        # Then check lefoot.ru/ with original logic
-        try:
-            response = requests.get("https://lefoot.ru/", timeout=10)
-            content = response.text
-            # Original regex pattern from user's code
-            web_addresses = re.findall(r'href="(https?://[\w.-]+(?:\.[\w.-]+)+(?:/[\w.-]*)*', content)
-            
-            # Process URLs exactly as original code
-            if web_addresses:
-                url = web_addresses[0]
-                url = url.replace("http", "https").replace("httpss", "https") + "/"
-                if 'match' in url.lower():
-                    valid_urls.append(url)
-        except Exception as e:
-            VSlog(f"Error processing lefoot.ru: {e}")
-
-        # Process results
-        if valid_urls:
-            selected_url = valid_urls[0]  # First valid URL takes priority
-            save_url(selected_url)
-            VSlog(f"Using new valid URL: {selected_url}")
-            return selected_url
+            VSlog(f"fulldeals processing error: {str(e)}")
+        
+        # Second source: lefoot.ru (only if first failed)
+        if not current_valid_url:
+            try:
+                response = requests.get("https://lefoot.ru/", timeout=10)
+                content = response.text
+                urls = re.findall(r'href="(https?://[\w.-]+(?:\.[\w.-]+)+(?:/[\w.-]*)*', content)
+                if urls:
+                    raw_url = urls[0]
+                    processed_url = raw_url.replace("http", "https").replace("httpss", "https").rstrip('/') + '/'
+                    VSlog(f"Found lefoot URL candidate: {processed_url}")
+                    if validate_url_content(processed_url):
+                        current_valid_url = processed_url
+            except Exception as e:
+                VSlog(f"lefoot processing error: {str(e)}")
+        
+        # Save and return if found new valid URL
+        if current_valid_url:
+            save_valid_url(current_valid_url)
+            return current_valid_url
         
         # Fallback to saved URL
-        saved_url = load_url()
-        if saved_url and 'match' in saved_url.lower():
-            VSlog(f"Using saved URL: {saved_url}")
+        saved_url = load_and_validate_url()
+        if saved_url:
+            VSlog("Using validated fallback URL")
             return saved_url
         
         VSlog("No valid URLs found in current check or saved file")
         return None
 
     except Exception as e:
-        VSlog(f"Critical error: {e}")
-        saved_url = load_url()
-        if saved_url and 'match' in saved_url.lower():
-            VSlog(f"Using saved URL after error: {saved_url}")
-            return saved_url
-        return None
+        VSlog(f"Critical error: {str(e)}")
+        saved_url = load_and_validate_url()
+        return saved_url if saved_url else None
     
 def set_elitegol_url(url):
     """Set a new URL for EliteGol in the sites.json file."""
