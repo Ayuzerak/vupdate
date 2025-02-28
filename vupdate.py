@@ -4642,6 +4642,8 @@ class cUpdate:
             modify_files()
 
             insert_update_service_addon()
+
+            addVstreamVoiceControl()
             
         except Exception as e:
             VSlog(f"An error occurred during update settings: {e}")
