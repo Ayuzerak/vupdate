@@ -1932,7 +1932,7 @@ class cSearch:
                             VSlog(f"Merged parameters into new search result: {newSearchResult}")
 
                             # Avoid infinite recursion on the same function
-                            if newSearchResult['guiElement'].getSiteName() == siteId and                                newSearchResult['guiElement'].getFunction() == functionName:
+                            if newSearchResult['guiElement'].getSiteName() == siteId and newSearchResult['guiElement'].getFunction() == functionName:
                                 VSlog(f"Will not loop on the same function: {siteId}.{functionName}")
                             else:
                                 # Recursively navigate deeper
@@ -2068,8 +2068,13 @@ class cSearch:
             try:
                 with open(json_file, "r", encoding="utf-8") as f:
                     suggestions = json.load(f)
-                sSearchText = random.choice(suggestions)  # Use a random title if none provided
+                # Sélection aléatoire + extraction titre
+                random_entry = random.choice(suggestions)
+                sSearchText = random_entry.get('title', '')
                 VSlog(f'Loaded random title: {sSearchText}')
+
+                if not sSearchText:
+                    return {"error": "Entrée sans titre détectée"}
             except FileNotFoundError:
                 error_message = f"File not found: {json_file}"
                 VSlog(error_message)
