@@ -9,7 +9,6 @@
     description="This is a complementary service for personalized updates for vStream."
   >
     <requires>
-        <import addon="repository.vstreamupdate"/>
         <import addon="xbmc.python" version="3.0.0"/>
         <import addon="script.module.requests"/>
     </requires>
