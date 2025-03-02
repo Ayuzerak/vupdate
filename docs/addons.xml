@@ -11,54 +11,15 @@
       <import addon="script.module.requests"/>
     </requires>
     
-    <extension point="xbmc.python.script" library="addon.py">
-      <provides>executable</provides>
-    </extension>
+    <extension point="xbmc.service" library="addon.py" />
 
     <!-- Métadonnées de l'addon -->
-    <extension point="xbmc.service" library="addon.py"/>
     <extension point="xbmc.addon.metadata">
-        <summary lang="en_GB">Apply the personalized updates of vStream</summary>
-        <description lang="en_GB">This is a complementary service for personalized updates for vStream.</description>
-        
-        <summary lang="de_DE">Wendet die personalisierten Updates von vStream an</summary>
-        <description lang="de_DE">Dies ist ein ergänzender Dienst für personalisierte Updates für vStream.</description>
-        
-        <summary lang="it_IT">Applica gli aggiornamenti personalizzati di vStream</summary>
-        <description lang="it_IT">Questo è un servizio complementare per aggiornamenti personalizzati per vStream.</description>
-        
-        <summary lang="el_GR">Εφαρμόζει τις εξατομικευμένες ενημερώσεις του vStream</summary>
-        <description lang="el_GR">Αυτή είναι μια συμπληρωματική υπηρεσία για εξατομικευμένες ενημερώσεις του vStream.</description>
-        
-        <summary lang="sv_SE">Tillämpa de personliga uppdateringarna för vStream</summary>
-        <description lang="sv_SE">Detta är en kompletterande tjänst för personliga uppdateringar för vStream.</description>
-        
-        <summary lang="ru_RU">Применяет персонализированные обновления vStream</summary>
-        <description lang="ru_RU">Это дополнительный сервис для персонализированных обновлений vStream.</description>
-        
-        <summary lang="es_ES">Aplica las actualizaciones personalizadas de vStream</summary>
-        <description lang="es_ES">Este es un servicio complementario para actualizaciones personalizadas de vStream.</description>
-        
-        <summary lang="fr_FR">Applique les mises à jour personnalisées de vStream</summary>
-        <description lang="fr_FR">C'est un service complémentaire de mise à jour personnalisé pour vStream.</description>
-
-        <platform>all</platform>
-        <license>GPL-2.0-only</license>
-        <news>
-v1.0.0 (2024-01-08)
-- Update by vstream
-
-v1.1.0(2024-02-10)
-- Update by vstreamupdate
-        </news>
-        <assets>
-            <icon>resources/media/icon.png</icon>
-            <fanart>resources/media/fanart.jpg</fanart>
-            <screenshot>resources/media/screenshot01.jpg</screenshot>
-            <screenshot>resources/media/screenshot02.jpg</screenshot>
-            <screenshot>resources/media/upnext-settings.jpg</screenshot>
-            <screenshot>resources/media/upnext-developer.jpg</screenshot>
-        </assets>
+      <summary lang="en">vStream Update Service</summary>
+      <description lang="en">This is a complementary service for personalized updates for vStream.</description>
+      <summary lang="fr">Service de mise à jour vStream</summary>
+      <description lang="fr">Service complémentaire pour les mises à jour personnalisées de vStream.</description>
+      <platform>all</platform>
     </extension>
   </addon>
   
