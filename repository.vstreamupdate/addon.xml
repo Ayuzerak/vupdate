@@ -4,10 +4,12 @@
         version="1.0.0"
         provider-name="Ayuj">
     <extension point="xbmc.addon.repository" name="vStream Update XBMC Addon Repository">
-         <info compressed="false">https://ayuzerak.github.io/vupdate/addons.xml</info>
-         <checksum>https://ayuzerak.github.io/vupdate/addons.xml.md5</checksum>
-         <datadir zip="true">https://ayuzerak.github.io/vupdate/</datadir> <!-- URL racine -->
-    </extension>
+    <dir>
+        <info compressed="false">https://Ayuzerak.github.io/vupdate/addons.xml</info>
+        <checksum>https://Ayuzerak.github.io/vupdate/addons.xml.md5</checksum>
+        <datadir zip="true">https://Ayuzerak.github.io/vupdate/service.vstreamupdate</datadir>
+    </dir>
+   </extension>
 
     <extension point="xbmc.addon.metadata">
         <summary lang="fr">vStream Update Repository</summary>
