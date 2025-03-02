@@ -4508,6 +4508,82 @@ def edit_live_file():
         VSlog("File modified successfully.")
     except Exception as e:
         VSlog(f"Error writing file: {e}")
+        
+def create_recommendation_files_to_watch():
+    # paths of files
+    films_path = VSPath('special://home/addons/plugin.video.vstream/resources/20filmslesplusrecents.json').replace('\\', '/')
+    series_path = VSPath('special://home/addons/plugin.video.vstream/resources/20serieslesplusrecents.json').replace('\\', '/')
+
+    def get_films_examples():
+        return [
+            {
+                "title": "Dune : Deuxième Partie",
+                "year": 2024,
+                "imdb_id": "tt15239678",
+                "genre": "Science-Fiction",
+                "description": "Suite de l'adaptation du roman de Frank Herbert. Paul Atreides mène une rébellion dans le désert aride de la planète Dune.",
+                "poster": "https://exemple.com/posters/dune2.jpg",
+                "rating": 8.7,
+                "added": datetime.now().isoformat()
+            },
+            {
+                "title": "Oppenheimer",
+                "year": 2023,
+                "imdb_id": "tt15398776",
+                "genre": "Biopic/Historique",
+                "description": "L'histoire du père de la bombe atomique et des dilemmes moraux de cette découverte.",
+                "poster": "https://exemple.com/posters/oppenheimer.jpg",
+                "rating": 8.4,
+                "added": datetime.now().isoformat()
+            }
+        ]
+
+    def get_series_examples():
+        return [
+            {
+                "title": "Stranger Things Saison 5",
+                "year": 2024,
+                "imdb_id": "tt4574334",
+                "genre": "Horreur/Fantastique",
+                "description": "Dernière saison de la série culte se déroulant à Hawkins. Les héros affrontent le Néant une dernière fois.",
+                "poster": "https://exemple.com/posters/st5.jpg",
+                "seasons": 5,
+                "episodes": 45,
+                "added": datetime.now().isoformat()
+            },
+            {
+                "title": "Loki Saison 2",
+                "year": 2023,
+                "imdb_id": "tt9140554",
+                "genre": "Super-héros/Science-Fiction",
+                "description": "Suite des aventures du dieu de la malice à travers le multivers.",
+                "poster": "https://exemple.com/posters/loki2.jpg",
+                "seasons": 2,
+                "episodes": 12,
+                "added": datetime.now().isoformat()
+            }
+        ]
+
+    def initialise_file(chemin, donnees):
+        repertoire = os.path.dirname(chemin)
+        if not os.path.exists(repertoire):
+            os.makedirs(repertoire, exist_ok=True)
+        
+        if not os.path.exists(chemin):
+            with open(chemin, 'w', encoding='utf-8') as f:
+                json.dump(donnees, f, indent=4, ensure_ascii=False)
+
+    # Initialisation of the films
+    initialise_file(
+        films_path,
+        get_films_examples()
+    )
+
+    # Initialisation of tv_shows
+    initialise_file(
+        series_path,
+        get_series_examples()
+    )
 
 class cUpdate:
 
@@ -4532,6 +4608,8 @@ class cUpdate:
             # Add new site if necessary
             VSlog("Adding PapaDuStream if not present.")
             ajouter_papadustream()
+
+            create_recommendation_files_to_watch()
 
             # Modify files as required
             VSlog("Modifying necessary files.")
