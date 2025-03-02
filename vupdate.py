@@ -1361,6 +1361,13 @@ def add_get_recommendations_method_for_netflix_like_recommendations():
             return meta
         else:
             return {}
+
+    def get_recommendations_by_id_tv(self, tmdbid):
+        meta = self._call('tv/' + tmdbid + '/recommendations')
+        if 'errors' not in meta and 'status_code' not in meta:
+            return meta
+        else:
+            return {}
     """
     # Nettoyer le contenu et le ré-indenter pour respecter l'indentation d'une classe (4 espaces)
     dedented = textwrap.dedent(raw_method_content).strip('\n')
