@@ -11,7 +11,9 @@
       <import addon="script.module.requests"/>
     </requires>
     
-    <extension point="xbmc.service" library="addon.py" />
+    <extension point="xbmc.python.script" library="addon.py">
+      <provides>executable</provides>
+    </extension>
 
     <!-- Métadonnées de l'addon -->
     <extension point="xbmc.service" library="addon.py"/>
