@@ -4514,7 +4514,7 @@ def create_recommendation_files_to_watch():
     films_path = VSPath('special://home/addons/plugin.video.vstream/resources/20filmslesplusrecents.json').replace('\\', '/')
     series_path = VSPath('special://home/addons/plugin.video.vstream/resources/20serieslesplusrecents.json').replace('\\', '/')
 
-    def get_films_examples():
+    def get_movies_examples():
         return [
             {
                 "title": "Dune : Deuxième Partie",
@@ -4573,13 +4573,13 @@ def create_recommendation_files_to_watch():
             with open(chemin, 'w', encoding='utf-8') as f:
                 json.dump(donnees, f, indent=4, ensure_ascii=False)
 
-    # Initialisation of the films
+    # Initialisation of the movies
     initialise_file(
         films_path,
-        get_films_examples()
+        get_movies_examples()
     )
 
-    # Initialisation of tv_shows
+    # Initialisation of the tv shows
     initialise_file(
         series_path,
         get_series_examples()
