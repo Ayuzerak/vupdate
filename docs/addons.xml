@@ -1,22 +1,28 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <addons>
-  <!-- Entrée pour votre add-on -->
   <addon
     id="service.vstreamupdate"
     version="1.1.0"
     name="Vstreamupdate"
     provider="ayuj"
-    description="This is a complementary service for personalized updates for vStream."
   >
     <requires>
-        <import addon="xbmc.python" version="3.0.0"/>
-        <import addon="script.module.requests"/>
+      <import addon="xbmc.python" version="3.0.0+"/> <!-- Version Python corrigée -->
+      <import addon="script.module.requests"/>
     </requires>
-    <extension
-      point="xbmc.service"
-      library="addon.py"
-    />
-  </addon>
+    
+    <extension point="xbmc.service" library="addon.py" />
 
+    <!-- Métadonnées de l'addon -->
+    <extension point="xbmc.addon.metadata">
+      <summary lang="en">vStream Update Service</summary>
+      <description lang="en">This is a complementary service for personalized updates for vStream.</description>
+      <summary lang="fr">Service de mise à jour vStream</summary>
+      <description lang="fr">Service complémentaire pour les mises à jour personnalisées de vStream.</description>
+      <platform>all</platform>
+    </extension>
+  </addon>
+  
   <!-- Ajoutez d'autres add-ons ici -->
+
 </addons>
