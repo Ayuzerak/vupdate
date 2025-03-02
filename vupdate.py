@@ -4590,6 +4590,72 @@ def create_recommendation_files_to_watch():
         get_series_examples()
     )
 
+# def save_watched_recommendations_to_json():
+#     oDb = cDb()
+#     ADDON = addon()
+#     recommendations = {}
+
+#     try:
+#         # Get all watched content (movies + shows)
+#         watched_content = oDb.get_catWatched('1', limit=None) + oDb.get_catWatched('4', limit=None)
+        
+#         # Create set of all watched TMDB IDs (integer format)
+#         watched_ids = {int(item['tmdb_id']) for item in watched_content}
+
+#         for item in watched_content:
+#             title = item['title']
+#             tmdb_id = item['tmdb_id']
+#             media_type = 'movie' if item['cat'] == 1 else 'tv'
+
+#             # Get recommendations
+#             if media_type == 'movie':
+#                 data = self.get_recommandations_by_id_movie(tmdb_id)
+#             else:
+#                 data = self.get_recommandations_by_id_tv(tmdb_id)
+
+#             if data.get('results'):
+#                 date_field = 'release_date' if media_type == 'movie' else 'first_air_date'
+                
+#                 # Filter recommendations
+#                 filtered = [
+#                     rec for rec in data['results']
+#                     if all([
+#                         rec.get('id') not in watched_ids,  # Exclude watched items
+#                         rec.get(date_field),  # Require valid date
+#                         not rec.get('adult', False)  # Optional: exclude adult content
+#                     ])
+#                 ]
+
+#                 # Sort and limit
+#                 sorted_recs = sorted(
+#                     filtered,
+#                     key=lambda x: x[date_field],
+#                     reverse=True
+#                 )[:10]
+
+#                 if sorted_recs:
+#                     recommendations[title] = {
+#                         'tmdb_id': tmdb_id,
+#                         'type': media_type,
+#                         'recommendations': sorted_recs
+#                     }
+
+#         # Save to JSON
+#         filename = f"recommendations_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json"
+#         profile_path = ADDON.getAddonInfo('profile')
+#         file_path = os.path.join(profile_path, filename)
+
+#         with open(file_path, 'w', encoding='utf-8') as f:
+#             json.dump(recommendations, f, indent=4, ensure_ascii=False)
+
+#         return file_path
+
+#     except Exception as e:
+#         print(f"Recommendation export error: {str(e)}")
+#         return None
+#     finally:
+#         del oDb
+
 class cUpdate:
 
     def getUpdateSetting(self):
