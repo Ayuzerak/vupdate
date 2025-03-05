@@ -3239,7 +3239,7 @@ def add_parameter_to_function_call(file_path, function_name, parameter):
 
 class ConditionInserter(ast.NodeTransformer):
     def __init__(self, target_line: str, condition: str, 
-                parent_blocks: Optional[List[str]], source: str, filename: str):
+                 parent_blocks: Optional[List[str]], source: str, filename: str):
         self.target_line = target_line.strip()
         self.raw_condition = condition.strip()
         self.parent_blocks = [p.strip() for p in parent_blocks] if parent_blocks else None
@@ -3247,23 +3247,28 @@ class ConditionInserter(ast.NodeTransformer):
         self.filename = filename
         self.source_lines = source.split('\n')
         self.symtable = self._build_symtable()
-        self.current_scopes = []
-        self.current_blocks = []
+        self.current_scopes = []  # Tracks symtable scopes for symbol lookup
+        self.current_blocks = []  # Tracks header lines for parent block matching
         self.inserted = False
+        self.errors = []  # Collects all error messages
+        self.target_found = False  # Tracks if target line was found
         self.condition_node = self._parse_condition()
         self._scope_symbols = self._analyze_scopes()
         self.target_node = self._parse_target_line()
         
-        # Diagnostic tracking
-        self.debug_info: List[str] = []
-        self.unsupported_blocks: Set[int] = set()
-        self.candidate_lines: List[tuple[int, str]] = []
+        if self.target_node is None:
+            self.log_error(f"Target line '{self.target_line}' could not be parsed as valid Python syntax")
 
-    def _build_symtable(self) -> symtable.SymbolTable:
+    def log_error(self, message: str):
+        """Logs an error message and stores it in the errors list."""
+        VSlog(message)
+        self.errors.append(message)
+
+    def _build_symtable(self):
         try:
             return symtable.symtable(self.source, self.filename, "exec")
         except SyntaxError as e:
-            VSlog(f"Symbol table error: {e}")
+            self.log_error(f"Symbol table error: {e}")
             raise
 
     def _analyze_scopes(self) -> Dict[str, Set[str]]:
@@ -3285,11 +3290,11 @@ class ConditionInserter(ast.NodeTransformer):
 
     def _parse_condition(self) -> ast.stmt:
         try:
-            cond_body = f"if {self.raw_condition}:\n    pass"
+            cond_body = f"{self.raw_condition}\n    pass"
             parsed = ast.parse(cond_body).body[0]
             return parsed
         except SyntaxError as e:
-            VSlog(f"Invalid condition syntax: {e}")
+            self.log_error(f"Invalid condition syntax: {e}")
             raise
 
     def _parse_target_line(self) -> Optional[ast.AST]:
@@ -3307,14 +3312,17 @@ class ConditionInserter(ast.NodeTransformer):
     def _match_parent_hierarchy(self) -> bool:
         if not self.parent_blocks:
             return True
-        if len(self.current_blocks) < len(self.parent_blocks):
-            return False
-        relevant_blocks = self.current_blocks[-len(self.parent_blocks):]
-        return relevant_blocks == self.parent_blocks
+        parent = self.parent_blocks
+        current = self.current_blocks
+        p_idx = 0
+        for block in current:
+            if p_idx < len(parent) and block == parent[p_idx]:
+                p_idx += 1
+        return p_idx == len(parent)
 
     def _get_header_line(self, node: ast.AST) -> str:
         if hasattr(node, 'lineno') and node.lineno is not None:
-            line_number = node.lineno - 1
+            line_number = node.lineno - 1  # Convert to 0-based
             if line_number < len(self.source_lines):
                 return self.source_lines[line_number].strip()
         return ''
@@ -3334,67 +3342,32 @@ class ConditionInserter(ast.NodeTransformer):
         return normalize(node) == normalize(self.condition_node)
 
     def _validate_condition(self, node: ast.AST) -> bool:
+        valid = True
         if isinstance(node, ast.If):
-            valid = True
             for name in ast.walk(node.test):
                 if isinstance(name, ast.Name) and name.id not in self._current_scope_symbols():
-                    VSlog(f"Undefined variable '{name.id}' in condition")
+                    self.log_error(f"Undefined variable '{name.id}' in condition")
                     valid = False
-            return valid
         elif isinstance(node, ast.For):
-            valid = True
             for name in ast.walk(node.iter):
                 if isinstance(name, ast.Name) and name.id not in self._current_scope_symbols():
-                    VSlog(f"Undefined variable '{name.id}' in for loop iterable")
+                    self.log_error(f"Undefined variable '{name.id}' in for loop iterable")
                     valid = False
-            return valid
         elif isinstance(node, ast.While):
-            valid = True
             for name in ast.walk(node.test):
                 if isinstance(name, ast.Name) and name.id not in self._current_scope_symbols():
-                    VSlog(f"Undefined variable '{name.id}' in while loop condition")
+                    self.log_error(f"Undefined variable '{name.id}' in while loop condition")
                     valid = False
-            return valid
         elif isinstance(node, ast.With):
-            valid = True
             for item in node.items:
                 for name in ast.walk(item.context_expr):
                     if isinstance(name, ast.Name) and name.id not in self._current_scope_symbols():
-                        VSlog(f"Undefined variable '{name.id}' in with statement context")
+                        self.log_error(f"Undefined variable '{name.id}' in with statement context")
                         valid = False
-            return valid
         else:
-            VSlog(f"Unsupported block type: {type(node).__name__}")
-            return False
-
-    def _log_diagnostics(self) -> None:
-        VSlog("\n=== Insertion Failure Diagnostics ===")
-        VSlog(f"Target line: '{self.target_line}'")
-        VSlog(f"Parent blocks required: {self.parent_blocks or 'None'}")
-        
-        if self.candidate_lines:
-            VSlog("\nSimilar lines found (check indentation/comments):")
-            for lineno, line in self.candidate_lines[-5:]:
-                VSlog(f"  Line {lineno+1}: {line}")
-        else:
-            VSlog("\nNo similar lines found in code")
-
-        if self.debug_info:
-            VSlog("\nBlock matching failures:")
-            for reason in self.debug_info[-5:]:
-                VSlog(f"  - {reason}")
-
-        current_scope = " > ".join(self.current_scopes[-3:]) or "global"
-        VSlog(f"\nCurrent scope hierarchy: {current_scope}")
-        
-        symbols = sorted(self._current_scope_symbols())
-        VSlog(f"Available symbols ({len(symbols)}): {', '.join(symbols[:10])}" + 
-              ("..." if len(symbols) > 10 else ""))
-        
-        if self.unsupported_blocks:
-            block_types = [b.split(':')[0] for b in self.current_blocks 
-                          if id(b) in self.unsupported_blocks]
-            VSlog(f"\nUnsupported blocks in path: {', '.join(set(block_types))}")
+            self.log_error(f"Unsupported block type: {type(node).__name__}")
+            valid = False
+        return valid
 
     def visit_Module(self, node: ast.Module) -> ast.Module:
         self.current_scopes.append("module")
@@ -3422,14 +3395,6 @@ class ConditionInserter(ast.NodeTransformer):
         node.body = self._handle_block(node.body)
         self.current_blocks.pop()
         self.current_scopes.pop()
-        return node
-
-    def visit_AsyncFunctionDef(self, node: ast.AsyncFunctionDef) -> ast.AsyncFunctionDef:
-        self.current_blocks.append(f'async def {node.name}')
-        self.unsupported_blocks.add(id(node))
-        node = self.generic_visit(node)
-        node.body = self._handle_block(node.body)
-        self.current_blocks.pop()
         return node
 
     def visit_If(self, node: ast.If) -> ast.If:
@@ -3467,87 +3432,48 @@ class ConditionInserter(ast.NodeTransformer):
         self.current_blocks.pop()
         return node
 
-    def visit_Try(self, node: ast.Try) -> ast.Try:
-        header_line = self._get_header_line(node)
-        self.current_blocks.append(f'try:{header_line}')
-        self.unsupported_blocks.add(id(node))
-        node = self.generic_visit(node)
-        node.body = self._handle_block(node.body)
-        node.handlers = [self.visit_ExceptHandler(h) for h in node.handlers]
-        node.orelse = self._handle_block(node.orelse)
-        node.finalbody = self._handle_block(node.finalbody)
-        self.current_blocks.pop()
-        return node
-
     def _handle_block(self, body: List[ast.AST]) -> List[ast.AST]:
         new_body = []
         for idx, stmt in enumerate(body):
-            if self.inserted:
+            # Check if current statement matches target
+            is_target = self._is_target_statement(stmt)
+            if not is_target:
                 new_body.append(stmt)
                 continue
 
-            # Collect candidate lines for diagnostics
-            if hasattr(stmt, 'lineno'):
-                line_no = stmt.lineno - 1
-                if line_no < len(self.source_lines):
-                    self.candidate_lines.append(
-                        (line_no, self.source_lines[line_no].strip())
-                    )
+            self.target_found = True
 
-            if self._is_target_statement(stmt):
-                match_info = []
-                
-                # Check parent block hierarchy
-                parent_match = self._match_parent_hierarchy()
-                if not parent_match:
-                    expected = self.parent_blocks or []
-                    actual = self.current_blocks[-len(expected):] if expected else []
-                    match_info.append(
-                        f"Parent block mismatch. Expected {expected}, found {actual}"
-                    )
+            # Verify parent block hierarchy
+            if not self._match_parent_hierarchy():
+                current_parents = self.current_blocks
+                expected_parents = self.parent_blocks if self.parent_blocks else []
+                self.log_error(
+                    f"Parent block mismatch at line {stmt.lineno}\n"
+                    f"Expected: {expected_parents}\n"
+                    f"Actual:   {current_parents}"
+                )
+                new_body.append(stmt)
+                continue
 
-                # Check for duplicate conditions
-                if idx > 0 and self._is_duplicate_condition(body[idx-1]):
-                    match_info.append("Duplicate condition already exists above")
+            # Check for existing duplicate condition
+            if idx > 0 and self._is_duplicate_condition(body[idx-1]):
+                self.log_error(f"Duplicate condition detected before target at line {stmt.lineno}")
+                new_body.append(stmt)
+                continue
 
-                # Check for unsupported blocks
-                current_block_ids = [id(n) for n in self.current_blocks]
-                if any(bid in self.unsupported_blocks for bid in current_block_ids):
-                    block_types = [b.split(':')[0] for b in self.current_blocks]
-                    match_info.append(
-                        f"Target inside unsupported block: {block_types}"
-                    )
+            # Validate condition context
+            if not self._validate_condition(self.condition_node):
+                self.log_error(f"Condition validation failed at line {stmt.lineno}")
+                new_body.append(stmt)
+                continue
 
-                # Validate condition variables
-                if not self._validate_condition(self.condition_node):
-                    match_info.append("Condition validation failed (see previous logs)")
-
-                if match_info:
-                    self.debug_info.append(
-                        f"Found target at line {stmt.lineno} but: {', '.join(match_info)}"
-                    )
-
-            if self._is_target_statement(stmt) and self._match_parent_hierarchy():
-                if idx > 0 and self._is_duplicate_condition(body[idx-1]):
-                    VSlog("Condition already exists in outer block")
-                    new_body.append(stmt)
-                    self.inserted = True
-                    continue
-
-                if self._validate_condition(self.condition_node):
-                    new_cond = ast.copy_location(self.condition_node, stmt)
-                    new_cond.body = [stmt]
-                    new_body.append(new_cond)
-                    self.inserted = True
-                    continue
-
-            new_body.append(stmt)
-
-        if not self.inserted and not any(isinstance(n, ast.If) for n in new_body):
-            self._log_diagnostics()
+            # Insert the condition
+            new_cond = ast.copy_location(self.condition_node, stmt)
+            new_cond.body = [stmt]
+            new_body.append(new_cond)
+            self.inserted = True  # Mark that at least one insertion occurred
 
         return new_body
-
 
 def add_condition_to_statement(
     file_path: str,
@@ -3574,57 +3500,60 @@ def add_condition_to_statement(
         return False
 
     if not inserter.inserted:
-        VSlog("\nNo valid insertion performed. Possible reasons:")
-        VSlog("1. Target line not found or doesn't match exactly (check whitespace/comments)")
-        VSlog("2. Parent block hierarchy mismatch (verify nesting order)")
-        VSlog("3. Target in unsupported block (try/except, async, etc.)")
-        VSlog("4. Condition validation failed (undefined variables)")
-        VSlog("5. Duplicate condition already exists")
-        inserter._log_diagnostics()
+        if inserter.target_found:
+            VSlog("Condition insertion failed. Reasons:")
+            for error in inserter.errors:
+                VSlog(f"• {error}")
+        else:
+            VSlog(f"Target line not found: '{target_line}'")
+            if parent_blocks:
+                VSlog(f"Parent blocks specified: {parent_blocks}")
         return False
 
     try:
-        new_source = ast.unparse(modified_tree)
-        ast.parse(new_source)
+        # Convert modified AST back to source code
+        new_source = ast.unparse(modified_tree)  # Requires Python 3.9+
+        ast.parse(new_source)  # Validate syntax
     except Exception as e:
-        VSlog(f"Output validation failed: {e}")
+        VSlog(f"Generated code validation failed: {e}")
         return False
 
     if dry_run:
-        VSlog("\nDry run diff:")
+        VSlog("Dry run diff:")
         diff = difflib.unified_diff(
             source.splitlines(),
             new_source.splitlines(),
-            fromfile=file_path,
-            tofile="modified"
+            fromfile='Original',
+            tofile='Modified',
+            lineterm=''
         )
         VSlog('\n'.join(diff))
         return True
 
     try:
-        if backup_file(file_path):
-            with open(file_path, 'w', encoding=encoding) as f:
-                f.write(new_source)
-            return True
-        return False
+        backup_file(file_path)
+        with open(file_path, 'w', encoding=encoding) as f:
+            f.write(new_source)
+        VSlog(f"Successfully modified {file_path}")
+        return True
     except Exception as e:
         VSlog(f"File write failed: {e}")
         restore_backup(file_path)
         return False
 
-
 def backup_file(file_path: str) -> bool:
     try:
         shutil.copy2(file_path, f"{file_path}.bak")
+        VSlog(f"Created backup: {file_path}.bak")
         return True
     except Exception as e:
         VSlog(f"Backup failed: {e}")
         return False
 
-
 def restore_backup(file_path: str) -> bool:
     try:
         shutil.move(f"{file_path}.bak", file_path)
+        VSlog(f"Restored backup: {file_path}")
         return True
     except Exception as e:
         VSlog(f"Restore failed: {e}")
