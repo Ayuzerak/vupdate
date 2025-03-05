@@ -3284,7 +3284,7 @@ class ConditionInserter(ast.NodeTransformer):
                     symbols.add(sym.get_name())
             scope_map[scope_name] = symbols
             for child in current.get_children():
-                stack.append((child, path + [current.get_name()])
+                stack.append( (child, path + [current.get_name()]) )
         return scope_map
 
     def _parse_condition(self) -> ast.stmt:
