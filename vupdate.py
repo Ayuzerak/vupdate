@@ -19,10 +19,12 @@ import difflib
 import random
 import string
 from string import Template
+from typing import List, Optional, Set, Dict, Union
 import glob
 import concurrent.futures
 import threading
 import tokenize
+import symtable
 import xml.etree.ElementTree as ET
 
 from requests.exceptions import RequestException, SSLError
@@ -3235,131 +3237,299 @@ def add_parameter_to_function_call(file_path, function_name, parameter):
     except Exception as e:
         VSlog(f"Error while modifying file '{file_path}': {str(e)}")
 
-def add_condition_to_statement(file_path, condition_to_insert, target_line, 
-                               parent_blocks=None, encoding='utf-8'):
-    """
-    Inserts a conditional statement before a target line if variables of the condition
-    are defined in accessible scopes; then reindents the target accordingly.
-    If the condition is already present immediately above the target line, no insertion is made.
+import ast
+import difflib
+import shutil
+import symtable
+from io import StringIO
+from typing import List, Optional, Set, Dict, Union
 
-    Parameters:
-    - file_path (str): Path to the Python file to modify.
-    - condition_to_insert (str): Condition line to add (e.g., "if user.is_admin:", "for ...", "with ...", etc).
-    - target_line (str): Line of code (or part of it) to wrap in the condition.
-    - parent_blocks (list): Required relative parent block hierarchy 
-          (e.g., ["class User:", "def save():"] or ["def save():"]).
-    - encoding (str): File encoding (default: 'utf-8').
+# Assume Unparser and VSlog are available
+# from unparser import Unparser
+# def VSlog(message: str): ...
 
-    Returns:
-    - bool: True if file was modified, False otherwise.
-    """
+class ConditionInserter(ast.NodeTransformer):
+    def __init__(self, target_line: str, condition: str, 
+                parent_blocks: Optional[List[str]], source: str, filename: str):
+        self.target_line = target_line.strip()
+        self.raw_condition = condition.strip()
+        self.parent_blocks = [p.strip() for p in parent_blocks] if parent_blocks else None
+        self.source = source
+        self.filename = filename
+        self.source_lines = source.split('\n')
+        self.symtable = self._build_symtable()
+        self.current_scopes = []  # Tracks symtable scopes for symbol lookup
+        self.current_blocks = []  # Tracks header lines for parent block matching
+        self.inserted = False
+        self.condition_node = self._parse_condition()
+        self._scope_symbols = self._analyze_scopes()
+        self.target_node = self._parse_target_line()
+
+    def _build_symtable(self):
+        try:
+            return symtable.symtable(self.source, self.filename, "exec")
+        except SyntaxError as e:
+            VSlog(f"Symbol table error: {e}")
+            raise
+
+    def _analyze_scopes(self) -> Dict[str, Set[str]]:
+        scope_map = {}
+        stack = [(self.symtable, [])]
+        while stack:
+            current, path = stack.pop()
+            scope_name = "::".join(path + [current.get_name()])
+            symbols = set()
+            for sym in current.get_symbols():
+                if sym.is_namespace() or sym.is_imported():
+                    symbols.add(sym.get_name().split('.')[0])
+                elif sym.is_assigned() or sym.is_parameter():
+                    symbols.add(sym.get_name())
+            scope_map[scope_name] = symbols
+            for child in current.get_children():
+                stack.append((child, path + [current.get_name()]))
+        return scope_map
+
+    def _parse_condition(self) -> ast.stmt:
+        try:
+            cond_body = f"{self.raw_condition}\n    pass"
+            parsed = ast.parse(cond_body).body[0]
+            return parsed
+        except SyntaxError as e:
+            VSlog(f"Invalid condition syntax: {e}")
+            raise
+
+    def _parse_target_line(self) -> Optional[ast.AST]:
+        try:
+            return ast.parse(self.target_line).body[0]
+        except SyntaxError:
+            return None
+
+    def _current_scope_symbols(self) -> Set[str]:
+        symbols = set()
+        for scope_name in self.current_scopes:
+            symbols.update(self._scope_symbols.get(scope_name, set()))
+        return symbols | set(dir(__builtins__))
+
+    def _match_parent_hierarchy(self) -> bool:
+        if not self.parent_blocks:
+            return True
+        if len(self.current_blocks) < len(self.parent_blocks):
+            return False
+        relevant_blocks = self.current_blocks[-len(self.parent_blocks):]
+        return relevant_blocks == self.parent_blocks
+
+    def _get_header_line(self, node: ast.AST) -> str:
+        if hasattr(node, 'lineno') and node.lineno is not None:
+            line_number = node.lineno - 1  # Convert to 0-based
+            if line_number < len(self.source_lines):
+                return self.source_lines[line_number].strip()
+        return ''
+
+    def _is_target_statement(self, node: ast.AST) -> bool:
+        if self.target_node and ast.dump(node) == ast.dump(self.target_node):
+            return True
+        stmt_src = ast.get_source_segment(self.source, node)
+        if not stmt_src:
+            return False
+        stmt_src = stmt_src.split('#', 1)[0].strip()
+        return stmt_src == self.target_line
+
+    def _is_duplicate_condition(self, node: ast.AST) -> bool:
+        def normalize(node: ast.AST) -> str:
+            return ast.dump(node, annotate_fields=False)
+        return normalize(node) == normalize(self.condition_node)
+
+    def _validate_condition(self, node: ast.AST) -> bool:
+        if isinstance(node, ast.If):
+            valid = True
+            for name in ast.walk(node.test):
+                if isinstance(name, ast.Name) and name.id not in self._current_scope_symbols():
+                    VSlog(f"Undefined variable '{name.id}' in condition")
+                    valid = False
+            return valid
+        elif isinstance(node, ast.For):
+            valid = True
+            for name in ast.walk(node.iter):
+                if isinstance(name, ast.Name) and name.id not in self._current_scope_symbols():
+                    VSlog(f"Undefined variable '{name.id}' in for loop iterable")
+                    valid = False
+            return valid
+        elif isinstance(node, ast.While):
+            valid = True
+            for name in ast.walk(node.test):
+                if isinstance(name, ast.Name) and name.id not in self._current_scope_symbols():
+                    VSlog(f"Undefined variable '{name.id}' in while loop condition")
+                    valid = False
+            return valid
+        elif isinstance(node, ast.With):
+            valid = True
+            for item in node.items:
+                for name in ast.walk(item.context_expr):
+                    if isinstance(name, ast.Name) and name.id not in self._current_scope_symbols():
+                        VSlog(f"Undefined variable '{name.id}' in with statement context")
+                        valid = False
+            return valid
+        else:
+            VSlog(f"Unsupported block type: {type(node).__name__}")
+            return False
+
+    def visit_Module(self, node: ast.Module) -> ast.Module:
+        self.current_scopes.append("module")
+        self.current_blocks.append('module')
+        node.body = self._handle_block(node.body)
+        self.current_blocks.pop()
+        self.current_scopes.pop()
+        return node
+
+    def visit_ClassDef(self, node: ast.ClassDef) -> ast.ClassDef:
+        self.current_scopes.append(f"class::{node.name}")
+        header_line = self._get_header_line(node)
+        self.current_blocks.append(header_line)
+        node = self.generic_visit(node)
+        node.body = self._handle_block(node.body)
+        self.current_blocks.pop()
+        self.current_scopes.pop()
+        return node
+
+    def visit_FunctionDef(self, node: ast.FunctionDef) -> ast.FunctionDef:
+        self.current_scopes.append(f"function::{node.name}")
+        header_line = self._get_header_line(node)
+        self.current_blocks.append(header_line)
+        node = self.generic_visit(node)
+        node.body = self._handle_block(node.body)
+        self.current_blocks.pop()
+        self.current_scopes.pop()
+        return node
+
+    def visit_If(self, node: ast.If) -> ast.If:
+        header_line = self._get_header_line(node)
+        self.current_blocks.append(header_line)
+        node = self.generic_visit(node)
+        node.body = self._handle_block(node.body)
+        node.orelse = self._handle_block(node.orelse)
+        self.current_blocks.pop()
+        return node
+
+    def visit_For(self, node: ast.For) -> ast.For:
+        header_line = self._get_header_line(node)
+        self.current_blocks.append(header_line)
+        node = self.generic_visit(node)
+        node.body = self._handle_block(node.body)
+        node.orelse = self._handle_block(node.orelse)
+        self.current_blocks.pop()
+        return node
+
+    def visit_While(self, node: ast.While) -> ast.While:
+        header_line = self._get_header_line(node)
+        self.current_blocks.append(header_line)
+        node = self.generic_visit(node)
+        node.body = self._handle_block(node.body)
+        node.orelse = self._handle_block(node.orelse)
+        self.current_blocks.pop()
+        return node
+
+    def visit_With(self, node: ast.With) -> ast.With:
+        header_line = self._get_header_line(node)
+        self.current_blocks.append(header_line)
+        node = self.generic_visit(node)
+        node.body = self._handle_block(node.body)
+        self.current_blocks.pop()
+        return node
+
+    def _handle_block(self, body: List[ast.AST]) -> List[ast.AST]:
+        new_body = []
+        for idx, stmt in enumerate(body):
+            if self.inserted:
+                new_body.append(stmt)
+                continue
+
+            if self._is_target_statement(stmt) and self._match_parent_hierarchy():
+                if idx > 0 and self._is_duplicate_condition(body[idx-1]):
+                    VSlog("Condition already exists in outer block")
+                    new_body.append(stmt)
+                    self.inserted = True
+                    continue
+
+                if self._validate_condition(self.condition_node):
+                    new_cond = ast.copy_location(self.condition_node, stmt)
+                    new_cond.body = [stmt]
+                    new_body.append(new_cond)
+                    self.inserted = True
+                    continue
+
+            new_body.append(stmt)
+        return new_body
+
+def add_condition_to_statement(
+    file_path: str,
+    condition_to_insert: str,
+    target_line: str,
+    parent_blocks: Optional[List[str]] = None,
+    encoding: str = 'utf-8',
+    dry_run: bool = False
+) -> bool:
     try:
         with open(file_path, 'r', encoding=encoding) as f:
-            lines = f.readlines()
+            source = f.read()
     except Exception as e:
-        VSlog(f"Failed to read file {file_path}: {e}")
+        VSlog(f"File read error: {e}")
         return False
-
-    # Determine the starting index and indent for the target’s parent block.
-    parent_start_idx = 0
-    parent_indent = 0
-    if parent_blocks:
-        # Use the last block header as the enclosing block.
-        last_parent = parent_blocks[-1].strip()
-        for idx, line in enumerate(lines):
-            if line.strip() == last_parent:
-                parent_start_idx = idx
-                parent_indent = len(line) - len(line.lstrip())
-                break
-        else:
-            VSlog(f"Parent block {last_parent} not found in file {file_path}.")
-            return False
-
-    # Find the target line index using a substring match.
-    target_idx = None
-    for idx in range(parent_start_idx, len(lines)):
-        # Remove inline comments and trailing whitespace.
-        line_content = lines[idx].split("#")[0].rstrip()
-        if target_line.strip() in line_content.strip():
-            target_idx = idx
-            break
-
-    if target_idx is None:
-        VSlog(f"Target line containing '{target_line.strip()}' not found in file {file_path}.")
-        return False
-
-    # Check if the condition is already present immediately above the target line.
-    if target_idx > 0 and lines[target_idx - 1].strip() == condition_to_insert.strip():
-        VSlog(f"Condition '{condition_to_insert.strip()}' already present above target line in file {file_path}. No insertion needed.")
-        return False
-
-    # For "if" conditions, extract variable names from the condition expression.
-    condition_vars = []
-    cond_strip = condition_to_insert.strip()
-    if cond_strip.startswith("if ") and cond_strip.endswith(":"):
-        cond_expr_str = cond_strip[3:-1].strip()
-        try:
-            expr_ast = ast.parse(cond_expr_str, mode='eval')
-            condition_vars = [node.id for node in ast.walk(expr_ast) if isinstance(node, ast.Name)]
-        except Exception:
-            condition_vars = []
-    # For non-"if" statements, we assume condition is allowed.
-    
-    # Helper: check if a given variable appears in an assignment in a line.
-    def var_assigned_in_line(var, line):
-        pattern = r'\b' + re.escape(var) + r'\s*='
-        return re.search(pattern, line) is not None
-
-    # Determine accessible scope:
-    # Global scope: lines before the parent's block header (indent == 0)
-    # Local scope: lines within the parent's block (between parent's header and target line)
-    def is_var_accessible(var):
-        if var == "self":
-            parent_line = lines[parent_start_idx]
-            if parent_line.lstrip().startswith("def ") and re.search(r'\bself\b', parent_line):
-                return True
-            return False
-
-        # Check global scope.
-        for i in range(0, parent_start_idx):
-            stripped = lines[i].strip()
-            if stripped and (len(lines[i]) - len(lines[i].lstrip()) == 0):
-                if var_assigned_in_line(var, lines[i]):
-                    return True
-
-        # Check local scope.
-        for i in range(parent_start_idx, target_idx):
-            if (len(lines[i]) - len(lines[i].lstrip())) > parent_indent:
-                if var_assigned_in_line(var, lines[i]):
-                    return True
-        return False
-
-    # Verify that each variable used in the condition is accessible.
-    for var in condition_vars:
-        if not is_var_accessible(var):
-            VSlog(f"Variable '{var}' is not accessible in file {file_path}. Aborting condition insertion.")
-            return False
-
-    # At this point, insert the condition.
-    target_line_str = lines[target_idx]
-    target_indent_str = target_line_str[:len(target_line_str) - len(target_line_str.lstrip())]
-
-    new_condition_line = target_indent_str + condition_to_insert.rstrip() + "\n"
-    indent_unit = " " * 4
-    new_target_line = target_indent_str + indent_unit + target_line_str.lstrip()
-
-    lines[target_idx] = new_target_line
-    lines.insert(target_idx, new_condition_line)
 
     try:
-        with open(file_path, 'w', encoding=encoding) as f:
-            f.writelines(lines)
+        tree = ast.parse(source)
+        inserter = ConditionInserter(target_line, condition_to_insert, parent_blocks, source, file_path)
+        modified_tree = inserter.visit(tree)
+        ast.fix_missing_locations(modified_tree)
     except Exception as e:
-        VSlog(f"Failed to write file {file_path}: {e}")
+        VSlog(f"AST processing failed: {e}")
         return False
 
-    VSlog(f"Condition inserted successfully in file {file_path}.")
-    return True
+    if not inserter.inserted:
+        VSlog("No valid insertion performed")
+        return False
+
+    try:
+        new_source = convert_ast_code(modified_tree)
+        ast.parse(new_source)
+    except Exception as e:
+        VSlog(f"Output validation failed: {e}")
+        return False
+
+    if dry_run:
+        diff = difflib.unified_diff(
+            source.splitlines(),
+            new_source.splitlines(),
+            fromfile=file_path,
+            tofile="modified"
+        )
+        VSlog('\n'.join(diff))
+        return True
+
+    try:
+        backup_file(file_path)
+        with open(file_path, 'w', encoding=encoding) as f:
+            f.write(new_source)
+        return True
+    except Exception as e:
+        VSlog(f"File write failed: {e}")
+        restore_backup(file_path)
+        return False
+
+def backup_file(file_path: str) -> bool:
+    try:
+        shutil.copy2(file_path, f"{file_path}.bak")
+        return True
+    except Exception as e:
+        VSlog(f"Backup failed: {e}")
+        return False
+
+def restore_backup(file_path: str) -> bool:
+    try:
+        shutil.move(f"{file_path}.bak", file_path)
+        return True
+    except Exception as e:
+        VSlog(f"Restore failed: {e}")
+        return False
         
 def add_codeblock_after_block(file_path, block_header, codeblock, insert_after_line=None):
     """
