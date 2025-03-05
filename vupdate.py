@@ -3252,6 +3252,7 @@ class ConditionInserter(ast.NodeTransformer):
         self.inserted = False
         self.errors = []
         self.target_found = False
+        self.insertion_details = []
         self.condition_node = self._parse_condition()
         self._scope_symbols = self._analyze_scopes()
         self.target_node = self._parse_target_line()
@@ -3310,7 +3311,6 @@ class ConditionInserter(ast.NodeTransformer):
 
     def _match_parent_hierarchy(self) -> bool:
         if not self.parent_blocks:
-            VSlog("No parent blocks specified, skipping hierarchy check")
             return True
         
         parent_idx = 0
@@ -3344,7 +3344,7 @@ class ConditionInserter(ast.NodeTransformer):
             return False
         
         clean_src = stmt_src.split('#', 1)[0].strip()
-        return self.target_line in clean_src  # Partial matching
+        return self.target_line in clean_src
 
     def _is_duplicate_condition(self, node: ast.AST) -> bool:
         def normalize(node: ast.AST) -> str:
@@ -3379,7 +3379,6 @@ class ConditionInserter(ast.NodeTransformer):
             valid = False
         return valid
 
-    # Visitor methods remain the same as previous implementation
     def visit_Module(self, node: ast.Module) -> ast.Module:
         self.current_scopes.append("module")
         self.current_blocks.append('module')
@@ -3452,13 +3451,15 @@ class ConditionInserter(ast.NodeTransformer):
                 continue
 
             self.target_found = True
+            original_lineno = stmt.lineno
+            original_code = ast.get_source_segment(self.source, stmt)
 
             if not self._match_parent_hierarchy():
                 new_body.append(stmt)
                 continue
 
             if idx > 0 and self._is_duplicate_condition(body[idx-1]):
-                self.log_error(f"Duplicate condition detected before target at line {stmt.lineno}")
+                self.log_error(f"Duplicate condition detected before target at line {original_lineno}")
                 new_body.append(stmt)
                 continue
 
@@ -3468,6 +3469,13 @@ class ConditionInserter(ast.NodeTransformer):
 
             new_cond = ast.copy_location(self.condition_node, stmt)
             new_cond.body = [stmt]
+
+            self.insertion_details.append({
+                'original_lineno': original_lineno,
+                'original_code': original_code,
+                'modified_code': ast.unparse(new_cond)
+            })
+
             new_body.append(new_cond)
             self.inserted = True
 
@@ -3481,11 +3489,20 @@ def add_condition_to_statement(
     encoding: str = 'utf-8',
     dry_run: bool = False
 ) -> bool:
+    VSlog(f"\n{'='*40} Insertion Request {'='*40}")
+    VSlog(f"File: {file_path}")
+    VSlog(f"Condition: {condition_to_insert}")
+    VSlog(f"Target: {target_line}")
+    VSlog(f"Parent blocks: {parent_blocks or 'None'}")
+    VSlog(f"Encoding: {encoding}")
+    VSlog(f"Dry run: {dry_run}")
+
     try:
         with open(file_path, 'r', encoding=encoding) as f:
             source = f.read()
+        source_lines = source.split('\n')
     except Exception as e:
-        VSlog(f"File read error: {e}")
+        VSlog(f"\nFile read error: {e}")
         return False
 
     try:
@@ -3494,29 +3511,52 @@ def add_condition_to_statement(
         modified_tree = inserter.visit(tree)
         ast.fix_missing_locations(modified_tree)
     except Exception as e:
-        VSlog(f"AST processing failed: {e}")
+        VSlog(f"\nAST processing failed: {e}")
         return False
 
     if not inserter.inserted:
         if inserter.target_found:
-            VSlog("Condition insertion failed. Reasons:")
+            VSlog("\nInsertion failed. Reasons:")
             for error in inserter.errors:
                 VSlog(f"• {error}")
         else:
-            VSlog(f"Target line not found: '{target_line}'")
-            if parent_blocks:
-                VSlog(f"Parent blocks specified: {parent_blocks}")
+            VSlog(f"\nTarget line not found: '{target_line}'")
         return False
 
     try:
         new_source = ast.unparse(modified_tree)
+        new_lines = new_source.split('\n')
         ast.parse(new_source)
     except Exception as e:
-        VSlog(f"Generated code validation failed: {e}")
+        VSlog(f"\nGenerated code validation failed: {e}")
         return False
 
+    VSlog("\nInsertion successful. Context changes:")
+    for idx, change in enumerate(inserter.insertion_details, 1):
+        orig_line = change['original_lineno']
+        
+        # Original context
+        orig_start = max(0, orig_line - 3)
+        orig_end = min(len(source_lines), orig_line + 2)
+        original_context = '\n'.join(
+            f"{i+1:4d} | {line}" 
+            for i, line in enumerate(source_lines[orig_start:orig_end], start=orig_start)
+        )
+
+        # Modified context
+        mod_start = max(0, orig_line - 3)
+        mod_end = min(len(new_lines), orig_line + 3)
+        modified_context = '\n'.join(
+            f"{i+1:4d} | {line}" 
+            for i, line in enumerate(new_lines[mod_start:mod_end], start=mod_start)
+        )
+
+        VSlog(f"\n―――― Change #{idx} [Line {orig_line+1}] ――――")
+        VSlog(f"[Original context]\n{original_context}")
+        VSlog(f"\n[Modified context]\n{modified_context}")
+
     if dry_run:
-        VSlog("Dry run diff:")
+        VSlog("\nFull diff:")
         diff = difflib.unified_diff(
             source.splitlines(),
             new_source.splitlines(),
@@ -3531,17 +3571,17 @@ def add_condition_to_statement(
         backup_file(file_path)
         with open(file_path, 'w', encoding=encoding) as f:
             f.write(new_source)
-        VSlog(f"Successfully modified {file_path}")
+        VSlog(f"\nFile successfully modified: {file_path}")
         return True
     except Exception as e:
-        VSlog(f"File write failed: {e}")
+        VSlog(f"\nFile write failed: {e}")
         restore_backup(file_path)
         return False
 
 def backup_file(file_path: str) -> bool:
     try:
         shutil.copy2(file_path, f"{file_path}.bak")
-        VSlog(f"Created backup: {file_path}.bak")
+        VSlog(f"Backup created: {file_path}.bak")
         return True
     except Exception as e:
         VSlog(f"Backup failed: {e}")
