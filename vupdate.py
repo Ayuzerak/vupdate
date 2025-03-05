@@ -3247,20 +3247,19 @@ class ConditionInserter(ast.NodeTransformer):
         self.filename = filename
         self.source_lines = source.split('\n')
         self.symtable = self._build_symtable()
-        self.current_scopes = []  # Tracks symtable scopes for symbol lookup
-        self.current_blocks = []  # Tracks header lines for parent block matching
+        self.current_scopes = []
+        self.current_blocks = []
         self.inserted = False
-        self.errors = []  # Collects all error messages
-        self.target_found = False  # Tracks if target line was found
+        self.errors = []
+        self.target_found = False
         self.condition_node = self._parse_condition()
         self._scope_symbols = self._analyze_scopes()
         self.target_node = self._parse_target_line()
-        
+
         if self.target_node is None:
             self.log_error(f"Target line '{self.target_line}' could not be parsed as valid Python syntax")
 
     def log_error(self, message: str):
-        """Logs an error message and stores it in the errors list."""
         VSlog(message)
         self.errors.append(message)
 
@@ -3285,7 +3284,7 @@ class ConditionInserter(ast.NodeTransformer):
                     symbols.add(sym.get_name())
             scope_map[scope_name] = symbols
             for child in current.get_children():
-                stack.append((child, path + [current.get_name()]))
+                stack.append((child, path + [current.get_name()])
         return scope_map
 
     def _parse_condition(self) -> ast.stmt:
@@ -3311,18 +3310,27 @@ class ConditionInserter(ast.NodeTransformer):
 
     def _match_parent_hierarchy(self) -> bool:
         if not self.parent_blocks:
+            VSlog("No parent blocks specified, skipping hierarchy check")
             return True
-        parent = self.parent_blocks
-        current = self.current_blocks
-        p_idx = 0
-        for block in current:
-            if p_idx < len(parent) and block == parent[p_idx]:
-                p_idx += 1
-        return p_idx == len(parent)
+        
+        parent_idx = 0
+        for block in self.current_blocks:
+            if parent_idx < len(self.parent_blocks) and block == self.parent_blocks[parent_idx]:
+                parent_idx += 1
+        
+        if parent_idx == len(self.parent_blocks):
+            return True
+        
+        self.log_error(
+            f"Parent block mismatch. Found {parent_idx} matching parents out of {len(self.parent_blocks)}\n"
+            f"Expected: {self.parent_blocks}\n"
+            f"Actual:   {self.current_blocks}"
+        )
+        return False
 
     def _get_header_line(self, node: ast.AST) -> str:
         if hasattr(node, 'lineno') and node.lineno is not None:
-            line_number = node.lineno - 1  # Convert to 0-based
+            line_number = node.lineno - 1
             if line_number < len(self.source_lines):
                 return self.source_lines[line_number].strip()
         return ''
@@ -3330,11 +3338,13 @@ class ConditionInserter(ast.NodeTransformer):
     def _is_target_statement(self, node: ast.AST) -> bool:
         if self.target_node and ast.dump(node) == ast.dump(self.target_node):
             return True
+        
         stmt_src = ast.get_source_segment(self.source, node)
         if not stmt_src:
             return False
-        stmt_src = stmt_src.split('#', 1)[0].strip()
-        return stmt_src == self.target_line
+        
+        clean_src = stmt_src.split('#', 1)[0].strip()
+        return self.target_line in clean_src  # Partial matching
 
     def _is_duplicate_condition(self, node: ast.AST) -> bool:
         def normalize(node: ast.AST) -> str:
@@ -3369,6 +3379,7 @@ class ConditionInserter(ast.NodeTransformer):
             valid = False
         return valid
 
+    # Visitor methods remain the same as previous implementation
     def visit_Module(self, node: ast.Module) -> ast.Module:
         self.current_scopes.append("module")
         self.current_blocks.append('module')
@@ -3435,7 +3446,6 @@ class ConditionInserter(ast.NodeTransformer):
     def _handle_block(self, body: List[ast.AST]) -> List[ast.AST]:
         new_body = []
         for idx, stmt in enumerate(body):
-            # Check if current statement matches target
             is_target = self._is_target_statement(stmt)
             if not is_target:
                 new_body.append(stmt)
@@ -3443,35 +3453,23 @@ class ConditionInserter(ast.NodeTransformer):
 
             self.target_found = True
 
-            # Verify parent block hierarchy
             if not self._match_parent_hierarchy():
-                current_parents = self.current_blocks
-                expected_parents = self.parent_blocks if self.parent_blocks else []
-                self.log_error(
-                    f"Parent block mismatch at line {stmt.lineno}\n"
-                    f"Expected: {expected_parents}\n"
-                    f"Actual:   {current_parents}"
-                )
                 new_body.append(stmt)
                 continue
 
-            # Check for existing duplicate condition
             if idx > 0 and self._is_duplicate_condition(body[idx-1]):
                 self.log_error(f"Duplicate condition detected before target at line {stmt.lineno}")
                 new_body.append(stmt)
                 continue
 
-            # Validate condition context
             if not self._validate_condition(self.condition_node):
-                self.log_error(f"Condition validation failed at line {stmt.lineno}")
                 new_body.append(stmt)
                 continue
 
-            # Insert the condition
             new_cond = ast.copy_location(self.condition_node, stmt)
             new_cond.body = [stmt]
             new_body.append(new_cond)
-            self.inserted = True  # Mark that at least one insertion occurred
+            self.inserted = True
 
         return new_body
 
@@ -3511,9 +3509,8 @@ def add_condition_to_statement(
         return False
 
     try:
-        # Convert modified AST back to source code
-        new_source = ast.unparse(modified_tree)  # Requires Python 3.9+
-        ast.parse(new_source)  # Validate syntax
+        new_source = ast.unparse(modified_tree)
+        ast.parse(new_source)
     except Exception as e:
         VSlog(f"Generated code validation failed: {e}")
         return False
