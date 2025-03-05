@@ -3315,8 +3315,11 @@ class ConditionInserter(ast.NodeTransformer):
         
         parent_idx = 0
         for block in self.current_blocks:
-            if parent_idx < len(self.parent_blocks) and block == self.parent_blocks[parent_idx]:
-                parent_idx += 1
+            if parent_idx < len(self.parent_blocks):
+                normalized_block = re.sub(r'\s+', ' ', block.strip())
+                normalized_parent = re.sub(r'\s+', ' ', self.parent_blocks[parent_idx].strip())
+                if normalized_block == normalized_parent:
+                    parent_idx += 1
         
         if parent_idx == len(self.parent_blocks):
             return True
@@ -3336,15 +3339,21 @@ class ConditionInserter(ast.NodeTransformer):
         return ''
 
     def _is_target_statement(self, node: ast.AST) -> bool:
-        if self.target_node and ast.dump(node) == ast.dump(self.target_node):
-            return True
-        
         stmt_src = ast.get_source_segment(self.source, node)
         if not stmt_src:
             return False
         
-        clean_src = stmt_src.split('#', 1)[0].strip()
-        return self.target_line in clean_src
+        def normalize_code(code):
+            code = re.sub(r'#.*', '', code)
+            code = re.sub(r'\s+', ' ', code)
+            code = code.strip()
+            code = re.sub(r'\\\n', ' ', code)
+            return code
+
+        node_code = normalize_code(stmt_src)
+        target_code = normalize_code(self.target_line)
+        
+        return target_code in node_code
 
     def _is_duplicate_condition(self, node: ast.AST) -> bool:
         def normalize(node: ast.AST) -> str:
@@ -3521,6 +3530,10 @@ def add_condition_to_statement(
                 VSlog(f"• {error}")
         else:
             VSlog(f"\nTarget line not found: '{target_line}'")
+            VSlog("Suggested fixes:")
+            VSlog("- Use parent_blocks to narrow search")
+            VSlog("- Check for whitespace/comment differences")
+            VSlog("- Verify line continuation syntax")
         return False
 
     try:
@@ -3535,7 +3548,6 @@ def add_condition_to_statement(
     for idx, change in enumerate(inserter.insertion_details, 1):
         orig_line = change['original_lineno']
         
-        # Original context
         orig_start = max(0, orig_line - 3)
         orig_end = min(len(source_lines), orig_line + 2)
         original_context = '\n'.join(
@@ -3543,7 +3555,6 @@ def add_condition_to_statement(
             for i, line in enumerate(source_lines[orig_start:orig_end], start=orig_start)
         )
 
-        # Modified context
         mod_start = max(0, orig_line - 3)
         mod_end = min(len(new_lines), orig_line + 3)
         modified_context = '\n'.join(
