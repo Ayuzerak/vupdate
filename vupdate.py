@@ -3324,15 +3324,15 @@ class ConditionInserter(ast.NodeTransformer):
         stmt_src = ast.get_source_segment(self.source, node)
         if not stmt_src:
             return False
-        
-        def normalize_code(code):
-            code = re.sub(r'#.*', '', code)
-            code = re.sub(r'\s+', ' ', code)
-            code = code.strip()
-            code = re.sub(r'\\\n', ' ', code)
-            return code.lower()
-
-        return normalize_code(self.target_line) in normalize_code(stmt_src)
+    
+        # Normalize line continuations
+        normalized_stmt = re.sub(r'\\\n', ' ', stmt_src)
+        normalized_target = re.sub(r'\\\n', ' ', self.target_line)
+    
+        return (
+            self.target_node and ast.dump(node) == ast.dump(self.target_node)
+            or normalized_target in normalized_stmt
+        )
 
     def _is_duplicate_condition(self, node: ast.AST) -> bool:
         def normalize(node: ast.AST) -> str:
