@@ -3237,6 +3237,16 @@ def add_parameter_to_function_call(file_path, function_name, parameter):
     except Exception as e:
         VSlog(f"Error while modifying file '{file_path}': {str(e)}")
 
+import ast
+import symtable
+import difflib
+import shutil
+from typing import List, Optional, Dict, Set
+from difflib import get_close_matches
+
+def VSlog(message: str):
+    print(message)
+
 class ConditionInserter(ast.NodeTransformer):
     def __init__(self, target_line: str, condition: str, 
                  parent_blocks: Optional[List[str]], source: str, filename: str):
@@ -3310,10 +3320,15 @@ class ConditionInserter(ast.NodeTransformer):
     def _match_parent_hierarchy(self) -> bool:
         if not self.parent_blocks:
             return True
-        pb_len = len(self.parent_blocks)
-        if len(self.current_blocks) < pb_len:
+        
+        normalized_parents = [" ".join(p.strip().split()) for p in self.parent_blocks]
+        normalized_current = [" ".join(b.strip().split()) for b in self.current_blocks]
+        
+        pb_len = len(normalized_parents)
+        if len(normalized_current) < pb_len:
             return False
-        return self.current_blocks[-pb_len:] == self.parent_blocks
+            
+        return normalized_current[-pb_len:] == normalized_parents
 
     def _get_header_line(self, node: ast.AST) -> str:
         if hasattr(node, 'lineno') and node.lineno is not None:
@@ -3324,7 +3339,11 @@ class ConditionInserter(ast.NodeTransformer):
         stmt_src = ast.get_source_segment(self.source, node)
         if not stmt_src:
             return False
-        return self.target_line in stmt_src.split('#')[0].strip()
+            
+        normalized_target = " ".join(self.target_line.split()).split('#')[0].strip()
+        normalized_stmt = " ".join(stmt_src.split()).split('#')[0].strip()
+        
+        return normalized_target == normalized_stmt
 
     def _is_duplicate_condition(self, node: ast.AST) -> bool:
         def normalize(node: ast.AST) -> str:
@@ -3334,13 +3353,25 @@ class ConditionInserter(ast.NodeTransformer):
     def _validate_condition(self, node: ast.AST) -> bool:
         valid = True
         if isinstance(node, ast.If):
+            current_symbols = self._current_scope_symbols()
             for name in ast.walk(node.test):
                 if isinstance(name, ast.Name):
-                    if name.id not in self._current_scope_symbols():
-                        self.log_error(f"Undefined variable '{name.id}' in condition")
+                    if name.id not in current_symbols:
+                        suggestions = get_close_matches(
+                            name.id, 
+                            current_symbols, 
+                            n=3, 
+                            cutoff=0.6
+                        )
+                        suggestion_msg = f" (Did you mean: {', '.join(suggestions)})" if suggestions else ""
+                        self.log_error(
+                            f"Undefined variable '{name.id}' in condition{suggestion_msg}. "
+                            f"Available symbols: {sorted(current_symbols)}"
+                        )
                         valid = False
         return valid
 
+    # AST Visitor Methods
     def visit_Module(self, node: ast.Module):
         self.scope_hierarchy.append("module")
         self.current_blocks.append('module')
@@ -3362,7 +3393,6 @@ class ConditionInserter(ast.NodeTransformer):
         self.scope_hierarchy.append(node.name)
         current_scope = "::".join(self.scope_hierarchy)
         
-        # Add parameters to symbol table
         params = {arg.arg for arg in node.args.args}
         if current_scope not in self._scope_symbols:
             self._scope_symbols[current_scope] = set()
@@ -3372,6 +3402,20 @@ class ConditionInserter(ast.NodeTransformer):
         node = self.generic_visit(node)
         self.current_blocks.pop()
         self.scope_hierarchy.pop()
+        return node
+
+    def visit_If(self, node: ast.If):
+        self.current_blocks.append('if')
+        node = self.generic_visit(node)
+        node.body = self._handle_block(node.body)
+        self.current_blocks.pop()
+        return node
+
+    def visit_Try(self, node: ast.Try):
+        self.current_blocks.append('try')
+        node = self.generic_visit(node)
+        node.body = self._handle_block(node.body)
+        self.current_blocks.pop()
         return node
 
     def _handle_block(self, body: List[ast.AST]) -> List[ast.AST]:
