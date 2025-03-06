@@ -3340,36 +3340,36 @@ class ConditionInserter(ast.NodeTransformer):
         def normalize(node: ast.AST) -> str:
             return ast.dump(node, annotate_fields=False)
         return normalize(node) == normalize(self.condition_node)
-        
+
     def _validate_condition(self, node: ast.AST) -> bool:
         valid = True
         if isinstance(node, ast.If):
             current_symbols = self._current_scope_symbols()
             condition_vars = set()
-        
-            # First pass: Collect all unique variables in condition
+            
+            # Collect all unique variables in condition
             for name in ast.walk(node.test):
                 if isinstance(name, ast.Name):
                     condition_vars.add(name.id)
-        
-            # Second pass: Validate and log each variable
+            
+            # Validate and log each variable
             undefined_vars = set()
             for var in sorted(condition_vars):
                 if var in current_symbols:
-                    self.log_error(f"Condition variable confirmed: '{var}' is defined")
+                    self.log_error(f"[Validation] Variable confirmed: '{var}'")
                 else:
                     undefined_vars.add(var)
-        
+            
             # Handle undefined variables
             for var in undefined_vars:
                 suggestions = get_close_matches(var, current_symbols, n=3, cutoff=0.6)
                 suggestion_msg = f" (Suggestions: {', '.join(suggestions)})" if suggestions else ""
-                self.log_error(f"Undefined variable '{var}' in condition{suggestion_msg}")
+                self.log_error(f"[Validation] Undefined variable: '{var}'{suggestion_msg}")
                 valid = False
 
-            # Additional debug: List all available symbols
-            self.log_error(f"Available symbols in scope: {sorted(current_symbols)}")
-        
+            # Log scope information
+            self.log_error(f"[Validation] Available symbols: {sorted(current_symbols)}")
+            
         return valid
 
     # AST Visitor Methods
@@ -3394,6 +3394,7 @@ class ConditionInserter(ast.NodeTransformer):
         self.scope_hierarchy.append(node.name)
         current_scope = "::".join(self.scope_hierarchy)
         
+        # Add parameters to symbol table
         params = {arg.arg for arg in node.args.args}
         if current_scope not in self._scope_symbols:
             self._scope_symbols[current_scope] = set()
