@@ -3340,26 +3340,36 @@ class ConditionInserter(ast.NodeTransformer):
         def normalize(node: ast.AST) -> str:
             return ast.dump(node, annotate_fields=False)
         return normalize(node) == normalize(self.condition_node)
-
+        
     def _validate_condition(self, node: ast.AST) -> bool:
         valid = True
         if isinstance(node, ast.If):
             current_symbols = self._current_scope_symbols()
+            condition_vars = set()
+        
+            # First pass: Collect all unique variables in condition
             for name in ast.walk(node.test):
                 if isinstance(name, ast.Name):
-                    if name.id not in current_symbols:
-                        suggestions = get_close_matches(
-                            name.id, 
-                            current_symbols, 
-                            n=3, 
-                            cutoff=0.6
-                        )
-                        suggestion_msg = f" (Did you mean: {', '.join(suggestions)})" if suggestions else ""
-                        self.log_error(
-                            f"Undefined variable '{name.id}' in condition{suggestion_msg}. "
-                            f"Available symbols: {sorted(current_symbols)}"
-                        )
-                        valid = False
+                    condition_vars.add(name.id)
+        
+            # Second pass: Validate and log each variable
+            undefined_vars = set()
+            for var in sorted(condition_vars):
+                if var in current_symbols:
+                    self.log_error(f"Condition variable confirmed: '{var}' is defined")
+                else:
+                    undefined_vars.add(var)
+        
+            # Handle undefined variables
+            for var in undefined_vars:
+                suggestions = get_close_matches(var, current_symbols, n=3, cutoff=0.6)
+                suggestion_msg = f" (Suggestions: {', '.join(suggestions)})" if suggestions else ""
+                self.log_error(f"Undefined variable '{var}' in condition{suggestion_msg}")
+                valid = False
+
+            # Additional debug: List all available symbols
+            self.log_error(f"Available symbols in scope: {sorted(current_symbols)}")
+        
         return valid
 
     # AST Visitor Methods
