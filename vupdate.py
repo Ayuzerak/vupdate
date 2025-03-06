@@ -3302,9 +3302,10 @@ class ConditionInserter(ast.NodeTransformer):
 
     def _current_scope_symbols(self) -> Set[str]:
         symbols = set()
-        for scope in reversed(self.scope_hierarchy):
-            full_scope = "::".join(self.scope_hierarchy[:self.scope_hierarchy.index(scope)+1])
-            symbols.update(self._scope_symbols.get(full_scope, set()))
+        # Check from inner-most to outer scopes
+        for depth in range(len(self.scope_hierarchy), 0, -1):
+            current_scope = "::".join(self.scope_hierarchy[:depth])
+            symbols.update(self._scope_symbols.get(current_scope, set()))
         return symbols | set(dir(__builtins__))
 
     def _match_parent_hierarchy(self) -> bool:
