@@ -3247,7 +3247,7 @@ class ConditionInserter(ast.NodeTransformer):
         self.filename = filename
         self.source_lines = source.split('\n')
         self.symtable = self._build_symtable()
-        self.current_scopes = []
+        self.scope_hierarchy = []
         self.current_blocks = []
         self.inserted = False
         self.errors = []
@@ -3256,9 +3256,6 @@ class ConditionInserter(ast.NodeTransformer):
         self.condition_node = self._parse_condition()
         self._scope_symbols = self._analyze_scopes()
         self.target_node = self._parse_target_line()
-
-        if self.target_node is None:
-            self.log_error(f"Target line '{self.target_line}' could not be parsed as valid Python syntax")
 
     def log_error(self, message: str):
         VSlog(message)
@@ -3285,7 +3282,7 @@ class ConditionInserter(ast.NodeTransformer):
                     symbols.add(sym.get_name())
             scope_map[scope_name] = symbols
             for child in current.get_children():
-                stack.append( (child, path + [current.get_name()]) )
+                stack.append((child, path + [current.get_name()]))
         return scope_map
 
     def _parse_condition(self) -> ast.stmt:
@@ -3305,37 +3302,21 @@ class ConditionInserter(ast.NodeTransformer):
 
     def _current_scope_symbols(self) -> Set[str]:
         symbols = set()
-        for scope_name in self.current_scopes:
-            symbols.update(self._scope_symbols.get(scope_name, set()))
+        for scope in reversed(self.scope_hierarchy):
+            full_scope = "::".join(self.scope_hierarchy[:self.scope_hierarchy.index(scope)+1])
+            symbols.update(self._scope_symbols.get(full_scope, set()))
         return symbols | set(dir(__builtins__))
 
     def _match_parent_hierarchy(self) -> bool:
         if not self.parent_blocks:
             return True
         
-        parent_idx = 0
-        for block in self.current_blocks:
-            if parent_idx < len(self.parent_blocks):
-                normalized_block = re.sub(r'\s+', ' ', block.strip())
-                normalized_parent = re.sub(r'\s+', ' ', self.parent_blocks[parent_idx].strip())
-                if normalized_block == normalized_parent:
-                    parent_idx += 1
-        
-        if parent_idx == len(self.parent_blocks):
-            return True
-        
-        self.log_error(
-            f"Parent block mismatch. Found {parent_idx} matching parents out of {len(self.parent_blocks)}\n"
-            f"Expected: {self.parent_blocks}\n"
-            f"Actual:   {self.current_blocks}"
-        )
-        return False
+        current_blocks_str = "::".join(self.current_blocks)
+        return all(block in current_blocks_str for block in self.parent_blocks)
 
     def _get_header_line(self, node: ast.AST) -> str:
         if hasattr(node, 'lineno') and node.lineno is not None:
-            line_number = node.lineno - 1
-            if line_number < len(self.source_lines):
-                return self.source_lines[line_number].strip()
+            return self.source_lines[node.lineno - 1].strip()
         return ''
 
     def _is_target_statement(self, node: ast.AST) -> bool:
@@ -3348,12 +3329,9 @@ class ConditionInserter(ast.NodeTransformer):
             code = re.sub(r'\s+', ' ', code)
             code = code.strip()
             code = re.sub(r'\\\n', ' ', code)
-            return code
+            return code.lower()
 
-        node_code = normalize_code(stmt_src)
-        target_code = normalize_code(self.target_line)
-        
-        return target_code in node_code
+        return normalize_code(self.target_line) in normalize_code(stmt_src)
 
     def _is_duplicate_condition(self, node: ast.AST) -> bool:
         def normalize(node: ast.AST) -> str:
@@ -3367,93 +3345,49 @@ class ConditionInserter(ast.NodeTransformer):
                 if isinstance(name, ast.Name) and name.id not in self._current_scope_symbols():
                     self.log_error(f"Undefined variable '{name.id}' in condition")
                     valid = False
-        elif isinstance(node, ast.For):
-            for name in ast.walk(node.iter):
-                if isinstance(name, ast.Name) and name.id not in self._current_scope_symbols():
-                    self.log_error(f"Undefined variable '{name.id}' in for loop iterable")
-                    valid = False
-        elif isinstance(node, ast.While):
-            for name in ast.walk(node.test):
-                if isinstance(name, ast.Name) and name.id not in self._current_scope_symbols():
-                    self.log_error(f"Undefined variable '{name.id}' in while loop condition")
-                    valid = False
-        elif isinstance(node, ast.With):
-            for item in node.items:
-                for name in ast.walk(item.context_expr):
-                    if isinstance(name, ast.Name) and name.id not in self._current_scope_symbols():
-                        self.log_error(f"Undefined variable '{name.id}' in with statement context")
-                        valid = False
-        else:
-            self.log_error(f"Unsupported block type: {type(node).__name__}")
-            valid = False
         return valid
 
-    def visit_Module(self, node: ast.Module) -> ast.Module:
-        self.current_scopes.append("module")
+    # Visitor methods
+    def visit_Module(self, node: ast.Module):
+        self.scope_hierarchy.append("module")
         self.current_blocks.append('module')
         node.body = self._handle_block(node.body)
         self.current_blocks.pop()
-        self.current_scopes.pop()
+        self.scope_hierarchy.pop()
         return node
 
-    def visit_ClassDef(self, node: ast.ClassDef) -> ast.ClassDef:
-        self.current_scopes.append(f"class::{node.name}")
-        header_line = self._get_header_line(node)
-        self.current_blocks.append(header_line)
+    def visit_ClassDef(self, node: ast.ClassDef):
+        self.scope_hierarchy.append(f"class::{node.name}")
+        self.current_blocks.append(self._get_header_line(node))
         node = self.generic_visit(node)
         node.body = self._handle_block(node.body)
         self.current_blocks.pop()
-        self.current_scopes.pop()
+        self.scope_hierarchy.pop()
         return node
 
-    def visit_FunctionDef(self, node: ast.FunctionDef) -> ast.FunctionDef:
-        self.current_scopes.append(f"function::{node.name}")
-        header_line = self._get_header_line(node)
-        self.current_blocks.append(header_line)
+    def visit_FunctionDef(self, node: ast.FunctionDef):
+        self.scope_hierarchy.append(f"function::{node.name}")
+        self.current_blocks.append(self._get_header_line(node))
+        
+        # Add parameters to scope
+        params = {arg.arg for arg in node.args.args}
+        current_scope = "::".join(self.scope_hierarchy)
+        if current_scope in self._scope_symbols:
+            self._scope_symbols[current_scope].update(params)
+            
         node = self.generic_visit(node)
         node.body = self._handle_block(node.body)
         self.current_blocks.pop()
-        self.current_scopes.pop()
-        return node
-
-    def visit_If(self, node: ast.If) -> ast.If:
-        header_line = self._get_header_line(node)
-        self.current_blocks.append(header_line)
-        node = self.generic_visit(node)
-        node.body = self._handle_block(node.body)
-        node.orelse = self._handle_block(node.orelse)
-        self.current_blocks.pop()
-        return node
-
-    def visit_For(self, node: ast.For) -> ast.For:
-        header_line = self._get_header_line(node)
-        self.current_blocks.append(header_line)
-        node = self.generic_visit(node)
-        node.body = self._handle_block(node.body)
-        node.orelse = self._handle_block(node.orelse)
-        self.current_blocks.pop()
-        return node
-
-    def visit_While(self, node: ast.While) -> ast.While:
-        header_line = self._get_header_line(node)
-        self.current_blocks.append(header_line)
-        node = self.generic_visit(node)
-        node.body = self._handle_block(node.body)
-        node.orelse = self._handle_block(node.orelse)
-        self.current_blocks.pop()
-        return node
-
-    def visit_With(self, node: ast.With) -> ast.With:
-        header_line = self._get_header_line(node)
-        self.current_blocks.append(header_line)
-        node = self.generic_visit(node)
-        node.body = self._handle_block(node.body)
-        self.current_blocks.pop()
+        self.scope_hierarchy.pop()
         return node
 
     def _handle_block(self, body: List[ast.AST]) -> List[ast.AST]:
         new_body = []
         for idx, stmt in enumerate(body):
+            if self.inserted and self.parent_blocks:
+                new_body.append(stmt)
+                continue
+
             is_target = self._is_target_statement(stmt)
             if not is_target:
                 new_body.append(stmt)
@@ -3468,7 +3402,7 @@ class ConditionInserter(ast.NodeTransformer):
                 continue
 
             if idx > 0 and self._is_duplicate_condition(body[idx-1]):
-                self.log_error(f"Duplicate condition detected before target at line {original_lineno}")
+                self.log_error(f"Duplicate condition before line {original_lineno}")
                 new_body.append(stmt)
                 continue
 
@@ -3503,8 +3437,6 @@ def add_condition_to_statement(
     VSlog(f"Condition: {condition_to_insert}")
     VSlog(f"Target: {target_line}")
     VSlog(f"Parent blocks: {parent_blocks or 'None'}")
-    VSlog(f"Encoding: {encoding}")
-    VSlog(f"Dry run: {dry_run}")
 
     try:
         with open(file_path, 'r', encoding=encoding) as f:
@@ -3530,10 +3462,6 @@ def add_condition_to_statement(
                 VSlog(f"• {error}")
         else:
             VSlog(f"\nTarget line not found: '{target_line}'")
-            VSlog("Suggested fixes:")
-            VSlog("- Use parent_blocks to narrow search")
-            VSlog("- Check for whitespace/comment differences")
-            VSlog("- Verify line continuation syntax")
         return False
 
     try:
@@ -3547,16 +3475,17 @@ def add_condition_to_statement(
     VSlog("\nInsertion successful. Context changes:")
     for idx, change in enumerate(inserter.insertion_details, 1):
         orig_line = change['original_lineno']
+        context_range = 3
         
-        orig_start = max(0, orig_line - 3)
-        orig_end = min(len(source_lines), orig_line + 2)
+        orig_start = max(0, orig_line - context_range)
+        orig_end = min(len(source_lines), orig_line + context_range)
         original_context = '\n'.join(
             f"{i+1:4d} | {line}" 
             for i, line in enumerate(source_lines[orig_start:orig_end], start=orig_start)
         )
 
-        mod_start = max(0, orig_line - 3)
-        mod_end = min(len(new_lines), orig_line + 3)
+        mod_start = max(0, orig_line - context_range)
+        mod_end = min(len(new_lines), orig_line + context_range + 1)
         modified_context = '\n'.join(
             f"{i+1:4d} | {line}" 
             for i, line in enumerate(new_lines[mod_start:mod_end], start=mod_start)
@@ -3567,7 +3496,7 @@ def add_condition_to_statement(
         VSlog(f"\n[Modified context]\n{modified_context}")
 
     if dry_run:
-        VSlog("\nFull diff:")
+        VSlog("\nDry run diff:")
         diff = difflib.unified_diff(
             source.splitlines(),
             new_source.splitlines(),
