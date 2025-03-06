@@ -16,6 +16,7 @@ import ast
 import socket
 import textwrap
 import difflib
+from difflib import get_close_matches
 import random
 import string
 from string import Template
@@ -3236,16 +3237,6 @@ def add_parameter_to_function_call(file_path, function_name, parameter):
         VSlog(f"Error: File not found - {file_path}")
     except Exception as e:
         VSlog(f"Error while modifying file '{file_path}': {str(e)}")
-
-import ast
-import symtable
-import difflib
-import shutil
-from typing import List, Optional, Dict, Set
-from difflib import get_close_matches
-
-def VSlog(message: str):
-    print(message)
 
 class ConditionInserter(ast.NodeTransformer):
     def __init__(self, target_line: str, condition: str, 
