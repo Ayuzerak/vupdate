@@ -3237,15 +3237,6 @@ def add_parameter_to_function_call(file_path, function_name, parameter):
     except Exception as e:
         VSlog(f"Error while modifying file '{file_path}': {str(e)}")
 
-import ast
-import symtable
-import difflib
-import shutil
-from typing import List, Optional, Dict, Set
-
-def VSlog(message: str):
-    print(message)
-
 class ConditionInserter(ast.NodeTransformer):
     def __init__(self, target_line: str, condition: str, 
                  parent_blocks: Optional[List[str]], source: str, filename: str):
