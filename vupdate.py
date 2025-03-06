@@ -3237,6 +3237,15 @@ def add_parameter_to_function_call(file_path, function_name, parameter):
     except Exception as e:
         VSlog(f"Error while modifying file '{file_path}': {str(e)}")
 
+import ast
+import symtable
+import difflib
+import shutil
+from typing import List, Optional, Dict, Set
+
+def VSlog(message: str):
+    print(message)
+
 class ConditionInserter(ast.NodeTransformer):
     def __init__(self, target_line: str, condition: str, 
                  parent_blocks: Optional[List[str]], source: str, filename: str):
@@ -3302,7 +3311,6 @@ class ConditionInserter(ast.NodeTransformer):
 
     def _current_scope_symbols(self) -> Set[str]:
         symbols = set()
-        # Check from inner-most to outer scopes
         for depth in range(len(self.scope_hierarchy), 0, -1):
             current_scope = "::".join(self.scope_hierarchy[:depth])
             symbols.update(self._scope_symbols.get(current_scope, set()))
@@ -3311,9 +3319,10 @@ class ConditionInserter(ast.NodeTransformer):
     def _match_parent_hierarchy(self) -> bool:
         if not self.parent_blocks:
             return True
-        
-        current_blocks_str = "::".join(self.current_blocks)
-        return all(block in current_blocks_str for block in self.parent_blocks)
+        pb_len = len(self.parent_blocks)
+        if len(self.current_blocks) < pb_len:
+            return False
+        return self.current_blocks[-pb_len:] == self.parent_blocks
 
     def _get_header_line(self, node: ast.AST) -> str:
         if hasattr(node, 'lineno') and node.lineno is not None:
@@ -3321,14 +3330,6 @@ class ConditionInserter(ast.NodeTransformer):
         return ''
 
     def _is_target_statement(self, node: ast.AST) -> bool:
-        # Handle parameter default values as defined variables
-        if isinstance(node, ast.FunctionDef):
-            for default in node.args.defaults:
-                for name in ast.walk(default):
-                    if isinstance(name, ast.Name):
-                        self._scope_symbols["::".join(self.scope_hierarchy)].add(name.id)
-        
-        # Original target matching logic
         stmt_src = ast.get_source_segment(self.source, node)
         if not stmt_src:
             return False
@@ -3342,23 +3343,13 @@ class ConditionInserter(ast.NodeTransformer):
     def _validate_condition(self, node: ast.AST) -> bool:
         valid = True
         if isinstance(node, ast.If):
-            # Check test expression variables
             for name in ast.walk(node.test):
                 if isinstance(name, ast.Name):
-                    # Allow parameters and their default values
                     if name.id not in self._current_scope_symbols():
-                        # Check if it's a parameter with default
-                        current_func = next(
-                            (s for s in self.scope_hierarchy if "function::" in s), 
-                            None
-                        )
-                        if current_func and name.id in self._scope_symbols.get(current_func, set()):
-                            continue
                         self.log_error(f"Undefined variable '{name.id}' in condition")
                         valid = False
         return valid
 
-    # Visitor methods
     def visit_Module(self, node: ast.Module):
         self.scope_hierarchy.append("module")
         self.current_blocks.append('module')
@@ -3368,7 +3359,7 @@ class ConditionInserter(ast.NodeTransformer):
         return node
 
     def visit_ClassDef(self, node: ast.ClassDef):
-        self.scope_hierarchy.append(f"class::{node.name}")
+        self.scope_hierarchy.append(node.name)
         self.current_blocks.append(self._get_header_line(node))
         node = self.generic_visit(node)
         node.body = self._handle_block(node.body)
@@ -3377,18 +3368,15 @@ class ConditionInserter(ast.NodeTransformer):
         return node
 
     def visit_FunctionDef(self, node: ast.FunctionDef):
-        # Add function parameters to symbol table
-        params = {arg.arg for arg in node.args.args}
-        current_scope = "::".join(self.scope_hierarchy + [f"function::{node.name}"])
+        self.scope_hierarchy.append(node.name)
+        current_scope = "::".join(self.scope_hierarchy)
         
-        # Create scope entry if it doesn't exist
+        # Add parameters to symbol table
+        params = {arg.arg for arg in node.args.args}
         if current_scope not in self._scope_symbols:
             self._scope_symbols[current_scope] = set()
-            
         self._scope_symbols[current_scope].update(params)
         
-        # Continue normal processing
-        self.scope_hierarchy.append(f"function::{node.name}")
         self.current_blocks.append(self._get_header_line(node))
         node = self.generic_visit(node)
         self.current_blocks.pop()
