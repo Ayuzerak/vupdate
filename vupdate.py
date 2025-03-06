@@ -1450,7 +1450,7 @@ def addVstreamVoiceControl():
         add_parameter_to_function(file_path, 'getMediaLink', 'autoPlay=False')
         add_parameter_to_function(file_path, '_getMediaLinkForGuest', 'autoPlay=False')
         add_parameter_to_function_call(file_path, '_getMediaLinkForGuest', 'autoPlay')
-        add_condition_to_statement(file_path, 'if not autoPlay:', 'oDialog = dialog().VSok')
+        add_condition_to_statement(file_path, 'if not autoPlay:', 'oDialog = dialog().VSok', ["def getMediaLink(self, autoPlay=False):"])
 
     file_path = VSPath('special://home/addons/plugin.video.vstream/resources/lib/gui/gui.py').replace('\\', '/')
     codeblock = """
