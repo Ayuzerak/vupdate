@@ -3321,18 +3321,18 @@ class ConditionInserter(ast.NodeTransformer):
         return ''
 
     def _is_target_statement(self, node: ast.AST) -> bool:
+        # Handle parameter default values as defined variables
+        if isinstance(node, ast.FunctionDef):
+            for default in node.args.defaults:
+                for name in ast.walk(default):
+                    if isinstance(name, ast.Name):
+                        self._scope_symbols["::".join(self.scope_hierarchy)].add(name.id)
+        
+        # Original target matching logic
         stmt_src = ast.get_source_segment(self.source, node)
         if not stmt_src:
             return False
-    
-        # Normalize line continuations
-        normalized_stmt = re.sub(r'\\\n', ' ', stmt_src)
-        normalized_target = re.sub(r'\\\n', ' ', self.target_line)
-    
-        return (
-            self.target_node and ast.dump(node) == ast.dump(self.target_node)
-            or normalized_target in normalized_stmt
-        )
+        return self.target_line in stmt_src.split('#')[0].strip()
 
     def _is_duplicate_condition(self, node: ast.AST) -> bool:
         def normalize(node: ast.AST) -> str:
@@ -3342,10 +3342,20 @@ class ConditionInserter(ast.NodeTransformer):
     def _validate_condition(self, node: ast.AST) -> bool:
         valid = True
         if isinstance(node, ast.If):
+            # Check test expression variables
             for name in ast.walk(node.test):
-                if isinstance(name, ast.Name) and name.id not in self._current_scope_symbols():
-                    self.log_error(f"Undefined variable '{name.id}' in condition")
-                    valid = False
+                if isinstance(name, ast.Name):
+                    # Allow parameters and their default values
+                    if name.id not in self._current_scope_symbols():
+                        # Check if it's a parameter with default
+                        current_func = next(
+                            (s for s in self.scope_hierarchy if "function::" in s), 
+                            None
+                        )
+                        if current_func and name.id in self._scope_symbols.get(current_func, set()):
+                            continue
+                        self.log_error(f"Undefined variable '{name.id}' in condition")
+                        valid = False
         return valid
 
     # Visitor methods
@@ -3367,17 +3377,20 @@ class ConditionInserter(ast.NodeTransformer):
         return node
 
     def visit_FunctionDef(self, node: ast.FunctionDef):
+        # Add function parameters to symbol table
+        params = {arg.arg for arg in node.args.args}
+        current_scope = "::".join(self.scope_hierarchy + [f"function::{node.name}"])
+        
+        # Create scope entry if it doesn't exist
+        if current_scope not in self._scope_symbols:
+            self._scope_symbols[current_scope] = set()
+            
+        self._scope_symbols[current_scope].update(params)
+        
+        # Continue normal processing
         self.scope_hierarchy.append(f"function::{node.name}")
         self.current_blocks.append(self._get_header_line(node))
-        
-        # Add parameters to scope
-        params = {arg.arg for arg in node.args.args}
-        current_scope = "::".join(self.scope_hierarchy)
-        if current_scope in self._scope_symbols:
-            self._scope_symbols[current_scope].update(params)
-            
         node = self.generic_visit(node)
-        node.body = self._handle_block(node.body)
         self.current_blocks.pop()
         self.scope_hierarchy.pop()
         return node
