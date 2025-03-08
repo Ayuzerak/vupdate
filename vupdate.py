@@ -3238,6 +3238,16 @@ def add_parameter_to_function_call(file_path, function_name, parameter):
     except Exception as e:
         VSlog(f"Error while modifying file '{file_path}': {str(e)}")
 
+import ast
+import symtable
+import difflib
+import shutil
+from typing import List, Optional, Dict, Set
+from difflib import get_close_matches
+
+def VSlog(message: str):
+    print(message)
+
 class ConditionInserter(ast.NodeTransformer):
     def __init__(self, target_line: str, condition: str, 
                  parent_blocks: Optional[List[str]], source: str, filename: str):
@@ -3326,15 +3336,58 @@ class ConditionInserter(ast.NodeTransformer):
             return self.source_lines[node.lineno - 1].strip()
         return ''
 
+    def _normalize_line(self, line: str) -> str:
+        if not line:
+            return ""
+        line = line.split('#')[0].strip()
+        line = ' '.join(line.split()).rstrip(';')
+        return line.replace('"', "'").lower()
+
     def _is_target_statement(self, node: ast.AST) -> bool:
+        # Strategy 1: AST-based exact matching
         stmt_src = ast.get_source_segment(self.source, node)
-        if not stmt_src:
-            return False
-            
-        normalized_target = " ".join(self.target_line.split()).split('#')[0].strip()
-        normalized_stmt = " ".join(stmt_src.split()).split('#')[0].strip()
+        if self._normalize_line(stmt_src) == self._normalize_line(self.target_line):
+            return True
         
-        return normalized_target == normalized_stmt
+        # Strategy 2: Line number direct matching
+        if hasattr(node, 'lineno'):
+            line_text = self.source_lines[node.lineno - 1].strip()
+            if self._normalize_line(line_text) == self._normalize_line(self.target_line):
+                return True
+        
+        # Strategy 3: Full subtree scanning
+        for child in ast.walk(node):
+            if hasattr(child, 'lineno'):
+                line_text = self.source_lines[child.lineno - 1].strip()
+                if self._normalize_line(line_text) == self._normalize_line(self.target_line):
+                    return True
+        
+        return False
+
+    def _handle_missed_target(self):
+        normalized_target = self._normalize_line(self.target_line)
+        matches = []
+        similar = []
+        
+        for idx, line in enumerate(self.source_lines, 1):
+            normalized = self._normalize_line(line)
+            if normalized == normalized_target:
+                matches.append(f"Line {idx}: {line.strip()}")
+            elif normalized_target in normalized:
+                similar.append(f"Line {idx}: {line.strip()}")
+        
+        if matches or similar:
+            self.log_error("\nPotential target line matches:")
+            for match in matches[:3]:
+                self.log_error(f"  ✓ {match}")
+            for sim in similar[:3]:
+                self.log_error(f"  ~ {sim}")
+            
+            if not matches:
+                self.log_error("\nPossible reasons:")
+                self.log_error("- Different indentation level")
+                self.log_error("- Part of multi-line statement")
+                self.log_error("- Inside comment/string literal")
 
     def _is_duplicate_condition(self, node: ast.AST) -> bool:
         def normalize(node: ast.AST) -> str:
@@ -3347,32 +3400,27 @@ class ConditionInserter(ast.NodeTransformer):
             current_symbols = self._current_scope_symbols()
             condition_vars = set()
             
-            # Collect all unique variables in condition
             for name in ast.walk(node.test):
                 if isinstance(name, ast.Name):
                     condition_vars.add(name.id)
             
-            # Validate and log each variable
             undefined_vars = set()
             for var in sorted(condition_vars):
                 if var in current_symbols:
-                    self.log_error(f"[Validation] Variable confirmed: '{var}'")
+                    self.log_error(f"[Validation] ✓ '{var}' is defined")
                 else:
                     undefined_vars.add(var)
             
-            # Handle undefined variables
             for var in undefined_vars:
                 suggestions = get_close_matches(var, current_symbols, n=3, cutoff=0.6)
-                suggestion_msg = f" (Suggestions: {', '.join(suggestions)})" if suggestions else ""
-                self.log_error(f"[Validation] Undefined variable: '{var}'{suggestion_msg}")
+                suggestion_msg = f" (similar: {', '.join(suggestions)})" if suggestions else ""
+                self.log_error(f"[Validation] ✗ '{var}' undefined{suggestion_msg}")
                 valid = False
 
-            # Log scope information
-            self.log_error(f"[Validation] Available symbols: {sorted(current_symbols)}")
+            self.log_error(f"[Validation] Scope symbols: {sorted(current_symbols)}")
             
         return valid
 
-    # AST Visitor Methods
     def visit_Module(self, node: ast.Module):
         self.scope_hierarchy.append("module")
         self.current_blocks.append('module')
@@ -3394,7 +3442,6 @@ class ConditionInserter(ast.NodeTransformer):
         self.scope_hierarchy.append(node.name)
         current_scope = "::".join(self.scope_hierarchy)
         
-        # Add parameters to symbol table
         params = {arg.arg for arg in node.args.args}
         if current_scope not in self._scope_symbols:
             self._scope_symbols[current_scope] = set()
@@ -3501,6 +3548,7 @@ def add_condition_to_statement(
                 VSlog(f"• {error}")
         else:
             VSlog(f"\nTarget line not found: '{target_line}'")
+            inserter._handle_missed_target()
         return False
 
     try:
