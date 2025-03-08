@@ -3238,6 +3238,16 @@ def add_parameter_to_function_call(file_path, function_name, parameter):
     except Exception as e:
         VSlog(f"Error while modifying file '{file_path}': {str(e)}")
 
+import ast
+import symtable
+import difflib
+import shutil
+from typing import List, Optional, Dict, Set
+from difflib import get_close_matches
+
+def VSlog(message: str):
+    print(message)
+
 class ConditionInserter(ast.NodeTransformer):
     def __init__(self, target_line: str, condition: str, 
                  parent_blocks: Optional[List[str]], source: str, filename: str):
@@ -3330,22 +3340,18 @@ class ConditionInserter(ast.NodeTransformer):
         if not line:
             return ""
         line = line.split('#')[0].strip()
-        line = ' '.join(line.split()).rstrip(';')
-        return line.replace('"', "'").lower()
+        return ' '.join(line.split()).rstrip(';').replace('"', "'").lower()
 
     def _is_target_statement(self, node: ast.AST) -> bool:
-        # Strategy 1: AST-based exact matching
         stmt_src = ast.get_source_segment(self.source, node)
         if self._normalize_line(stmt_src) == self._normalize_line(self.target_line):
             return True
         
-        # Strategy 2: Line number direct matching
         if hasattr(node, 'lineno'):
             line_text = self.source_lines[node.lineno - 1].strip()
             if self._normalize_line(line_text) == self._normalize_line(self.target_line):
                 return True
         
-        # Strategy 3: Full subtree scanning
         for child in ast.walk(node):
             if hasattr(child, 'lineno'):
                 line_text = self.source_lines[child.lineno - 1].strip()
@@ -3389,25 +3395,26 @@ class ConditionInserter(ast.NodeTransformer):
         if isinstance(node, ast.If):
             current_symbols = self._current_scope_symbols()
             condition_vars = set()
-            
+            validation_errors = []
+            scope_logged = False
+
             for name in ast.walk(node.test):
                 if isinstance(name, ast.Name):
                     condition_vars.add(name.id)
-            
-            undefined_vars = set()
-            for var in sorted(condition_vars):
-                if var in current_symbols:
-                    self.log_error(f"[Validation] ✓ '{var}' is defined")
-                else:
-                    undefined_vars.add(var)
-            
-            for var in undefined_vars:
-                suggestions = get_close_matches(var, current_symbols, n=3, cutoff=0.6)
-                suggestion_msg = f" (similar: {', '.join(suggestions)})" if suggestions else ""
-                self.log_error(f"[Validation] ✗ '{var}' undefined{suggestion_msg}")
-                valid = False
 
-            self.log_error(f"[Validation] Scope symbols: {sorted(current_symbols)}")
+            for var in sorted(condition_vars):
+                if var not in current_symbols:
+                    valid = False
+                    suggestions = get_close_matches(var, current_symbols, n=3, cutoff=0.6)
+                    suggestion_msg = f" (similar: {', '.join(suggestions)})" if suggestions else ""
+                    validation_errors.append(f"Undefined variable: '{var}'{suggestion_msg}")
+                    
+                    if not scope_logged:
+                        self.errors.append(f"Available symbols: {sorted(current_symbols)}")
+                        scope_logged = True
+
+            if validation_errors:
+                self.errors.extend(validation_errors)
             
         return valid
 
@@ -3432,11 +3439,21 @@ class ConditionInserter(ast.NodeTransformer):
         self.scope_hierarchy.append(node.name)
         current_scope = "::".join(self.scope_hierarchy)
         
-        params = {arg.arg for arg in node.args.args}
+        # Capture all parameter types
+        params = set()
+        params.update(arg.arg for arg in node.args.posonlyargs)
+        params.update(arg.arg for arg in node.args.args)
+        params.update(arg.arg for arg in node.args.kwonlyargs)
+        if node.args.vararg:
+            params.add(node.args.vararg.arg)
+        if node.args.kwarg:
+            params.add(node.args.kwarg.arg)
+
+        # Update current scope
         if current_scope not in self._scope_symbols:
             self._scope_symbols[current_scope] = set()
         self._scope_symbols[current_scope].update(params)
-        
+
         self.current_blocks.append(self._get_header_line(node))
         node = self.generic_visit(node)
         self.current_blocks.pop()
@@ -3534,8 +3551,11 @@ def add_condition_to_statement(
     if not inserter.inserted:
         if inserter.target_found:
             VSlog("\nInsertion failed. Reasons:")
+            seen = set()
             for error in inserter.errors:
-                VSlog(f"• {error}")
+                if error not in seen:
+                    VSlog(f"• {error}")
+                    seen.add(error)
         else:
             VSlog(f"\nTarget line not found: '{target_line}'")
             inserter._handle_missed_target()
