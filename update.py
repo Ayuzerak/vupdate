@@ -1907,118 +1907,139 @@ def set_elitegol_url(url):
         VSlog(f"Error while setting EliteGol URL: {e}")
         
 def get_livetv_url():
+    """Retrieve LiveTV URL with content validation and fallback to saved URL.
+    Only a valid final (redirected) URL is saved to the config file when detected.
+    The default URL is used only as a last resort.
+    """
+    VSlog("Starting LiveTV URL retrieval process")
+    
     CONFIG_FILE = VSPath('special://home/addons/service.vstreamupdate/site_config.ini').replace('\\', '/')
-
-    def load_current_url():
-        config = configparser.ConfigParser()
-        if os.path.exists(CONFIG_FILE):
-            config.read(CONFIG_FILE)
-            if "livetv" in config and "current_url" in config["livetv"]:
-                return config["livetv"]["current_url"]
-        # Fallback default value if not found in config
-        return "https://livetv819.me"
-
-    def save_current_url(url):
+    default_url = "https://livetv.sx/frx/"
+    bypass_url = "https://livetv774.me"
+    
+    def save_valid_url(url):
         try:
             config = configparser.ConfigParser()
-            config["livetv"] = {"current_url": url}
-            VSlog(f"Trying to write to {CONFIG_FILE}")  # Debug statement
+            if os.path.exists(CONFIG_FILE):
+                config.read(CONFIG_FILE)
+            if "livetv" not in config:
+                config["livetv"] = {}
+            config["livetv"]["current_url"] = url
             with open(CONFIG_FILE, "w") as configfile:
                 config.write(configfile)
-            VSlog(f"URL saved successfully: {url}")  # Confirmation log
+            VSlog(f"URL saved successfully: {url}")
         except Exception as e:
-            VSlog(f"Failed to save URL: {e}")
-
-    def good_live_tv_url(test_url):
+            VSlog(f"Cannot save valid URL: {str(e)}")
+    
+    def load_and_validate_url():
+        """Attempt to load a URL from config and validate it.
+        Returns the effective URL if valid, otherwise None.
+        """
+        VSlog("load_and_validate_url()")
         try:
-            final_response = requests.get(
-                test_url,
-                headers={
-                    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-                                  "AppleWebKit/537.36 (KHTML, like Gecko) "
-                                  "Chrome/91.0.4472.124 Safari/537.36"
-                },
-                timeout=10,
-                allow_redirects=True
-            )
-        except requests.RequestException as e:
-            VSlog(f"Erreur lors de la requête: {e}")
-            return False
-
-        effective_url = final_response.url  # URL after redirects
-        content = final_response.text
-
-        # Check if the keyword "Matchs" exists in the response content
-        if content.find("Matchs") == -1:
-            VSlog("Url non trouvée.")
-            return False
-        else:
-            # If we're testing current_url and it got redirected, update it.
-            if test_url == current_url and effective_url != test_url:
-                VSlog(f"Redirection détectée: {test_url} -> {effective_url}")
-                save_current_url(effective_url)
-            VSlog(f"Url trouvée: {effective_url}")
-            return True
-
-    VSlog("Récupération de l'URL de LiveTV.")
-
-    current_url = load_current_url()
-    bypass_url = "https://livetv774.me"
-    default_url = "https://livetv.sx/frx/"
-    url = ""
-
-    try:
-        if good_live_tv_url(default_url):
-            return default_url
-
-        if good_live_tv_url(current_url):
-            return current_url
-
-        if good_live_tv_url(bypass_url):
-            return bypass_url
-
-        response = requests.get(
-            "https://top-infos.com/live-tv-sx-nouvelle-adresse/",
-            headers={
-                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-                              "AppleWebKit/537.36 (KHTML, like Gecko) "
-                              "Chrome/91.0.4472.124 Safari/537.36"
-            },
-            timeout=10
-        )
-
-        content = response.text
-        target_position = content.find("LiveTV est accessible via")
-
-        if target_position == -1:
-            VSlog("Texte clé non trouvé dans la page.")
-        else:
-            content_after_target = content[target_position:]
-            web_addresses = re.findall(
-                r'https?://[\w.-]+(?:\.[\w.-]+)+(?::\d+)?(?:/[\w.-]*)*(?:\?[\w&=.-]*)?(?:#[\w.-]*)?',
-                content_after_target
-            )
-
-            if web_addresses:
-                # Prefer the second match if it contains "livetv"
-                if len(web_addresses) > 1 and "livetv" in web_addresses[1]:
-                    url = web_addresses[1].replace("httpss", "https") + "/"
-                else:
-                    url = web_addresses[0].replace("httpss", "https") + "/"
-
-                if not url.startswith("http"):
-                    url = "https://" + url
-                VSlog(f"URL de LiveTV trouvée : {url}")
-
-                if good_live_tv_url(url):
-                    return url
+            config = configparser.ConfigParser()
+            if os.path.exists(CONFIG_FILE):
+                config.read(CONFIG_FILE)
+                if "livetv" in config and "current_url" in config["livetv"]:
+                    saved_url = config["livetv"]["current_url"]
+                    effective_url = validate_url_content(saved_url)
+                    if effective_url:
+                        return effective_url
+        except Exception as e:
+            VSlog(f"URL load error: {str(e)}")
+        return None
+    
+    def validate_url_content(url):
+        """Check if the URL's content contains the keyword 'matchs'.
+        Returns the final effective URL (after redirection) if valid, or None.
+        """
+        try:
+            headers = {
+                "User-Agent": (
+                    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                    "AppleWebKit/537.36 (KHTML, like Gecko) "
+                    "Chrome/91.0.4472.124 Safari/537.36"
+                )
+            }
+            response = requests.get(url, headers=headers, timeout=15, allow_redirects=True)
+            effective_url = response.url  # Final URL after any redirects
+            if "matchs" in response.text.lower():
+                if effective_url != url:
+                    VSlog(f"Redirection detected: {url} -> {effective_url}")
+                return effective_url
             else:
-                VSlog("Aucune adresse trouvée après le texte clé.")
+                VSlog(f"Content validation failed for {url}: keyword 'matchs' not found")
+                return None
+        except Exception as e:
+            VSlog(f"Content validation failed for {url}: {str(e)}")
+            return None
 
-        return default_url
-    except requests.RequestException as e:
-        VSlog(f"Erreur lors de la récupération de l'URL de LiveTV : {e}")
-        return default_url
+    current_valid_url = None
+
+    # Candidate 1: Try the URL saved in the config file.
+    effective_url = load_and_validate_url()
+    if effective_url:
+        VSlog(f"Saved URL is valid: {effective_url}")
+        save_valid_url(effective_url)
+        current_valid_url = effective_url
+
+    # Candidate 2: Try the bypass URL.
+    if not current_valid_url:
+        effective_url = validate_url_content(bypass_url)
+        if effective_url:
+            VSlog(f"Bypass URL is valid: {effective_url}")
+            save_valid_url(effective_url)
+            current_valid_url = effective_url
+
+    # Candidate 3: Try to extract URL from an external source.
+    if not current_valid_url:
+        try:
+            response = requests.get(
+                "https://top-infos.com/live-tv-sx-nouvelle-adresse/",
+                headers={
+                    "User-Agent": (
+                        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                        "AppleWebKit/537.36 (KHTML, like Gecko) "
+                        "Chrome/91.0.4472.124 Safari/537.36"
+                    )
+                },
+                timeout=10
+            )
+            content = response.text
+            target_position = content.find("LiveTV est accessible via")
+            if target_position != -1:
+                content_after_target = content[target_position:]
+                web_addresses = re.findall(
+                    r'https?://[\w\.-]+(?:\.[\w\.-]+)+(?::\d+)?(?:/[\w\.-]*)*(?:\?[\w&=.-]*)?(?:#[\w.-]*)?',
+                    content_after_target
+                )
+                if web_addresses:
+                    # Prefer the second match if it contains "livetv"
+                    if len(web_addresses) > 1 and "livetv" in web_addresses[1]:
+                        candidate_url = web_addresses[1].replace("httpss", "https").rstrip('/') + '/'
+                    else:
+                        candidate_url = web_addresses[0].replace("httpss", "https").rstrip('/') + '/'
+                    VSlog(f"Candidate URL found from external source: {candidate_url}")
+                    effective_url = validate_url_content(candidate_url)
+                    if effective_url:
+                        VSlog(f"External candidate URL is valid: {effective_url}")
+                        save_valid_url(effective_url)
+                        current_valid_url = effective_url
+        except Exception as e:
+            VSlog(f"Error retrieving URL from external source: {str(e)}")
+    
+    # Candidate 4: Last resort, use the default URL.
+    if not current_valid_url:
+        effective_url = validate_url_content(default_url)
+        if effective_url:
+            VSlog(f"Default URL is valid: {effective_url}")
+            save_valid_url(effective_url)
+            current_valid_url = effective_url
+        else:
+            current_valid_url = default_url
+            VSlog("Default URL failed content validation, returning as fallback")
+    
+    return current_valid_url
 
 def set_livetv_url(url):
     """Met à jour l'URL de LiveTV dans le fichier sites.json."""
