@@ -3239,7 +3239,6 @@ def add_parameter_to_function_call(file_path, function_name, parameter):
     except Exception as e:
         VSlog(f"Error while modifying file '{file_path}': {str(e)}")
 
-
 class ConditionInserter(ast.NodeTransformer):
     def __init__(self, target_line: str, condition: str, 
                  parent_blocks: Optional[List[str]], source: str, filename: str):
@@ -3633,17 +3632,16 @@ def _process_partial_matches(
     target: str,
     encoding: str
 ) -> bool:
-    VSlog("\n⚠️ WARNING: No exact matches found. Partial matches detected:")
+    VSlog("\n⚠️ WARNING: No exact matches found. Processing partial matches...")
+    line_numbers = [match[0] for match in inserter.partial_matches]
+    
+    VSlog("\n🔍 Found potential insertion points:")
     for idx, (lineno, line, similarity) in enumerate(inserter.partial_matches, 1):
         VSlog(f"  [{idx}] Line {lineno}: {line} ({similarity})")
 
-    best_match = max(inserter.partial_matches,
-                    key=lambda x: float(x[2].split('%')[0]))
-    VSlog(f"\n🔧 Auto-selecting best match: Line {best_match[0]}")
-
     try:
-        modified_tree = _force_insert_at_line(
-            ast.parse(source), best_match[0], condition, target
+        modified_tree = _force_insert_at_multiple_lines(
+            ast.parse(source), line_numbers, condition, target
         )
         ast.fix_missing_locations(modified_tree)
         
@@ -3657,12 +3655,15 @@ def _process_partial_matches(
         VSlog(f"\n❌ Partial match insertion failed: {e}")
         return False
 
-    VSlog("\n⚠️ Conditional inserted at partial match location:")
-    _log_changes([{
-        'original_lineno': best_match[0],
-        'original_code': best_match[1],
-        'modified_code': f"{condition}\n    {best_match[1]}"
-    }], source.split('\n'), new_lines)
+    VSlog("\n⚠️ WARNING: Multiple insertions made at potential match locations:")
+    changes = [{
+        'original_lineno': match[0],
+        'original_code': match[1],
+        'modified_code': f"{condition}\n    {match[1]}",
+        'is_partial': True
+    } for match in inserter.partial_matches]
+    
+    _log_changes(changes, source.split('\n'), new_lines)
 
     if dry_run:
         _show_dry_run_diff(source, new_source)
@@ -3672,29 +3673,34 @@ def _process_partial_matches(
         if backup_file(file_path):
             with open(file_path, 'w', encoding=encoding) as f:
                 f.write(new_source)
-            VSlog(f"\n💾 File modified with partial match: {file_path}")
+            VSlog(f"\n💾 File modified with {len(line_numbers)} partial match insertions")
             return True
     except Exception as e:
         VSlog(f"\n❌ Partial match write failed: {e}")
         restore_backup(file_path)
         return False
 
-def _force_insert_at_line(
+def _force_insert_at_multiple_lines(
     tree: ast.Module,
-    lineno: int,
+    linenos: List[int],
     condition: str,
     target: str
 ) -> ast.Module:
-    class ForceInserter(ast.NodeTransformer):
+    class MultiLineInserter(ast.NodeTransformer):
         def __init__(self):
-            self.done = False
-            self.insert_lineno = lineno
+            self.insertions = sorted(set(linenos))
             self.condition = ast.parse(condition).body[0]
+            self.current_index = 0
             
         def generic_visit(self, node):
-            if hasattr(node, 'lineno') and node.lineno == self.insert_lineno:
-                if not self.done:
-                    self.done = True
+            if hasattr(node, 'lineno') and self.current_index < len(self.insertions):
+                while (self.current_index < len(self.insertions) and 
+                      node.lineno > self.insertions[self.current_index]):
+                    self.current_index += 1
+                
+                if (self.current_index < len(self.insertions) and 
+                   node.lineno == self.insertions[self.current_index]):
+                    self.current_index += 1
                     new_if = ast.If(
                         test=self.condition.test,
                         body=[node],
@@ -3703,16 +3709,23 @@ def _force_insert_at_line(
                     return ast.copy_location(new_if, node)
             return node
             
-    return ForceInserter().visit(tree)
+    return MultiLineInserter().visit(tree)
 
 def _log_changes(insertions, orig_lines, mod_lines):
     for change in insertions:
         lineno = change['original_lineno']
-        context = 2  # Lines before/after to show
+        context = 2
         
-        VSlog(f"\n―――― Change at line {lineno+1} ――――")
+        warning = "⚠️ PARTIAL MATCH" if change.get('is_partial') else ""
+        VSlog(f"\n―――― {warning} Change at line {lineno+1} ――――")
         VSlog(f"Original:\n{_get_code_context(orig_lines, lineno, context)}")
         VSlog(f"\nModified:\n{_get_code_context(mod_lines, lineno, context+1)}")
+        
+        if change.get('is_partial'):
+            VSlog(f"\n🔶 WARNING: Insertion made at potential match location")
+            VSlog(f"   Similarity threshold: {ConditionInserter.partial_match_threshold}")
+            VSlog(f"   Original code: {change['original_code']}")
+
         VSlog(f"\nCode Validation:")
         VSlog(f"| {'Original':<40} | {'Modified':<40} |")
         VSlog(f"| {'-'*40} | {'-'*40} |")
