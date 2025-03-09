@@ -4608,7 +4608,7 @@ def get_livetv_url():
                 VSlog(f"Redirection détectée: {test_url} -> {effective_url}")
                 save_current_url(effective_url)
             VSlog(f"Url trouvée: {effective_url}")
-            return True
+            return False
 
     VSlog("Récupération de l'URL de LiveTV.")
 
