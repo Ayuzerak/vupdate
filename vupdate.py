@@ -3344,10 +3344,11 @@ class ConditionInserter(ast.NodeTransformer):
             return False
 
         raw_line = self.source_lines[node.lineno - 1].rstrip()
+        normalized_raw = self._normalize_line(raw_line)
         stmt_src = ast.get_source_segment(self.source, node)
         
         variants = {
-            'raw_line': self._normalize_line(raw_line),
+            'raw_line': normalized_raw,
             'stmt_src': self._normalize_line(stmt_src),
             'ast_dump': self._normalize_ast(node)
         }
@@ -3355,34 +3356,48 @@ class ConditionInserter(ast.NodeTransformer):
         if any(v == self.normalized_target for v in variants.values()):
             return True
 
-        best_ratio = max(
-            SequenceMatcher(None, self.normalized_target, v).ratio()
-            for v in variants.values()
-        )
+        similarities = []
+        for v in variants.values():
+            ratio = SequenceMatcher(None, self.normalized_target, v).ratio()
+            similarities.append(ratio)
+            if self.normalized_target in v:
+                similarities.append(min(ratio + 0.15, 1.0))
+
+        best_ratio = max(similarities) if similarities else 0
         
         if best_ratio >= self.partial_match_threshold:
             self.partial_matches.append((
                 node.lineno,
                 raw_line,
-                f"{best_ratio:.0%} match"
+                f"{best_ratio:.0%} match",
+                normalized_raw
             ))
             
         return False
 
     def _handle_missed_target(self):
-        normalized_target = self._normalize_line(self.target_line)
-        matches = []
+        normalized_target = self.normalized_target
+        existing_lines = {m[0] for m in self.partial_matches}
         
-        for idx, line in enumerate(self.source_lines, 1):
-            if normalized_target in self._normalize_line(line):
-                matches.append(f"Line {idx}: {line.strip()}")
-        
-        if matches:
-            self.log_error("\nPotential matches (case-sensitive partial):")
-            for match in matches[:3]:
-                self.log_error(f"  - {match}")
+        for idx, line in enumerate(self.source_lines):
+            normalized_line = self._normalize_line(line)
+            if normalized_target in normalized_line:
+                lineno = idx + 1
+                if lineno not in existing_lines:
+                    ratio = SequenceMatcher(None, normalized_target, normalized_line).ratio()
+                    self.partial_matches.append((
+                        idx,
+                        line.strip(),
+                        f"line-scan: {ratio:.0%}",
+                        normalized_line
+                    ))
+
+        if self.partial_matches:
+            self.log_error("\nCombined potential matches:")
+            for match in self.partial_matches:
+                self.log_error(f"  Line {match[0]+1}: {match[1]} ({match[2]})")
         else:
-            self.log_error("\nNo similar lines found")
+            self.log_error("\nNo matches found by any detection method")
 
     def _is_duplicate_condition(self, node: ast.AST) -> bool:
         def normalize(node: ast.AST) -> str:
@@ -3391,29 +3406,36 @@ class ConditionInserter(ast.NodeTransformer):
 
     def _validate_condition(self, node: ast.AST) -> bool:
         valid = True
+        validation_report = []
         if isinstance(node, ast.If):
             current_symbols = self._current_scope_symbols()
             condition_vars = set()
-            validation_errors = set()
-            scope_logged = False
-
+            
             for name in ast.walk(node.test):
                 if isinstance(name, ast.Name):
-                    condition_vars.add(name.id)
+                    var_name = name.id
+                    condition_vars.add(var_name)
+                    var_status = "Defined" if var_name in current_symbols else "Undefined"
+                    validation_report.append(f"{var_name}: {var_status}")
 
-            for var in sorted(condition_vars):
-                if var not in current_symbols:
-                    valid = False
-                    suggestions = get_close_matches(var, current_symbols, n=3, cutoff=0.6)
-                    suggestion_msg = f" (similar: {', '.join(suggestions)})" if suggestions else ""
-                    validation_errors.add(f"Undefined variable: '{var}'{suggestion_msg}")
-                    
-                    if not scope_logged:
-                        self.errors.add(f"Available symbols: {sorted(current_symbols)}")
-                        scope_logged = True
+            undefined_vars = [v for v in condition_vars if v not in current_symbols]
+            if undefined_vars:
+                valid = False
+                suggestions = {}
+                for var in undefined_vars:
+                    closest = get_close_matches(var, current_symbols, n=3, cutoff=0.6)
+                    suggestions[var] = closest if closest else "No similar variables found"
+                
+                self.log_error("Condition validation failed:")
+                for var, matches in suggestions.items():
+                    self.log_error(f"  Undefined: '{var}' | Suggestions: {', '.join(matches)}")
+                
+                self.log_error(f"Current scope symbols: {sorted(current_symbols)}")
+            else:
+                self.log_error("Condition variables status:")
+                for line in validation_report:
+                    self.log_error(f"  - {line}")
 
-            self.errors.update(validation_errors)
-            
         return valid
 
     def visit_Module(self, node: ast.Module):
@@ -3550,6 +3572,9 @@ class ConditionInserter(ast.NodeTransformer):
             new_body.append(new_cond)
             self.inserted = True
 
+        if not self.inserted:
+            self._handle_missed_target()
+
         return new_body
 
 def add_condition_to_statement(
@@ -3586,7 +3611,12 @@ def add_condition_to_statement(
 
     if not inserter.inserted:
         if inserter.partial_matches:
-            return _process_partial_matches(
+            VSlog("\n⚠️ WARNING: No exact matches found. Using ALL potential matches:")
+            for idx, (lineno, line, similarity, _) in enumerate(inserter.partial_matches, 1):
+                VSlog(f"  [{idx}] Line {lineno+1}: {line} ({similarity})")
+            
+            VSlog("\n🔧 Attempting multi-point insertion at all potential locations")
+            return _process_all_partial_matches(
                 inserter, source, file_path, dry_run,
                 condition_to_insert, target_line, encoding
             )
@@ -3624,7 +3654,7 @@ def add_condition_to_statement(
         restore_backup(file_path)
         return False
 
-def _process_partial_matches(
+def _process_all_partial_matches(
     inserter: ConditionInserter,
     source: str,
     file_path: str,
@@ -3633,13 +3663,8 @@ def _process_partial_matches(
     target: str,
     encoding: str
 ) -> bool:
-    VSlog("\n⚠️ WARNING: No exact matches found. Processing partial matches...")
     line_numbers = [match[0] for match in inserter.partial_matches]
     
-    VSlog("\n🔍 Found potential insertion points:")
-    for idx, (lineno, line, similarity) in enumerate(inserter.partial_matches, 1):
-        VSlog(f"  [{idx}] Line {lineno}: {line} ({similarity})")
-
     try:
         modified_tree = _force_insert_at_multiple_lines(
             ast.parse(source), line_numbers, condition, target
@@ -3653,17 +3678,36 @@ def _process_partial_matches(
         ast.parse(new_source)
         compile(new_source, filename=file_path, mode='exec')
     except Exception as e:
-        VSlog(f"\n❌ Partial match insertion failed: {e}")
+        VSlog(f"\n❌ Multi-insertion failed: {e}")
         return False
 
     VSlog("\n⚠️ WARNING: Multiple insertions made at potential match locations:")
-    changes = [{
-        'original_lineno': match[0],
-        'original_code': match[1],
-        'modified_code': f"{condition}\n    {match[1]}",
-        'is_partial': True
-    } for match in inserter.partial_matches]
-    
+    changes = []
+    for match in inserter.partial_matches:
+        lineno, line, similarity, normalized = match
+        changes.append({
+            'original_lineno': lineno,
+            'original_code': line,
+            'modified_code': f"{condition}\n    {line}",
+            'is_partial': True,
+            'similarity': similarity,
+            'normalized': normalized
+        })
+        
+        # Validate variables for each insertion
+        temp_inserter = ConditionInserter(target, condition, None, source, file_path)
+        temp_inserter._validate_condition(temp_inserter.condition_node)
+        
+        VSlog(f"\n  • Insertion at line {lineno+1}:")
+        VSlog(f"    Original: {line}")
+        VSlog(f"    Modified: {condition}")
+        VSlog(f"    Similarity: {similarity}")
+        VSlog(f"    Normalized: {normalized}")
+        VSlog(f"    Variable validation:")
+        for msg in temp_inserter.errors:
+            if "Defined" in msg or "Undefined" in msg:
+                VSlog(f"      {msg}")
+
     _log_changes(changes, source.split('\n'), new_lines)
 
     if dry_run:
@@ -3695,6 +3739,7 @@ def _force_insert_at_multiple_lines(
             
         def generic_visit(self, node):
             if hasattr(node, 'lineno') and self.current_index < len(self.insertions):
+                # Handle line number offsets
                 while (self.current_index < len(self.insertions) and 
                       node.lineno > self.insertions[self.current_index]):
                     self.current_index += 1
@@ -3723,16 +3768,14 @@ def _log_changes(insertions, orig_lines, mod_lines):
         VSlog(f"\nModified:\n{_get_code_context(mod_lines, lineno, context+1)}")
         
         if change.get('is_partial'):
-            VSlog(f"\n🔶 WARNING: Insertion made at potential match location")
-            VSlog(f"   Similarity threshold: {ConditionInserter.partial_match_threshold}")
-            VSlog(f"   Original code: {change['original_code']}")
-
-        VSlog(f"\nCode Validation:")
-        VSlog(f"| {'Original':<40} | {'Modified':<40} |")
-        VSlog(f"| {'-'*40} | {'-'*40} |")
-        for o, m in zip(orig_lines[lineno-context:lineno+context+1],
-                        mod_lines[lineno-context:lineno+context+2]):
-            VSlog(f"| {o[:40]:<40} | {m[:40]:<40} |")
+            VSlog(f"\n🔶 WARNING: Potential match insertion")
+            VSlog(f"    Similarity: {change.get('similarity', 'Unknown')}")
+            VSlog(f"    Normalized: {change.get('normalized', '')}")
+            VSlog(f"    Target: {change['original_code']}")
+            VSlog(f"    Condition variables:")
+            for key in ['modified_code', 'variable_status']:
+                if key in change:
+                    VSlog(f"      {change[key]}")
 
 def _get_code_context(lines, lineno, context):
     start = max(0, lineno - context)
