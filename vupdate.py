@@ -1439,8 +1439,8 @@ def addVstreamVoiceControl():
         file_path = VSPath(path).replace('\\', '/')
         VSlog(f"Processing file: {file_path}")
         add_parameter_to_function(file_path, 'showHosters', 'oInputParameterHandler=False')
-        add_condition_to_statement(file_path, 'if not oInputParameterHandler:', 'oInputParameterHandler = cInputParameterHandler()')
         add_parameter_to_function_call(file_path, 'cHosterGui().showHoster', 'oInputParameterHandler=oInputParameterHandler')
+        add_condition_to_statement(file_path, 'if not oInputParameterHandler:', 'oInputParameterHandler = cInputParameterHandler()')
 
     # Recherche de tous les fichiers .py dans le répertoire
     file_paths = glob.glob(os.path.join(VSPath('special://home/addons/plugin.video.vstream/resources/hosters/').replace('\\', '/'), "*.py"))
@@ -1475,12 +1475,12 @@ if window(10101).getProperty('playVideo') == 'true':
     file_path = VSPath('special://home/addons/plugin.video.vstream/resources/lib/gui/hoster.py').replace('\\', '/')
 
     add_parameter_to_function(file_path, 'showHoster', 'oInputParameterHandler=False')
-    add_condition_to_statement(file_path, 'if not oInputParameterHandler:', 'oInputParameterHandler = cInputParameterHandler()')
     add_parameter_to_function(file_path, 'play', 'oInputParameterHandler=False')
     add_parameter_to_function(file_path, 'play', 'autoPlay = False')
-    add_condition_to_statement(file_path, 'if not autoPlay:', 'oDialog.VSinfo')
     add_parameter_to_function_call(file_path, 'oHoster.getMediaLink', 'autoPlay')
     add_parameter_to_function_call(file_path, 'cPlayer', 'oInputParameterHandler')
+    add_condition_to_statement(file_path, 'if not oInputParameterHandler:', 'oInputParameterHandler = cInputParameterHandler()')
+    add_condition_to_statement(file_path, 'if not autoPlay:', 'oDialog.VSinfo')
     add_condition_to_statement(file_path, 'if not autoPlay:', 'oDialog.VSerror')
     add_condition_to_statement(file_path, 'if not autoPlay:', 'oGui.setEndOfDirectory()')
 
