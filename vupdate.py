@@ -3330,50 +3330,40 @@ class ConditionInserter(ast.NodeTransformer):
         if not line:
             return ""
         line = line.split('#')[0].strip()
-        return ' '.join(line.split()).rstrip(';').replace('"', "'").lower()
+        return ' '.join(line.split()).rstrip(';')
 
     def _is_target_statement(self, node: ast.AST) -> bool:
+        # Partial match detection with case sensitivity
         stmt_src = ast.get_source_segment(self.source, node)
-        if self._normalize_line(stmt_src) == self._normalize_line(self.target_line):
-            return True
-        
-        if hasattr(node, 'lineno'):
-            line_text = self.source_lines[node.lineno - 1].strip()
-            if self._normalize_line(line_text) == self._normalize_line(self.target_line):
+        if stmt_src:
+            normalized_stmt = self._normalize_line(stmt_src)
+            normalized_target = self._normalize_line(self.target_line)
+            if normalized_target in normalized_stmt:
                 return True
-        
-        for child in ast.walk(node):
-            if hasattr(child, 'lineno'):
-                line_text = self.source_lines[child.lineno - 1].strip()
-                if self._normalize_line(line_text) == self._normalize_line(self.target_line):
-                    return True
-        
+
+        # Direct line scanning
+        if hasattr(node, 'lineno'):
+            raw_line = self.source_lines[node.lineno - 1]
+            if self._normalize_line(self.target_line) in self._normalize_line(raw_line):
+                return True
+
         return False
 
     def _handle_missed_target(self):
-        normalized_target = self._normalize_line(self.target_line)
+        target_base = self._normalize_line(self.target_line)
         matches = []
-        similar = []
         
         for idx, line in enumerate(self.source_lines, 1):
             normalized = self._normalize_line(line)
-            if normalized == normalized_target:
+            if target_base in normalized:
                 matches.append(f"Line {idx}: {line.strip()}")
-            elif normalized_target in normalized:
-                similar.append(f"Line {idx}: {line.strip()}")
         
-        if matches or similar:
-            self.log_error("\nPotential target line matches:")
-            for match in matches[:3]:
-                self.log_error(f"  ✓ {match}")
-            for sim in similar[:3]:
-                self.log_error(f"  ~ {sim}")
-            
-            if not matches:
-                self.log_error("\nPossible reasons:")
-                self.log_error("- Different indentation level")
-                self.log_error("- Part of multi-line statement")
-                self.log_error("- Inside comment/string literal")
+        if matches:
+            self.log_error("\nPotential partial matches:")
+            for match in matches[:5]:
+                self.log_error(f"  - {match}")
+        else:
+            self.log_error("\nNo similar lines found in file")
 
     def _is_duplicate_condition(self, node: ast.AST) -> bool:
         def normalize(node: ast.AST) -> str:
@@ -3385,7 +3375,7 @@ class ConditionInserter(ast.NodeTransformer):
         if isinstance(node, ast.If):
             current_symbols = self._current_scope_symbols()
             condition_vars = set()
-            validation_errors = []
+            validation_errors = set()
             scope_logged = False
 
             for name in ast.walk(node.test):
@@ -3397,14 +3387,13 @@ class ConditionInserter(ast.NodeTransformer):
                     valid = False
                     suggestions = get_close_matches(var, current_symbols, n=3, cutoff=0.6)
                     suggestion_msg = f" (similar: {', '.join(suggestions)})" if suggestions else ""
-                    validation_errors.append(f"Undefined variable: '{var}'{suggestion_msg}")
+                    validation_errors.add(f"Undefined variable: '{var}'{suggestion_msg}")
                     
                     if not scope_logged:
                         self.errors.append(f"Available symbols: {sorted(current_symbols)}")
                         scope_logged = True
 
-            if validation_errors:
-                self.errors.extend(validation_errors)
+            self.errors.extend(validation_errors)
             
         return valid
 
@@ -3429,7 +3418,7 @@ class ConditionInserter(ast.NodeTransformer):
         self.scope_hierarchy.append(node.name)
         current_scope = "::".join(self.scope_hierarchy)
         
-        # Capture all parameter types
+        # Capture all parameter types with proper scoping
         params = set()
         params.update(arg.arg for arg in node.args.posonlyargs)
         params.update(arg.arg for arg in node.args.args)
@@ -3439,10 +3428,12 @@ class ConditionInserter(ast.NodeTransformer):
         if node.args.kwarg:
             params.add(node.args.kwarg.arg)
 
-        # Update current scope
-        if current_scope not in self._scope_symbols:
-            self._scope_symbols[current_scope] = set()
-        self._scope_symbols[current_scope].update(params)
+        # Update all relevant scopes
+        for depth in range(1, len(self.scope_hierarchy) + 1):
+            scope_key = "::".join(self.scope_hierarchy[:depth])
+            if scope_key not in self._scope_symbols:
+                self._scope_symbols[scope_key] = set()
+            self._scope_symbols[scope_key].update(params)
 
         self.current_blocks.append(self._get_header_line(node))
         node = self.generic_visit(node)
