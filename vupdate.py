@@ -3239,6 +3239,7 @@ def add_parameter_to_function_call(file_path, function_name, parameter):
     except Exception as e:
         VSlog(f"Error while modifying file '{file_path}': {str(e)}")
 
+
 class ConditionInserter(ast.NodeTransformer):
     def __init__(self, target_line: str, condition: str, 
                  parent_blocks: Optional[List[str]], source: str, filename: str):
@@ -4745,8 +4746,11 @@ def get_livetv_url():
             if test_url == current_url and effective_url != test_url:
                 VSlog(f"Redirection détectée: {test_url} -> {effective_url}")
                 save_current_url(effective_url)
-            VSlog(f"Url trouvée: {effective_url}")
-            return False
+                VSlog(f"Url sauvegardée: {effective_url}")
+                return False
+            else:
+                VSlog(f"Url trouvée: {effective_url}")
+                return True
 
     VSlog("Récupération de l'URL de LiveTV.")
 
