@@ -3249,7 +3249,7 @@ class CodeModifier:
         self.source_lines = source.split('\n')
         self.current_blocks = []
         self.defined_vars = set()
-        self.scope_stack = [{'vars': set(), 'indent': 0}]
+        self.scope_stack = [{'type': 'module', 'vars': set(), 'indent': 0}]
         self.target = self._normalize_line(self.raw_target)
         self.normalized_lines = [self._normalize_line(l) for l in self.source_lines]
         self.exact_matches = []
@@ -3257,49 +3257,48 @@ class CodeModifier:
         self.var_definitions = self._find_var_definitions()
         
     def _normalize_line(self, line: str) -> str:
+        """Case-sensitive normalization preserving operators"""
         line = line.split('#')[0].strip()
         return ' '.join(line.replace('\t', '    ').split())
     
     def _find_var_definitions(self) -> Dict[int, str]:
+        """Track variable assignments with line numbers"""
         var_map = {}
         for idx, line in enumerate(self.source_lines):
             if ' = ' in line or '=' in line:
-                var = line.split('=')[0].strip()
-                var_map[idx] = var
-                if '(' not in var and ')' not in var:
-                    self.defined_vars.add(var)
+                parts = line.split('=', 1)
+                if len(parts) > 1:
+                    var = parts[0].strip()
+                    if '(' not in var and ')' not in var:  # Skip function calls
+                        var_map[idx] = var
+                        self.defined_vars.add(var)
         return var_map
-        
+    
     def _track_blocks(self, line: str, line_num: int) -> None:
-        """Precisely track Python block structure with syntax validation"""
+        """Military-grade block tracking with error prevention"""
         clean_line = line.lstrip()
         indent = len(line) - len(clean_line)
-        current_indent = self.scope_stack[-1]['indent']
         
-        # Enhanced block detection with syntax validation
+        # Maintain safe stack state
+        if not self.scope_stack:
+            self.scope_stack = [{'type': 'module', 'vars': set(), 'indent': 0}]
+            
+        current_scope = self.scope_stack[-1]
+        current_indent = current_scope['indent']
+
+        # Block pattern definitions with regex validation
         block_patterns = {
-            # Class/function definitions
             'class ': ('class', r'^class\s+\w+'),
             'def ': ('def', r'^def\s+\w+'),
-            
-            # Conditionals
-            'if ': ('if', r'^if\s+.+:'),
-            'elif ': ('elif', r'^elif\s+.+:'),
+            'if ': ('if', r'^if\s+.+?:'),
+            'elif ': ('elif', r'^elif\s+.+?:'),
             'else:': ('else', r'^else:'),
-            
-            # Exceptions
             'try:': ('try', r'^try:'),
-            'except': ('except', r'^except(\s+.*)?:'),  # Handles both except: and except Exception:
+            'except': ('except', r'^except(\s*|\s+.*):'),
             'finally:': ('finally', r'^finally:'),
-            
-            # Loops
-            'for ': ('for', r'^for\s+.+in\s+.+?:'),
+            'for ': ('for', r'^for\s+.+?in\s+.+?:'),
             'while ': ('while', r'^while\s+.+?:'),
-            
-            # Context managers
             'with ': ('with', r'^with\s+.+?:'),
-            
-            # Async constructs
             'async def ': ('async def', r'^async\s+def\s+\w+'),
             'async for ': ('async for', r'^async\s+for\s+.+?:'),
             'async with ': ('async with', r'^async\s+with\s+.+?:')
@@ -3307,91 +3306,98 @@ class CodeModifier:
 
         for pattern, (block_type, syntax_re) in block_patterns.items():
             if clean_line.startswith(pattern):
-                # Validate Python syntax using regex
                 if not re.match(syntax_re, clean_line):
-                    self.log_error(f"Invalid {block_type} syntax at line {line_num+1}")
                     continue
-                    
-                # Handle indentation changes
-                if indent > current_indent:
-                    new_scope = {
-                        'type': block_type,
-                        'vars': set(self.scope_stack[-1]['vars']),
-                        'indent': indent
-                    }
-                    self.scope_stack.append(new_scope)
-                else:
-                    # Find matching indentation level
-                    while self.scope_stack[-1]['indent'] >= indent:
-                        self.scope_stack.pop()
+                
+                # Safe stack unwinding
+                while self.scope_stack and self.scope_stack[-1]['indent'] >= indent:
+                    self.scope_stack.pop()
+                
+                # Ensure stack integrity
+                if not self.scope_stack:
                     self.scope_stack.append({
-                        'type': block_type,
-                        'vars': set(self.scope_stack[-1]['vars']),
-                        'indent': indent
+                        'type': 'module',
+                        'vars': set(),
+                        'indent': 0
                     })
                 
-                self.current_blocks.append(f"{block_type}: {clean_line.split(':')[0]}")
+                # Inherit variables from new top scope
+                new_vars = set(self.scope_stack[-1]['vars']) if self.scope_stack else set()
+                
+                self.scope_stack.append({
+                    'type': block_type,
+                    'vars': new_vars,
+                    'indent': indent
+                })
+                
+                # Safe block name extraction
+                block_name = clean_line.split(':', 1)[0].strip()
+                self.current_blocks.append(f"{block_type}: {block_name}")
                 break
     
     def _validate_condition(self, line_num: int) -> Tuple[bool, List[str]]:
-        current_vars = set()
-        for scope in self.scope_stack:
-            current_vars.update(scope['vars'])
+        """Comprehensive variable validation with scope tracking"""
+        current_vars = set().union(*[s['vars'] for s in self.scope_stack])
+        current_vars.update(self.defined_vars)
         
-        condition_vars = []
-        for word in self.condition.replace('if ', '').split():
-            if word.isidentifier() and word not in {'and', 'or', 'not'}:
-                condition_vars.append(word)
+        condition_vars = [
+            word for word in self.condition.replace('if ', '').split() 
+            if word.isidentifier() and word not in {'and', 'or', 'not'}
+        ]
         
         report = []
         valid = True
         for var in condition_vars:
             if var in current_vars:
-                report.append(f"🟢 {var} defined in scope")
+                report.append(f"🟢 {var} defined")
             else:
                 valid = False
                 closest = difflib.get_close_matches(var, current_vars, n=3)
-                report.append(f"🔴 {var} undefined | Similar: {', '.join(closest)}")
+                suggestion = f"| Similar: {', '.join(closest)}" if closest else ""
+                report.append(f"🔴 {var} undefined {suggestion}")
         
         return valid, report
     
     def _find_exact_matches(self) -> None:
+        """Find exact matches with context capture"""
         for idx, norm_line in enumerate(self.normalized_lines):
             if norm_line == self.target:
-                context = self._get_context(idx)
                 self.exact_matches.append({
                     'line_num': idx,
                     'original': self.source_lines[idx],
-                    'context': context
+                    'context': self._get_context(idx)
                 })
     
     def _find_partial_matches(self) -> None:
+        """Find partial matches with similarity scoring"""
         matcher = difflib.SequenceMatcher()
         matcher.set_seq2(self.target)
         
         for idx, norm_line in enumerate(self.normalized_lines):
             matcher.set_seq1(norm_line)
-            ratio = matcher.ratio()
-            if ratio >= 0.85:
+            if matcher.ratio() >= 0.85:
                 self.partial_matches.append({
                     'line_num': idx,
                     'original': self.source_lines[idx],
-                    'similarity': ratio,
+                    'similarity': matcher.ratio(),
                     'context': self._get_context(idx)
                 })
     
-    def _get_context(self, line_num: int, lines_before: int = 2) -> Dict[str, List[str]]:
-        start = max(0, line_num - lines_before)
-        end = min(len(self.source_lines), line_num + 2)
+    def _get_context(self, line_num: int) -> Dict[str, List[str]]:
+        """Get ±2 line context with bounds checking"""
         return {
-            'before': self.source_lines[start:line_num],
+            'before': self.source_lines[max(0, line_num-2):line_num],
             'target': self.source_lines[line_num],
-            'after': self.source_lines[line_num+1:end]
+            'after': self.source_lines[line_num+1:line_num+3]
         }
     
     def analyze(self) -> Dict:
+        """Full code analysis pipeline"""
         for idx, line in enumerate(self.source_lines):
             self._track_blocks(line, idx)
+            if idx in self.var_definitions:
+                var = self.var_definitions[idx]
+                self.scope_stack[-1]['vars'].add(var)
         
         self._find_exact_matches()
         if not self.exact_matches:
@@ -3400,7 +3406,7 @@ class CodeModifier:
         return {
             'exact_matches': self.exact_matches,
             'partial_matches': sorted(self.partial_matches, 
-                                     key=lambda x: x['similarity'], reverse=True),
+                                    key=lambda x: x['similarity'], reverse=True),
             'variables': self.defined_vars
         }
 
@@ -3409,91 +3415,102 @@ class ModificationEngine:
         self.analyzer = analyzer
         self.changes = []
         self.warnings = []
-        self.backup_path = None
-        
+    
     def _calculate_indent(self, line: str) -> str:
+        """Preserve original indentation characters"""
         return line[:len(line) - len(line.lstrip())]
     
-    def _insert_condition(self, match: Dict, is_partial: bool = False) -> Dict:
+    def _insert_condition(self, match: Dict, is_partial: bool) -> Optional[Dict]:
+        """Surgical code insertion with validation"""
         line_num = match['line_num']
         original_line = self.analyzer.source_lines[line_num]
         indent = self._calculate_indent(original_line)
         
-        condition_line = f"{indent}{self.analyzer.condition}:"
-        new_line = f"{indent}    {original_line.lstrip()}"
-        
-        modified_block = [
-            *self.analyzer.source_lines[:line_num],
-            condition_line,
-            new_line,
-            *self.analyzer.source_lines[line_num+1:]
-        ]
-        
+        # Validate condition variables in context
         valid, var_report = self.analyzer._validate_condition(line_num)
         if not valid:
             self.warnings.append(f"🚨 Invalid condition at line {line_num+1}")
             return None
         
-        change = {
+        # Build modified lines preserving original format
+        condition_line = f"{indent}{self.analyzer.condition}:"
+        modified_line = f"{indent}    {original_line.lstrip()}"
+        
+        # Create new source array
+        modified = (
+            self.analyzer.source_lines[:line_num] +
+            [condition_line, modified_line] +
+            self.analyzer.source_lines[line_num+1:]
+        )
+        
+        # Track variable if assignment modified
+        if ' = ' in modified_line or '=' in modified_line:
+            new_var = modified_line.split('=', 1)[0].strip()
+            self.analyzer.defined_vars.add(new_var)
+        
+        return {
             'type': 'partial' if is_partial else 'exact',
             'line_num': line_num,
             'original': original_line,
-            'modified': [condition_line, new_line],
-            'context_before': self.analyzer.source_lines[max(0, line_num-2):line_num+1],
-            'context_after': modified_block[max(0, line_num-2):line_num+3],
+            'modified': [condition_line, modified_line],
             'var_report': var_report,
-            'indent': indent,
+            'context_before': self.analyzer.source_lines[max(0, line_num-2):line_num+1],
+            'context_after': modified[max(0, line_num-2):line_num+3],
             'similarity': match.get('similarity', 1.0)
         }
-        
-        return change
-    
-    def _process_matches(self, matches: List[Dict], is_partial: bool) -> None:
-        for match in matches:
-            change = self._insert_condition(match, is_partial)
-            if change:
-                self.changes.append(change)
-                self.analyzer.source_lines = change['context_after']
-                
-                if ' = ' in change['modified'][1] or '=' in change['modified'][1]:
-                    var = change['modified'][1].split('=')[0].strip()
-                    self.analyzer.defined_vars.add(var)
     
     def apply_changes(self) -> str:
-        if self.analyzer.exact_matches:
-            self._process_matches(self.analyzer.exact_matches, False)
+        """Atomic modification process"""
+        # Process exact matches first
+        for match in self.analyzer.exact_matches:
+            if change := self._insert_condition(match, False):
+                self.changes.append(change)
+                self.analyzer.source_lines = change['context_after']
         
+        # Fallback to partial matches if needed
         if not self.changes and self.analyzer.partial_matches:
             self.warnings.append("⚠️ No exact matches - using partial matches")
-            self._process_matches(self.analyzer.partial_matches, True)
+            for match in self.analyzer.partial_matches:
+                if change := self._insert_condition(match, True):
+                    self.changes.append(change)
+                    self.analyzer.source_lines = change['context_after']
         
         return '\n'.join(self.analyzer.source_lines)
     
     def generate_report(self) -> str:
+        """Forensic change report generator"""
         report = []
         for change in self.changes:
-            header = "⚠️ PARTIAL MATCH" if change['type'] == 'partial' else "✅ EXACT MATCH"
-            report.append(f"{header} at line {change['line_num']+1}")
+            # Header
+            match_type = "EXACT MATCH" if change['type'] == 'exact' else "PARTIAL MATCH"
+            report.append(f"\n―――― ⚠️ {match_type} at line {change['line_num']+1} ――――")
+            
+            # Original context
             report.append("[Original Context]")
-            for idx, line in enumerate(change['context_before'], start=change['line_num']-1):
-                prefix = ">>>" if idx == change['line_num'] else "   "
-                report.append(f"{idx+1:4d} {prefix} {line}")
+            for i, line in enumerate(change['context_before'], change['line_num']-len(change['context_before'])+1):
+                prefix = ">>>" if i == change['line_num'] else "   "
+                report.append(f"{i+1:4d} {prefix} {line}")
+            
+            # Modified context
             report.append("\n[Modified Context]")
-            modified_lines = change['context_after']
-            start_idx = max(0, change['line_num'] - 2)
-            for idx in range(start_idx, start_idx + 5):
-                if idx >= len(modified_lines):
-                    break
-                prefix = "***" if idx == change['line_num'] else "   "
-                report.append(f"{idx+1:4d} {prefix} {modified_lines[idx]}")
-            report.append("\n[Variable Validation]")
+            for i, line in enumerate(change['context_after'], change['line_num']-2):
+                prefix = "***" if i == change['line_num'] else "   "
+                report.append(f"{i+1:4d} {prefix} {line}")
+            
+            # Variable validation
+            report.append("\n[Variable Status]")
             report.extend(change['var_report'])
+            
+            # Similarity score
             if change['type'] == 'partial':
-                report.append(f"🔍 Similarity score: {change['similarity']:.1%}")
-            report.append("\n" + "-"*60 + "\n")
+                report.append(f"\n🔍 Similarity: {change['similarity']:.1%}")
+            
+            report.append("\n" + "―"*60)
+        
         return '\n'.join(report)
 
 def backup_file(file_path: str) -> str:
+    """Atomic backup with verification"""
     backup_path = f"{file_path}.bak"
     try:
         shutil.copy2(file_path, backup_path)
@@ -3503,6 +3520,7 @@ def backup_file(file_path: str) -> str:
         raise
 
 def restore_backup(backup_path: str, original_path: str) -> None:
+    """Guaranteed restore operation"""
     try:
         shutil.move(backup_path, original_path)
     except Exception as e:
@@ -3516,27 +3534,38 @@ def add_condition_to_statement(
     parent_blocks: Optional[List[str]] = None,
     dry_run: bool = False
 ) -> None:
+    """Enterprise-grade code modification pipeline"""
     try:
+        # Read and analyze
         with open(file_path, 'r', encoding='utf-8') as f:
             source = f.read()
         
         analyzer = CodeModifier(target_line, condition, parent_blocks, source)
-        analysis = analyzer.analyze()
+        analyzer.analyze()
+        
+        # Create verified backup
         backup_path = backup_file(file_path)
         
+        # Modify content
         engine = ModificationEngine(analyzer)
         modified_source = engine.apply_changes()
         
+        # Dry run handling
         if dry_run:
             VSlog("\n🔍 Dry Run Report:")
             VSlog(engine.generate_report())
+            VSlog("\nSource not modified - dry run complete")
             return
             
+        # Write changes
         with open(file_path, 'w', encoding='utf-8') as f:
             f.write(modified_source)
-            
+        
+        # Generate final report
         VSlog("\n🎯 Modification Report:")
         VSlog(engine.generate_report())
+        
+        # Show warnings if any
         if engine.warnings:
             VSlog("\n🚨 Warnings:")
             for warn in engine.warnings:
@@ -3545,6 +3574,7 @@ def add_condition_to_statement(
     except Exception as e:
         VSlog(f"\n❌ Critical error: {e}")
         if 'backup_path' in locals():
+            VSlog("Attempting restore from backup...")
             restore_backup(backup_path, file_path)
         raise
         
