@@ -16,11 +16,12 @@ import ast
 import socket
 import textwrap
 import difflib
-from difflib import get_close_matches
+from difflib import get_close_matches, SequenceMatcher
 import random
 import string
 from string import Template
-from typing import List, Optional, Set, Dict, Union
+import sys
+from typing import List, Optional, Dict, Set, Tuple, Union
 import glob
 import concurrent.futures
 import threading
@@ -3251,16 +3252,19 @@ class ConditionInserter(ast.NodeTransformer):
         self.scope_hierarchy = []
         self.current_blocks = []
         self.inserted = False
-        self.errors = set()  # Using set to prevent duplicates
+        self.errors = set()
         self.target_found = False
+        self.partial_matches = []
         self.insertion_details = []
         self.condition_node = self._parse_condition()
         self._scope_symbols = self._analyze_scopes()
         self.target_node = self._parse_target_line()
+        self.normalized_target = self._normalize_line(self.target_line)
+        self.partial_match_threshold = 0.85
 
     def log_error(self, message: str):
-        VSlog(message)
-        self.errors.add(message)  # Store unique errors
+        VSlog(f"ERROR: {message}")
+        self.errors.add(message)
 
     def _build_symtable(self):
         try:
@@ -3312,7 +3316,6 @@ class ConditionInserter(ast.NodeTransformer):
         if not self.parent_blocks:
             return True
         
-        # Normalize both with same rules
         normalize = lambda s: s.replace(' = ', '=').replace('( ', '(').replace(' )', ')')
         target_blocks = [normalize(b) for b in self.parent_blocks]
         current_blocks = [normalize(b) for b in self.current_blocks]
@@ -3325,7 +3328,6 @@ class ConditionInserter(ast.NodeTransformer):
         return ''
 
     def _normalize_line(self, line: str) -> str:
-        """Case-sensitive normalization with operator spacing fix"""
         if not line:
             return ""
         line = line.split('#')[0].strip()
@@ -3334,70 +3336,66 @@ class ConditionInserter(ast.NodeTransformer):
         return ' '.join(line.split())
 
     def _is_target_statement(self, node: ast.AST) -> bool:
-        # Multi-strategy partial matching
-        normalized_target = self._normalize_line(self.target_line)
+        if not hasattr(node, 'lineno'):
+            return False
+
+        raw_line = self.source_lines[node.lineno - 1].rstrip()
+        stmt_src = ast.get_source_segment(self.source, node) or ""
         
-        # Check direct line content
-        if hasattr(node, 'lineno'):
-            raw_line = self.source_lines[node.lineno - 1]
-            if normalized_target in self._normalize_line(raw_line):
-                return True
-        
-        # Check AST-reconstructed statement
-        stmt_src = ast.get_source_segment(self.source, node)
-        if stmt_src and normalized_target in self._normalize_line(stmt_src):
+        variants = {
+            'raw_line': self._normalize_line(raw_line),
+            'stmt_src': self._normalize_line(stmt_src),
+            'ast_dump': self._normalize_ast(node)
+        }
+
+        if any(v == self.normalized_target for v in variants.values()):
             return True
+
+        best_ratio = max(
+            SequenceMatcher(None, self.normalized_target, v).ratio()
+            for v in variants.values() if v
+        )
+        
+        if best_ratio >= self.partial_match_threshold:
+            self.partial_matches.append((
+                node.lineno,
+                raw_line,
+                f"{best_ratio:.0%} match"
+            ))
             
         return False
+
+    def _normalize_ast(self, node: ast.AST) -> str:
+        return ast.dump(node, annotate_fields=False, include_attributes=False)
 
     def _handle_missed_target(self):
         normalized_target = self._normalize_line(self.target_line)
         matches = []
-        
         for idx, line in enumerate(self.source_lines, 1):
             if normalized_target in self._normalize_line(line):
                 matches.append(f"Line {idx}: {line.strip()}")
-        
         if matches:
-            self.log_error("\nPotential matches (case-sensitive partial):")
+            VSlog("Potential matches (case-sensitive partial):")
             for match in matches[:3]:
-                self.log_error(f"  - {match}")
-        else:
-            self.log_error("\nNo similar lines found")
+                VSlog(f"  - {match}")
 
     def _is_duplicate_condition(self, node: ast.AST) -> bool:
-        def normalize(node: ast.AST) -> str:
-            return ast.dump(node, annotate_fields=False)
-        return normalize(node) == normalize(self.condition_node)
+        return ast.dump(node, annotate_fields=False) == \
+               ast.dump(self.condition_node, annotate_fields=False)
 
     def _validate_condition(self, node: ast.AST) -> bool:
         valid = True
         if isinstance(node, ast.If):
             current_symbols = self._current_scope_symbols()
-            condition_vars = set()
-            validation_errors = set()
-            scope_logged = False
-
-            # Collect variables from condition
-            for name in ast.walk(node.test):
-                if isinstance(name, ast.Name):
-                    condition_vars.add(name.id)
-
-            # Validate each variable
-            for var in sorted(condition_vars):
+            condition_vars = {n.id for n in ast.walk(node.test) if isinstance(n, ast.Name)}
+            for var in condition_vars:
                 if var not in current_symbols:
                     valid = False
                     suggestions = get_close_matches(var, current_symbols, n=3, cutoff=0.6)
                     suggestion_msg = f" (similar: {', '.join(suggestions)})" if suggestions else ""
-                    validation_errors.add(f"Undefined variable: '{var}'{suggestion_msg}")
-                    
-                    if not scope_logged:
-                        self.errors.add(f"Available symbols: {sorted(current_symbols)}")
-                        scope_logged = True
-
-            # Add collected errors
-            self.errors.update(validation_errors)
-            
+                    self.log_error(f"Undefined variable: '{var}'{suggestion_msg}")
+            if not valid:
+                self.log_error(f"Available symbols: {sorted(current_symbols)}")
         return valid
 
     def visit_Module(self, node: ast.Module):
@@ -3421,7 +3419,6 @@ class ConditionInserter(ast.NodeTransformer):
         self.scope_hierarchy.append(node.name)
         current_scope = "::".join(self.scope_hierarchy)
         
-        # Capture all parameters with precise scoping
         params = set()
         params.update(arg.arg for arg in node.args.posonlyargs)
         params.update(arg.arg for arg in node.args.args)
@@ -3431,22 +3428,16 @@ class ConditionInserter(ast.NodeTransformer):
         if node.args.kwarg:
             params.add(node.args.kwarg.arg)
 
-        # Update symbol tables
         if current_scope not in self._scope_symbols:
             self._scope_symbols[current_scope] = set()
         self._scope_symbols[current_scope].update(params)
 
-        # Propagate parameters to nested scopes
         for depth in range(len(self.scope_hierarchy), 0, -1):
             scope_key = "::".join(self.scope_hierarchy[:depth])
             self._scope_symbols[scope_key].update(params)
 
-        # Track parent block with normalized header
-        header = self._get_header_line(node)
-        self.current_blocks.append(self._normalize_line(header))
-        
+        self.current_blocks.append(self._normalize_line(self._get_header_line(node)))
         node = self.generic_visit(node)
-        
         self.current_blocks.pop()
         self.scope_hierarchy.pop()
         return node
@@ -3465,13 +3456,39 @@ class ConditionInserter(ast.NodeTransformer):
         self.current_blocks.pop()
         return node
 
+    def visit_For(self, node: ast.For):
+        self.current_blocks.append('for')
+        node = self.generic_visit(node)
+        node.body = self._handle_block(node.body)
+        self.current_blocks.pop()
+        return node
+
+    def visit_While(self, node: ast.While):
+        self.current_blocks.append('while')
+        node = self.generic_visit(node)
+        node.body = self._handle_block(node.body)
+        self.current_blocks.pop()
+        return node
+
+    def visit_With(self, node: ast.With):
+        self.current_blocks.append('with')
+        node = self.generic_visit(node)
+        node.body = self._handle_block(node.body)
+        self.current_blocks.pop()
+        return node
+
+    def visit_AsyncFunctionDef(self, node):
+        return self.visit_FunctionDef(node)
+
+    def visit_AsyncFor(self, node):
+        return self.visit_For(node)
+
+    def visit_AsyncWith(self, node):
+        return self.visit_With(node)
+
     def _handle_block(self, body: List[ast.AST]) -> List[ast.AST]:
         new_body = []
         for idx, stmt in enumerate(body):
-            if self.inserted and self.parent_blocks:
-                new_body.append(stmt)
-                continue
-
             is_target = self._is_target_statement(stmt)
             if not is_target:
                 new_body.append(stmt)
@@ -3527,58 +3544,63 @@ def add_condition_to_statement(
             source = f.read()
         source_lines = source.split('\n')
     except Exception as e:
-        VSlog(f"\nFile read error: {e}")
+        VSlog(f"File read error: {e}")
         return False
 
     try:
         tree = ast.parse(source)
-        inserter = ConditionInserter(target_line, condition_to_insert, parent_blocks, source, file_path)
+        inserter = ConditionInserter(target_line, condition_to_insert, 
+                                    parent_blocks, source, file_path)
         modified_tree = inserter.visit(tree)
         ast.fix_missing_locations(modified_tree)
     except Exception as e:
-        VSlog(f"\nAST processing failed: {e}")
+        VSlog(f"AST processing failed: {e}")
         return False
 
     if not inserter.inserted:
-        if inserter.target_found:
-            VSlog("\nInsertion failed. Reasons:")
-            for error in sorted(inserter.errors):
-                VSlog(f"• {error}")
+        if inserter.partial_matches:
+            VSlog("\n⚠️ WARNING: Falling back to partial matches:")
+            for lineno, line, similarity in inserter.partial_matches:
+                VSlog(f"  • Line {lineno}: {line} ({similarity})")
+            return _process_partial_matches(inserter, source, file_path, 
+                                           dry_run, condition_to_insert, 
+                                           target_line, encoding)
         else:
-            VSlog(f"\nTarget line not found: '{target_line}'")
+            VSlog(f"Target line not found: '{target_line}'")
             inserter._handle_missed_target()
-        return False
+            return False
 
     try:
         new_source = ast.unparse(modified_tree)
-        new_lines = new_source.split('\n')
         ast.parse(new_source)
+        compile(new_source, file_path, 'exec')
     except Exception as e:
-        VSlog(f"\nGenerated code validation failed: {e}")
+        VSlog(f"Validation failed: {e}")
         return False
 
-    VSlog("\nInsertion successful. Context changes:")
+    VSlog("\nValidation passed. Context changes:")
     for idx, change in enumerate(inserter.insertion_details, 1):
         orig_line = change['original_lineno']
         context_range = 3
         
-        orig_start = max(0, orig_line - context_range)
-        orig_end = min(len(source_lines), orig_line + context_range)
-        original_context = '\n'.join(
+        orig_context = '\n'.join(
             f"{i+1:4d} | {line}" 
-            for i, line in enumerate(source_lines[orig_start:orig_end], start=orig_start)
+            for i, line in enumerate(
+                source_lines[max(0, orig_line-2):orig_line+2], 
+                start=max(0, orig_line-2)
         )
-
-        mod_start = max(0, orig_line - context_range)
-        mod_end = min(len(new_lines), orig_line + context_range + 1)
-        modified_context = '\n'.join(
+        
+        new_lines = new_source.split('\n')
+        mod_context = '\n'.join(
             f"{i+1:4d} | {line}" 
-            for i, line in enumerate(new_lines[mod_start:mod_end], start=mod_start)
+            for i, line in enumerate(
+                new_lines[max(0, orig_line-2):orig_line+3], 
+                start=max(0, orig_line-2)
         )
 
         VSlog(f"\n―――― Change #{idx} [Line {orig_line+1}] ――――")
-        VSlog(f"[Original context]\n{original_context}")
-        VSlog(f"\n[Modified context]\n{modified_context}")
+        VSlog(f"[Original]\n{orig_context}")
+        VSlog(f"\n[Modified]\n{mod_context}")
 
     if dry_run:
         VSlog("\nDry run diff:")
@@ -3596,10 +3618,66 @@ def add_condition_to_statement(
         backup_file(file_path)
         with open(file_path, 'w', encoding=encoding) as f:
             f.write(new_source)
-        VSlog(f"\nFile successfully modified: {file_path}")
+        VSlog(f"File modified successfully: {file_path}")
         return True
     except Exception as e:
-        VSlog(f"\nFile write failed: {e}")
+        VSlog(f"File write failed: {e}")
+        restore_backup(file_path)
+        return False
+
+def _process_partial_matches(inserter, source, file_path, dry_run, 
+                            condition, target, encoding) -> bool:
+    best_match = max(inserter.partial_matches, 
+                    key=lambda x: float(x[2].split('%')[0]))
+    VSlog(f"\nAuto-selecting best match: Line {best_match[0]}")
+
+    class ForceInserter(ast.NodeTransformer):
+        def __init__(self, target_lineno):
+            self.target_lineno = target_lineno
+            self.done = False
+            
+        def generic_visit(self, node):
+            if hasattr(node, 'lineno') and node.lineno == self.target_lineno:
+                if not self.done:
+                    self.done = True
+                    return ast.If(
+                        test=ast.parse(condition).body[0].test,
+                        body=[node],
+                        orelse=[]
+                    )
+            return node
+
+    try:
+        tree = ast.parse(source)
+        modified_tree = ForceInserter(best_match[0]).visit(tree)
+        ast.fix_missing_locations(modified_tree)
+        new_source = ast.unparse(modified_tree)
+        ast.parse(new_source)
+        compile(new_source, file_path, 'exec')
+    except Exception as e:
+        VSlog(f"Partial match insertion failed: {e}")
+        return False
+
+    if dry_run:
+        VSlog("\nPartial match dry run diff:")
+        diff = difflib.unified_diff(
+            source.splitlines(),
+            new_source.splitlines(),
+            fromfile='Original',
+            tofile='Modified',
+            lineterm=''
+        )
+        VSlog('\n'.join(diff))
+        return True
+
+    try:
+        backup_file(file_path)
+        with open(file_path, 'w', encoding=encoding) as f:
+            f.write(new_source)
+        VSlog(f"Partial match applied: {file_path}")
+        return True
+    except Exception as e:
+        VSlog(f"Partial match write failed: {e}")
         restore_backup(file_path)
         return False
 
