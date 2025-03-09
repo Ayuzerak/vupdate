@@ -3734,7 +3734,7 @@ def _force_insert_at_multiple_lines(
                     self.current_index += 1
                 
                 if (self.current_index < len(self.insertions) and 
-                   node.lineno == self.insertions[self.current_index]:
+                   node.lineno == self.insertions[self.current_index]):
                     self.current_index += 1
                     new_if = ast.If(
                         test=self.condition.test,
