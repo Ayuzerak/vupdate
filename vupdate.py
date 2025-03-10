@@ -3242,16 +3242,6 @@ def add_parameter_to_function_call(file_path, function_name, parameter):
     except Exception as e:
         VSlog(f"Error while modifying file '{file_path}': {str(e)}")
 
-import re
-import ast
-import shutil
-import symtable
-from difflib import SequenceMatcher
-from typing import List, Optional, Set, Tuple
-
-def VSlog(message: str):
-    print(message)
-
 class HybridInserter:
     def __init__(self, target_line: str, condition: str, parent_blocks: Optional[List[str]] = None):
         self.original_target = target_line.strip()
