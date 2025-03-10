@@ -3250,11 +3250,8 @@ class TransactionalInserter:
         self.normalized_target = self._normalize_line(target_line)
         self.valid_changes = []
         self.failed_changes = []
-        self.var_status_cache = {}
-        
-        # Extract condition variables using AST
         self.condition_vars = self._parse_condition_vars()
-        self.required_indent = None
+        self.scope_hierarchy = []
 
     def _normalize_line(self, line: str) -> str:
         line = re.sub(r'#.*$', '', line)
@@ -3276,41 +3273,51 @@ class TransactionalInserter:
     def _get_line_indent(self, line: str) -> str:
         return re.match(r'^(\s*)', line).group(1)
 
-    def _validate_insertion(self, original_lines: List[str], line_num: int) -> Tuple[bool, List[str]]:
-        """Validate and return (success, modified_lines)"""
-        indent = self._get_line_indent(original_lines[line_num])
-        modified_lines = original_lines.copy()
-    
-        # Create modified version
-        modified_lines[line_num] = f"{indent}{self.condition}\n"
-        modified_lines.insert(line_num+1, f"{indent}    {original_lines[line_num].lstrip()}")
-    
-        try:
-            # Full syntax check
-            ast.parse(''.join(modified_lines))
+    def _build_scope_hierarchy(self, lines: List[str]):
+        self.scope_hierarchy = []
+        tree = ast.parse("".join(lines))
         
-            # Indentation check
-            expected_indent = len(indent) + 4
-            actual_indent = len(self._get_line_indent(modified_lines[line_num+1]))
-        
-            if actual_indent != expected_indent:
-                VSlog(f"❌ Indentation mismatch at line {line_num+2}")
-                VSlog(f"   Expected: {expected_indent} spaces, Actual: {actual_indent}")
-                return False, original_lines
+        class ScopeVisitor(ast.NodeVisitor):
+            def __init__(self, outer):
+                self.outer = outer
+                self.current_blocks = []
             
-            return True, modified_lines
-        except IndentationError as e:
-            VSlog(f"❌ Indentation error: {e.msg}")
-            return False, original_lines
-        except SyntaxError as e:
-            VSlog(f"❌ Syntax error: {e.msg}")
-            return False, original_lines
-        except Exception as e:
-            VSlog(f"❌ Validation error: {str(e)}")
-            return False, original_lines
+            def _track_block(self, node, block_type: str):
+                start = node.lineno - 1
+                end = node.end_lineno - 1 if hasattr(node, 'end_lineno') else start
+                self.current_blocks.append((start, end, block_type))
+                self.generic_visit(node)
+                self.current_blocks.pop()
+            
+            def visit_FunctionDef(self, node):
+                self._track_block(node, f'def {node.name}')
+            
+            def visit_ClassDef(self, node):
+                self._track_block(node, f'class {node.name}')
+            
+            def visit_For(self, node):
+                self._track_block(node, 'for')
+            
+            def visit_While(self, node):
+                self._track_block(node, 'while')
+            
+            def visit_With(self, node):
+                self._track_block(node, 'with')
+            
+            def visit_Try(self, node):
+                self._track_block(node, 'try')
+        
+        visitor = ScopeVisitor(self)
+        visitor.visit(tree)
+        self.scope_hierarchy = visitor.current_blocks
+
+    def _current_parent_blocks(self, line_num: int) -> List[str]:
+        return [
+            block[2] for block in self.scope_hierarchy
+            if block[0] <= line_num <= block[1]
+        ]
 
     def _check_variables(self, lines: List[str], line_num: int) -> Dict[str, bool]:
-        """Check variable definitions using symbol table"""
         var_status = {}
         try:
             code = ''.join(lines[:line_num+1])
@@ -3324,48 +3331,59 @@ class TransactionalInserter:
         except Exception:
             return {var: False for var in self.condition_vars}
 
-    def _log_change(self, original_lines: List[str], line_num: int, var_status: Dict[str, bool]):
-        """Enhanced logging with 2-line context and indentation visualization"""
+    def _validate_insertion(self, modified_lines: List[str], line_num: int) -> Tuple[bool, List[str]]:
+        try:
+            ast.parse(''.join(modified_lines))
+            
+            indent = self._get_line_indent(modified_lines[line_num])
+            next_line_indent = self._get_line_indent(modified_lines[line_num+1])
+            
+            expected_indent = len(indent) + 4
+            actual_indent = len(next_line_indent)
+            
+            if actual_indent != expected_indent:
+                return False, f"Indentation error: Expected {expected_indent} spaces, got {actual_indent}"
+                
+            return True, ""
+        except IndentationError as e:
+            return False, f"Indentation error: {e.msg}"
+        except SyntaxError as e:
+            return False, f"Syntax error: {e.msg}"
+        except Exception as e:
+            return False, f"Validation error: {str(e)}"
+
+    def _log_change(self, original_lines: List[str], modified_lines: List[str], line_num: int, var_status: Dict[str, bool]):
         context_size = 2
-        start = max(0, line_num - context_size)
-        end = min(len(original_lines), line_num + context_size + 1)
-    
+        
         # Before context
         VSlog("\n[Before] Context:")
+        start = max(0, line_num - context_size)
+        end = min(len(original_lines), line_num + context_size + 1)
         for i in range(start, end):
             prefix = ">>>" if i == line_num else "   "
             VSlog(f"{i+1:4d} {prefix} {original_lines[i].rstrip()}")
-
-        # Create temporary modified version
-        indent = self._get_line_indent(original_lines[line_num])
-        modified_lines = original_lines.copy()
-        modified_lines[line_num] = f"{indent}{self.condition}\n"
-        modified_lines.insert(line_num+1, f"{indent}    {original_lines[line_num].lstrip()}")
-    
-        # After context
-        VSlog("\n[After] Context:")
+        
+        # Actual after context
+        VSlog("\n[Effective After] Context:")
         mod_start = max(0, line_num - context_size)
         mod_end = min(len(modified_lines), line_num + context_size + 2)
         for i in range(mod_start, mod_end):
-            prefix = ">>>" if i in (line_num, line_num+1) else "   "
             try:
                 line = modified_lines[i].rstrip()
+                prefix = ">>>" if i in (line_num, line_num+1) else "   "
+                VSlog(f"{i+1:4d} {prefix} {line}")
             except IndexError:
-                line = ""
-            VSlog(f"{i+1:4d} {prefix} {line}")
-
+                continue
+        
         # Variable status
         VSlog("\nVariable Validation:")
         all_defined = True
         for var, defined in var_status.items():
             status = "✅ Defined" if defined else "❌ Undefined"
-            VSlog(f"  {var.ljust(25)} {status}")
+            VSlog(f"  {var.ljust(20)} {status}")
             all_defined &= defined
-        
-        if all_defined:
-            VSlog("\n🔧 All variables defined - attempting insertion")
-        else:
-            VSlog("\n⛔ Missing variable definitions - skipping insertion")
+            
+        VSlog("\n🔧 All variables defined - proceeding" if all_defined else "⛔ Missing variable definitions")
 
     def process_file(self, file_path: str, encoding: str = 'utf-8', dry_run: bool = False) -> bool:
         try:
@@ -3379,62 +3397,84 @@ class TransactionalInserter:
         shutil.copy2(file_path, backup_path)
         VSlog(f"\n🔒 Backup created: {backup_path}")
 
-        modified_lines = original_lines.copy()
+        self._build_scope_hierarchy(original_lines)
+        current_lines = original_lines.copy()
         changes = []
-    
-        # Find potential matches first
+        
         for line_num, line in enumerate(original_lines):
             if self.normalized_target not in self._normalize_line(line):
                 continue
+                
+            # Check parent blocks
+            current_blocks = self._current_parent_blocks(line_num)
+            if self.parent_blocks and not self._validate_parent_blocks(current_blocks):
+                continue
+                
+            # Create temporary modification
+            temp_modified = current_lines.copy()
+            indent = self._get_line_indent(line)
+            temp_modified[line_num] = f"{indent}{self.condition}\n"
+            temp_modified.insert(line_num+1, f"{indent}    {line.lstrip()}")
+            
+            # Validate variables
+            var_status = self._check_variables(temp_modified, line_num)
+            
+            # Validate syntax and indentation
+            is_valid, validation_msg = self._validate_insertion(temp_modified, line_num)
             
             VSlog(f"\n{'='*40} Processing line {line_num+1} {'='*40}")
-        
-            # Check variables
-            var_status = self._check_variables(original_lines, line_num)
-            self._log_change(original_lines, line_num, var_status)
-        
-            if not all(var_status.values()):
-                self.failed_changes.append(line_num)
-                continue
+            self._log_change(original_lines, temp_modified, line_num, var_status)
             
-            # Validate and get modified lines
-            valid, temp_modified = self._validate_insertion(modified_lines, line_num)
-        
-            if valid:
+            if all(var_status.values()) and is_valid:
+                current_lines = temp_modified.copy()
                 changes.append(line_num)
-                modified_lines = temp_modified.copy()
-                VSlog(f"✅ Validation passed - keeping changes at line {line_num+1}")
+                VSlog(f"\n✅ Validation passed - keeping changes")
             else:
                 self.failed_changes.append(line_num)
-                modified_lines = modified_lines.copy()  # Maintain previous valid changes
-                VSlog(f"⛔ Reverting changes at line {line_num+1}")
+                reasons = []
+                if not all(var_status.values()):
+                    reasons.append("undefined variables")
+                if not is_valid:
+                    reasons.append(validation_msg)
+                VSlog(f"\n⛔ Reverting changes: {', '.join(reasons)}")
 
         # Final validation
         try:
-            ast.parse(''.join(modified_lines))
+            ast.parse(''.join(current_lines))
         except Exception as e:
             VSlog(f"\n❌ Final validation failed: {e}")
-            modified_lines = original_lines.copy()
+            current_lines = original_lines.copy()
+            changes = []
 
         # Apply changes
         if dry_run:
             VSlog("\n🔍 Dry run results:")
-            VSlog(''.join(modified_lines))
+            VSlog(''.join(current_lines))
             return True
-        
+            
         try:
             with open(file_path, 'w', encoding=encoding) as f:
-                f.writelines(modified_lines)
-            
+                f.writelines(current_lines)
+                
             VSlog(f"\n✅ Successfully updated {len(changes)} locations")
             if self.failed_changes:
-                VSlog(f"⛔ Skipped {len(self.failed_changes)} invalid insertions")
+                VSlog(f"⛔ Failed insertions: {len(self.failed_changes)}")
             return True
         except Exception as e:
             VSlog(f"\n❌ Write failed: {e}")
             shutil.move(backup_path, file_path)
             VSlog("🔙 Restored from backup")
             return False
+
+    def _validate_parent_blocks(self, current_blocks: List[str]) -> bool:
+        if not self.parent_blocks:
+            return True
+        
+        normalize = lambda s: re.sub(r'\s+', ' ', s).strip()
+        target_blocks = [normalize(b) for b in self.parent_blocks]
+        current_normalized = [normalize(b) for b in current_blocks]
+        
+        return current_normalized[-len(target_blocks):] == target_blocks
 
 def add_condition_to_statement(
     file_path: str,
@@ -3449,10 +3489,10 @@ def add_condition_to_statement(
     VSlog(f"Condition: {condition}")
     VSlog(f"Target: {target_line}")
     VSlog(f"Parent blocks: {parent_blocks or 'None'}")
-
+    
     inserter = TransactionalInserter(target_line, condition, parent_blocks)
     return inserter.process_file(file_path, encoding, dry_run)
-        
+
 def add_codeblock_after_block(file_path, block_header, codeblock, insert_after_line=None):
     """
     Searches for a block in the file that starts with `block_header` (e.g., "def addVstreamVoiceControl():"),
