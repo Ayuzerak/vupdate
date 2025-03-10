@@ -3276,31 +3276,38 @@ class TransactionalInserter:
     def _get_line_indent(self, line: str) -> str:
         return re.match(r'^(\s*)', line).group(1)
 
-    def _validate_insertion(self, original_lines: List[str], modified_lines: List[str], line_num: int) -> bool:
-        """AST validation for syntax and indentation"""
+    def _validate_insertion(self, original_lines: List[str], line_num: int) -> Tuple[bool, List[str]]:
+        """Validate and return (success, modified_lines)"""
+        indent = self._get_line_indent(original_lines[line_num])
+        modified_lines = original_lines.copy()
+    
+        # Create modified version
+        modified_lines[line_num] = f"{indent}{self.condition}\n"
+        modified_lines.insert(line_num+1, f"{indent}    {original_lines[line_num].lstrip()}")
+    
         try:
-            # Validate syntax
+            # Full syntax check
             ast.parse(''.join(modified_lines))
+        
+            # Indentation check
+            expected_indent = len(indent) + 4
+            actual_indent = len(self._get_line_indent(modified_lines[line_num+1]))
+        
+            if actual_indent != expected_indent:
+                VSlog(f"❌ Indentation mismatch at line {line_num+2}")
+                VSlog(f"   Expected: {expected_indent} spaces, Actual: {actual_indent}")
+                return False, original_lines
             
-            # Validate indentation pattern
-            indent = self._get_line_indent(modified_lines[line_num])
-            next_line_indent = self._get_line_indent(modified_lines[line_num+1])
-            
-            if len(next_line_indent) != len(indent) + 4:
-                VSlog(f"❌ Indentation error at line {line_num+1}")
-                VSlog(f"   Expected {len(indent)+4} spaces, got {len(next_line_indent)}")
-                return False
-                
-            return True
+            return True, modified_lines
         except IndentationError as e:
-            VSlog(f"❌ Indentation error at line {e.lineno}: {e.msg}")
-            return False
+            VSlog(f"❌ Indentation error: {e.msg}")
+            return False, original_lines
         except SyntaxError as e:
-            VSlog(f"❌ Syntax error at line {e.lineno}: {e.msg}")
-            return False
+            VSlog(f"❌ Syntax error: {e.msg}")
+            return False, original_lines
         except Exception as e:
             VSlog(f"❌ Validation error: {str(e)}")
-            return False
+            return False, original_lines
 
     def _check_variables(self, lines: List[str], line_num: int) -> Dict[str, bool]:
         """Check variable definitions using symbol table"""
@@ -3317,25 +3324,48 @@ class TransactionalInserter:
         except Exception:
             return {var: False for var in self.condition_vars}
 
-    def _log_change(self, line_num: int, original: str, modified: str, var_status: Dict[str, bool]):
-        VSlog(f"\n―――― Change at line {line_num+1} ――――")
-        VSlog("[Before]")
-        VSlog(f"{line_num+1:4d} | {original.rstrip()}")
-        VSlog("\n[After]")
-        VSlog(f"{line_num+1:4d} | {modified.splitlines()[0].rstrip()}")
-        VSlog(f"{line_num+2:4d} | {modified.splitlines()[1].rstrip()}")
-        
-        VSlog("\nVariable Status:")
+    def _log_change(self, original_lines: List[str], line_num: int, var_status: Dict[str, bool]):
+        """Enhanced logging with 2-line context and indentation visualization"""
+        context_size = 2
+        start = max(0, line_num - context_size)
+        end = min(len(original_lines), line_num + context_size + 1)
+    
+        # Before context
+        VSlog("\n[Before] Context:")
+        for i in range(start, end):
+            prefix = ">>>" if i == line_num else "   "
+            VSlog(f"{i+1:4d} {prefix} {original_lines[i].rstrip()}")
+
+        # Create temporary modified version
+        indent = self._get_line_indent(original_lines[line_num])
+        modified_lines = original_lines.copy()
+        modified_lines[line_num] = f"{indent}{self.condition}\n"
+        modified_lines.insert(line_num+1, f"{indent}    {original_lines[line_num].lstrip()}")
+    
+        # After context
+        VSlog("\n[After] Context:")
+        mod_start = max(0, line_num - context_size)
+        mod_end = min(len(modified_lines), line_num + context_size + 2)
+        for i in range(mod_start, mod_end):
+            prefix = ">>>" if i in (line_num, line_num+1) else "   "
+            try:
+                line = modified_lines[i].rstrip()
+            except IndexError:
+                line = ""
+            VSlog(f"{i+1:4d} {prefix} {line}")
+
+        # Variable status
+        VSlog("\nVariable Validation:")
         all_defined = True
         for var, defined in var_status.items():
             status = "✅ Defined" if defined else "❌ Undefined"
-            VSlog(f"  {var}: {status}")
+            VSlog(f"  {var.ljust(25)} {status}")
             all_defined &= defined
-            
+        
         if all_defined:
-            VSlog("🔧 All variables defined - proceeding with insertion")
+            VSlog("\n🔧 All variables defined - attempting insertion")
         else:
-            VSlog("⛔ Missing variable definitions - skipping insertion")
+            VSlog("\n⛔ Missing variable definitions - skipping insertion")
 
     def process_file(self, file_path: str, encoding: str = 'utf-8', dry_run: bool = False) -> bool:
         try:
@@ -3351,44 +3381,51 @@ class TransactionalInserter:
 
         modified_lines = original_lines.copy()
         changes = []
-        
+    
         # Find potential matches first
         for line_num, line in enumerate(original_lines):
             if self.normalized_target not in self._normalize_line(line):
                 continue
-                
-            # Found potential match
-            var_status = self._check_variables(original_lines, line_num)
-            self._log_change(line_num, line, f"{self.condition}\n{line}", var_status)
             
+            VSlog(f"\n{'='*40} Processing line {line_num+1} {'='*40}")
+        
+            # Check variables
+            var_status = self._check_variables(original_lines, line_num)
+            self._log_change(original_lines, line_num, var_status)
+        
             if not all(var_status.values()):
                 self.failed_changes.append(line_num)
                 continue
-                
-            # Create modified version
-            temp_modified = original_lines.copy()
-            indent = self._get_line_indent(line)
-            temp_modified[line_num] = f"{indent}{self.condition}\n{indent}    {line.lstrip()}"
             
-            if self._validate_insertion(original_lines, temp_modified, line_num):
+            # Validate and get modified lines
+            valid, temp_modified = self._validate_insertion(modified_lines, line_num)
+        
+            if valid:
                 changes.append(line_num)
                 modified_lines = temp_modified.copy()
-                VSlog(f"✅ Successfully validated line {line_num+1}")
+                VSlog(f"✅ Validation passed - keeping changes at line {line_num+1}")
             else:
                 self.failed_changes.append(line_num)
-                modified_lines = original_lines.copy()
-                VSlog(f"⛔ Reverted changes at line {line_num+1}")
+                modified_lines = modified_lines.copy()  # Maintain previous valid changes
+                VSlog(f"⛔ Reverting changes at line {line_num+1}")
+
+        # Final validation
+        try:
+            ast.parse(''.join(modified_lines))
+        except Exception as e:
+            VSlog(f"\n❌ Final validation failed: {e}")
+            modified_lines = original_lines.copy()
 
         # Apply changes
         if dry_run:
             VSlog("\n🔍 Dry run results:")
             VSlog(''.join(modified_lines))
             return True
-            
+        
         try:
             with open(file_path, 'w', encoding=encoding) as f:
                 f.writelines(modified_lines)
-                
+            
             VSlog(f"\n✅ Successfully updated {len(changes)} locations")
             if self.failed_changes:
                 VSlog(f"⛔ Skipped {len(self.failed_changes)} invalid insertions")
