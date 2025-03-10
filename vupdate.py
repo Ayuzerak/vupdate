@@ -3257,9 +3257,7 @@ class ContextTracker:
         }
         self.regex_patterns = {
             'block_start': re.compile(
-                r'^\s*((@(\w+\.)*\w+\s*)*'  # Decorators
-                r'(async\s+)?'  # Async keywords
-                r'(def|class|for|while|with|if|elif|else|try|except|finally|match|case)\b'
+                r'^\s*((@(\w+\.)*\w+\s*)*(async\s+)?(def|class|for|while|with|if|elif|else|try|except|finally|match|case)\b)'
             ),
             'function_def': re.compile(
                 r'def\s+\w+\s*\((?P<params>[^)]*)\)\s*(->\s*[\w\[\], \.]*)?:'
@@ -3268,13 +3266,14 @@ class ContextTracker:
                 r'(?:list|dict|set|generator)_comp|\(.*?\bfor\b.*?\bin\b.*?\)'
             ),
             'assignment': re.compile(
-                r'^\s*((?:[\w,]+\s*=[^=]|.*?\S\s*=\s*[^\s=])'
+                r'^\s*((?:[\w,]+\s*=[^=]|.*?\S\s*=\s*[^\s=]))'
             ),
             'type_hint': re.compile(
-                r'\w+\s*:(?!//|/)',  # Look for type hints
+                r'\w+\s*:(?!//|/)',
                 re.UNICODE
             )
         }
+
         self.string_delimiters = {
             'single': ("'", r"'(?:\\\\|\\'|.)*?'"),
             'double': ('"', r'"(?:\\\\|\\"|.)*?"'),
@@ -3495,7 +3494,7 @@ def add_condition_to_statement(
         with open(file_path, 'r', encoding=encoding) as f:
             lines = f.readlines()
     except IOError as e:
-        logger.error(f"File error: {e}")
+        VSlog(f"File error: {e}")
         return False
 
     tracker = ContextTracker()
@@ -3509,11 +3508,11 @@ def add_condition_to_statement(
         modified_lines.append(raw_line)
 
         if not success and raw_line.strip() == target_line_clean:
-            logger.debug(f"Found target at line {line_num+1}")
+            VSlog(f"Found target at line {line_num+1}")
 
             current_blocks = tracker.get_current_blocks()
             if not _match_parent_blocks(current_blocks, parent_blocks):
-                logger.debug(f"Parent block mismatch. Current: {current_blocks}, Expected: {parent_blocks}")
+                VSlog(f"Parent block mismatch. Current: {current_blocks}, Expected: {parent_blocks}")
                 continue
 
             accessible = tracker.get_accessible_vars()
@@ -3521,11 +3520,11 @@ def add_condition_to_statement(
             missing = [v for v in condition_vars 
                       if v not in accessible and not hasattr(builtins, v)]
             if missing:
-                logger.debug(f"Missing variables: {missing}")
+                VSlog(f"Missing variables: {missing}")
                 continue
 
             if _has_existing_condition(modified_lines, line_num, condition_clean):
-                logger.debug("Condition already exists")
+                VSlog("Condition already exists")
                 continue
 
             indent = len(line) - len(line.lstrip())
@@ -3540,7 +3539,7 @@ def add_condition_to_statement(
                 f.write('\n'.join(modified_lines) + '\n')
             return True
         except IOError as e:
-            logger.error(f"Write failed: {e}")
+            VSlog(f"Write failed: {e}")
     return False
 
 def _match_parent_blocks(current: List[str], expected: List[str]) -> bool:
