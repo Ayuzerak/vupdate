@@ -3246,12 +3246,14 @@ class TransactionalInserter:
     def __init__(self, target_line: str, condition: str, parent_blocks: Optional[List[str]] = None):
         self.original_target = target_line.strip()
         self.condition = condition.strip()
-        self.parent_blocks = parent_blocks
+        self.parent_blocks = [pb.strip() for pb in parent_blocks] if parent_blocks else None
         self.normalized_target = self._normalize_line(target_line)
         self.valid_changes = []
         self.failed_changes = []
         self.condition_vars = self._parse_condition_vars()
         self.scope_hierarchy = []
+        self.indent_cache = {}
+        self.found_targets = []
 
     def _normalize_line(self, line: str) -> str:
         line = re.sub(r'#.*$', '', line)
@@ -3311,11 +3313,40 @@ class TransactionalInserter:
         visitor.visit(tree)
         self.scope_hierarchy = visitor.current_blocks
 
+    def _build_indent_cache(self, lines: List[str]):
+        self.indent_cache = {}
+        for block in self.scope_hierarchy:
+            start_line = block[0]
+            self.indent_cache[start_line] = self._get_line_indent(lines[start_line])
+
     def _current_parent_blocks(self, line_num: int) -> List[str]:
         return [
             block[2] for block in self.scope_hierarchy
             if block[0] <= line_num <= block[1]
         ]
+
+    def _validate_parent_blocks(self, current_blocks: List[str]) -> bool:
+        if not self.parent_blocks:
+            return True
+        
+        normalize = lambda s: re.sub(r'\s+', ' ', s).strip()
+        target_blocks = [normalize(b) for b in self.parent_blocks]
+        current_normalized = [normalize(b) for b in current_blocks]
+        
+        return current_normalized[-len(target_blocks):] == target_blocks
+
+    def _get_parent_indent(self, line_num: int) -> str:
+        for block in reversed(self.scope_hierarchy):
+            start, end, _ = block
+            if start <= line_num <= end:
+                return self.indent_cache.get(start, '')
+        return ''
+
+    def _calculate_indent(self, line_num: int) -> Tuple[str, str]:
+        base_indent = self._get_parent_indent(line_num)
+        condition_indent = base_indent + ' ' * 4
+        body_indent = condition_indent + ' ' * 4
+        return condition_indent, body_indent
 
     def _check_variables(self, lines: List[str], line_num: int) -> Dict[str, bool]:
         var_status = {}
@@ -3331,19 +3362,19 @@ class TransactionalInserter:
         except Exception:
             return {var: False for var in self.condition_vars}
 
-    def _validate_insertion(self, modified_lines: List[str], line_num: int) -> Tuple[bool, List[str]]:
+    def _validate_insertion(self, modified_lines: List[str], line_num: int) -> Tuple[bool, str]:
         try:
             ast.parse(''.join(modified_lines))
+            condition_indent, body_indent = self._calculate_indent(line_num)
             
-            indent = self._get_line_indent(modified_lines[line_num])
-            next_line_indent = self._get_line_indent(modified_lines[line_num+1])
+            actual_condition_indent = self._get_line_indent(modified_lines[line_num])
+            if actual_condition_indent != condition_indent:
+                return False, f"Condition indent mismatch. Expected: {len(condition_indent)} spaces, Got: {len(actual_condition_indent)}"
             
-            expected_indent = len(indent) + 4
-            actual_indent = len(next_line_indent)
+            actual_body_indent = self._get_line_indent(modified_lines[line_num+1])
+            if actual_body_indent != body_indent:
+                return False, f"Body indent mismatch. Expected: {len(body_indent)} spaces, Got: {len(actual_body_indent)}"
             
-            if actual_indent != expected_indent:
-                return False, f"Indentation error: Expected {expected_indent} spaces, got {actual_indent}"
-                
             return True, ""
         except IndentationError as e:
             return False, f"Indentation error: {e.msg}"
@@ -3355,7 +3386,6 @@ class TransactionalInserter:
     def _log_change(self, original_lines: List[str], modified_lines: List[str], line_num: int, var_status: Dict[str, bool]):
         context_size = 2
         
-        # Before context
         VSlog("\n[Before] Context:")
         start = max(0, line_num - context_size)
         end = min(len(original_lines), line_num + context_size + 1)
@@ -3363,7 +3393,6 @@ class TransactionalInserter:
             prefix = ">>>" if i == line_num else "   "
             VSlog(f"{i+1:4d} {prefix} {original_lines[i].rstrip()}")
         
-        # Actual after context
         VSlog("\n[Effective After] Context:")
         mod_start = max(0, line_num - context_size)
         mod_end = min(len(modified_lines), line_num + context_size + 2)
@@ -3375,7 +3404,6 @@ class TransactionalInserter:
             except IndexError:
                 continue
         
-        # Variable status
         VSlog("\nVariable Validation:")
         all_defined = True
         for var, defined in var_status.items():
@@ -3398,83 +3426,107 @@ class TransactionalInserter:
         VSlog(f"\n🔒 Backup created: {backup_path}")
 
         self._build_scope_hierarchy(original_lines)
+        self._build_indent_cache(original_lines)
         current_lines = original_lines.copy()
         changes = []
-        
+        self.found_targets = []
+
+        # First pass: Find all potential targets
         for line_num, line in enumerate(original_lines):
-            if self.normalized_target not in self._normalize_line(line):
-                continue
-                
-            # Check parent blocks
+            if self.normalized_target in self._normalize_line(line):
+                self.found_targets.append(line_num)
+
+        if not self.found_targets:
+            VSlog(f"\n❌ Target line not found: '{self.original_target}'")
+            VSlog("🔍 Similar lines found:")
+            similar_lines = []
+            for idx, line in enumerate(original_lines):
+                ratio = SequenceMatcher(None, self.normalized_target, self._normalize_line(line)).ratio()
+                if ratio > 0.7:
+                    similar_lines.append((idx, line, ratio))
+            
+            for idx, line, ratio in sorted(similar_lines, key=lambda x: -x[2])[:3]:
+                VSlog(f"  Line {idx+1} ({ratio:.0%} match): {line.strip()}")
+            return False
+
+        # Second pass: Validate each target
+        for line_num in self.found_targets:
+            line = original_lines[line_num]
             current_blocks = self._current_parent_blocks(line_num)
-            if self.parent_blocks and not self._validate_parent_blocks(current_blocks):
-                continue
-                
-            # Create temporary modification
-            temp_modified = current_lines.copy()
-            indent = self._get_line_indent(line)
-            temp_modified[line_num] = f"{indent}{self.condition}\n"
-            temp_modified.insert(line_num+1, f"{indent}    {line.lstrip()}")
-            
-            # Validate variables
-            var_status = self._check_variables(temp_modified, line_num)
-            
-            # Validate syntax and indentation
-            is_valid, validation_msg = self._validate_insertion(temp_modified, line_num)
             
             VSlog(f"\n{'='*40} Processing line {line_num+1} {'='*40}")
+            VSlog(f"Parent block hierarchy: {' → '.join(current_blocks)}")
+            
+            # Parent block validation
+            if not self._validate_parent_blocks(current_blocks):
+                expected = ' → '.join(self.parent_blocks) if self.parent_blocks else 'None'
+                VSlog(f"⛔ Parent block mismatch\n   Expected: {expected}\n   Actual: {' → '.join(current_blocks[-len(self.parent_blocks):]) if self.parent_blocks else 'None'}")
+                continue
+                
+            # Variable validation
+            temp_modified = current_lines.copy()
+            var_status = self._check_variables(temp_modified, line_num)
+            all_defined = all(var_status.values())
+            
+            if not all_defined:
+                VSlog("❌ Undefined variables detected:")
+                for var, defined in var_status.items():
+                    if not defined:
+                        VSlog(f"  - {var}")
+                        # Show variable context
+                        context = original_lines[max(0, line_num-5):line_num]
+                        for ctx_line in context:
+                            if var in ctx_line:
+                                VSlog(f"    Possible reference: {ctx_line.strip()}")
+                                break
+                        else:
+                            VSlog(f"    No references found in previous 5 lines")
+                continue
+
+            # Apply temporary modification
+            condition_indent, body_indent = self._calculate_indent(line_num)
+            temp_modified[line_num] = f"{condition_indent}{self.condition}\n"
+            temp_modified.insert(line_num+1, f"{body_indent}{line.lstrip()}")
+            
+            # Validate insertion
+            is_valid, validation_msg = self._validate_insertion(temp_modified, line_num)
             self._log_change(original_lines, temp_modified, line_num, var_status)
             
-            if all(var_status.values()) and is_valid:
+            if is_valid:
                 current_lines = temp_modified.copy()
                 changes.append(line_num)
                 VSlog(f"\n✅ Validation passed - keeping changes")
             else:
-                self.failed_changes.append(line_num)
-                reasons = []
-                if not all(var_status.values()):
-                    reasons.append("undefined variables")
-                if not is_valid:
-                    reasons.append(validation_msg)
-                VSlog(f"\n⛔ Reverting changes: {', '.join(reasons)}")
+                VSlog(f"\n⛔ Validation failed: {validation_msg}")
+                VSlog(f"   Calculated indentation:")
+                VSlog(f"     Condition: {'·'*len(condition_indent)} ({len(condition_indent)} spaces)")
+                VSlog(f"     Body: {'·'*len(body_indent)} ({len(body_indent)} spaces)")
 
-        # Final validation
-        try:
-            ast.parse(''.join(current_lines))
-        except Exception as e:
-            VSlog(f"\n❌ Final validation failed: {e}")
-            current_lines = original_lines.copy()
-            changes = []
+        # Final validation and output
+        if changes:
+            try:
+                ast.parse(''.join(current_lines))
+                if dry_run:
+                    VSlog("\n🔍 Dry run validation successful")
+                else:
+                    with open(file_path, 'w', encoding=encoding) as f:
+                        f.writelines(current_lines)
+                    VSlog(f"\n✅ Successfully updated {len(changes)} locations")
+            except Exception as e:
+                VSlog(f"\n❌ Final validation failed: {e}")
+                if not dry_run:
+                    shutil.move(backup_path, file_path)
+                    VSlog("🔙 Restored from backup")
+                return False
+        else:
+            VSlog("\n❌ No valid insertion points found. Reasons:")
+            VSlog("  - All potential targets failed validation checks")
+            if self.parent_blocks:
+                VSlog(f"  - Parent block requirements not met: {' → '.join(self.parent_blocks)}")
+            if self.condition_vars:
+                VSlog("  - Condition variables not properly defined")
 
-        # Apply changes
-        if dry_run:
-            VSlog("\n🔍 Dry run results:")
-            VSlog(''.join(current_lines))
-            return True
-            
-        try:
-            with open(file_path, 'w', encoding=encoding) as f:
-                f.writelines(current_lines)
-                
-            VSlog(f"\n✅ Successfully updated {len(changes)} locations")
-            if self.failed_changes:
-                VSlog(f"⛔ Failed insertions: {len(self.failed_changes)}")
-            return True
-        except Exception as e:
-            VSlog(f"\n❌ Write failed: {e}")
-            shutil.move(backup_path, file_path)
-            VSlog("🔙 Restored from backup")
-            return False
-
-    def _validate_parent_blocks(self, current_blocks: List[str]) -> bool:
-        if not self.parent_blocks:
-            return True
-        
-        normalize = lambda s: re.sub(r'\s+', ' ', s).strip()
-        target_blocks = [normalize(b) for b in self.parent_blocks]
-        current_normalized = [normalize(b) for b in current_blocks]
-        
-        return current_normalized[-len(target_blocks):] == target_blocks
+        return bool(changes)
 
 def add_condition_to_statement(
     file_path: str,
