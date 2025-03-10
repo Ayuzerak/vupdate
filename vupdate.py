@@ -14,6 +14,7 @@ import json
 import requests
 import re
 import builtins
+import keyword
 import ast
 import socket
 import textwrap
