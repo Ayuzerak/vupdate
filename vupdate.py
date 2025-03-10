@@ -3242,66 +3242,158 @@ def add_parameter_to_function_call(file_path, function_name, parameter):
     except Exception as e:
         VSlog(f"Error while modifying file '{file_path}': {str(e)}")
 
-class LineInserter:
-    def __init__(self, target_line: str, condition: str):
+import re
+import ast
+import shutil
+import symtable
+from difflib import SequenceMatcher
+from typing import List, Optional, Set, Tuple
+
+def VSlog(message: str):
+    print(message)
+
+class HybridInserter:
+    def __init__(self, target_line: str, condition: str, parent_blocks: Optional[List[str]] = None):
         self.original_target = target_line.strip()
         self.condition = condition.strip()
+        self.parent_blocks = [pb.strip() for pb in parent_blocks] if parent_blocks else None
         self.normalized_target = self._normalize_line(target_line)
         self.partial_matches = []
-        self.variables_to_check = self._extract_variables(condition)
-        
+        self.condition_vars = self._parse_condition_vars()
+        self.scope_hierarchy = []
+        self.source_lines = []
+
     def _normalize_line(self, line: str) -> str:
-        """Case-sensitive normalization with smart whitespace handling"""
-        line = re.sub(r'#.*$', '', line)  # Remove comments
-        line = re.sub(r'\s*=\s*', '=', line)  # Normalize equals
-        line = re.sub(r'\(\s+', '(', line)  # Normalize parentheses
+        line = re.sub(r'#.*$', '', line)
+        line = re.sub(r'\s*=\s*', '=', line)
+        line = re.sub(r'\(\s+', '(', line)
         line = re.sub(r'\s+\)', ')', line)
         return line.strip()
-    
-    def _extract_variables(self, condition: str) -> List[str]:
-        """Get variables from condition without AST"""
-        variables = []
-        tokens = re.findall(r'\b[a-zA-Z_]\w*\b', condition)
-        keywords = {'if', 'not', 'and', 'or', 'True', 'False', 'None'}
-        variables = [t for t in tokens if t not in keywords]
-        return variables
-    
-    def _variable_is_defined(self, lines: List[str], line_num: int) -> bool:
-        """Check variable definition in previous lines"""
-        for i in range(line_num-1, -1, -1):
-            line = self._normalize_line(lines[i])
-            for var in self.variables_to_check:
-                if re.search(rf'\b{var}\s*=', line):
-                    return True
-        return False
 
-    def find_insertion_points(self, lines: List[str]) -> List[int]:
-        """Find all potential matches using multi-strategy matching"""
+    def _parse_condition_vars(self) -> Set[str]:
+        try:
+            condition_ast = ast.parse(self.condition).body[0]
+            if isinstance(condition_ast, ast.If):
+                return {
+                    node.id for node in ast.walk(condition_ast.test)
+                    if isinstance(node, ast.Name)
+                }
+            return set()
+        except Exception:
+            return set()
+
+    def _build_scope_hierarchy(self, lines: List[str]):
+        self.scope_hierarchy = []
+        self.source_lines = lines
+        tree = ast.parse("".join(lines))
+        
+        class ScopeVisitor(ast.NodeVisitor):
+            def __init__(self, outer):
+                self.outer = outer
+                self.current_blocks = []
+            
+            def _track_block(self, node, block_type: str):
+                start = node.lineno - 1
+                end = node.end_lineno - 1 if hasattr(node, 'end_lineno') else start
+                self.current_blocks.append((start, end, block_type))
+                self.generic_visit(node)
+                self.current_blocks.pop()
+            
+            def visit_FunctionDef(self, node):
+                self._track_block(node, f'def {node.name}')
+            
+            def visit_ClassDef(self, node):
+                self._track_block(node, f'class {node.name}')
+            
+            def visit_For(self, node):
+                self._track_block(node, 'for')
+            
+            def visit_While(self, node):
+                self._track_block(node, 'while')
+            
+            def visit_With(self, node):
+                self._track_block(node, 'with')
+            
+            def visit_Try(self, node):
+                self._track_block(node, 'try')
+        
+        visitor = ScopeVisitor(self)
+        visitor.visit(tree)
+        self.scope_hierarchy = visitor.current_blocks
+
+    def _current_parent_blocks(self, line_num: int) -> List[str]:
+        return [
+            block[2] for block in self.scope_hierarchy
+            if block[0] <= line_num <= block[1]
+        ]
+
+    def _validate_parent_blocks(self, current_blocks: List[str]) -> bool:
+        if not self.parent_blocks:
+            return True
+        
+        normalize = lambda s: re.sub(r'\s+', ' ', s).strip()
+        target_blocks = [normalize(b) for b in self.parent_blocks]
+        current_normalized = [normalize(b) for b in current_blocks]
+        
+        return current_normalized[-len(target_blocks):] == target_blocks
+
+    def _validate_variables(self, line_num: int) -> bool:
+        try:
+            code = "".join(self.source_lines[:line_num+1])
+            table = symtable.symtable(code, "<string>", "exec")
+            return all(
+                table.lookup(var).is_assigned()
+                for var in self.condition_vars
+            )
+        except Exception:
+            return False
+
+    def find_insertion_points(self, lines: List[str]):
+        self._build_scope_hierarchy(lines)
         matches = []
+        
         for idx, line in enumerate(lines):
             normalized = self._normalize_line(line)
             
-            # Strategy 1: Direct partial match
-            if self.normalized_target in normalized:
-                matches.append((idx, line, "direct partial"))
-                continue
+            # Line matching strategies
+            direct_match = self.normalized_target in normalized
+            similarity = SequenceMatcher(None, self.normalized_target, normalized).ratio()
+            
+            if direct_match or similarity >= 0.8:
+                line_num = idx
+                current_blocks = self._current_parent_blocks(line_num)
                 
-            # Strategy 2: Similarity scoring
-            ratio = SequenceMatcher(None, self.normalized_target, normalized).ratio()
-            if ratio >= 0.8:
-                matches.append((idx, line, f"{ratio:.0%} similarity"))
+                # Validate parent blocks
+                if not self._validate_parent_blocks(current_blocks):
+                    continue
+                
+                # Validate variables
+                valid_vars = self._validate_variables(line_num)
+                
+                matches.append((
+                    idx,
+                    line,
+                    "direct" if direct_match else f"{similarity:.0%}",
+                    current_blocks,
+                    valid_vars
+                ))
         
-        # Filter and sort best matches
+        # Sort by best matches first
         self.partial_matches = sorted(
-            [m for m in matches if m[2] != "direct partial" or m[1] == self.original_target],
-            key=lambda x: -SequenceMatcher(None, self.original_target, x[1]).ratio(),
+            matches,
+            key=lambda x: (
+                -float(x[2].rstrip('%')) if '%' in x[2] else -1,
+                -len(x[3])
+            ),
             reverse=False
         )
+        return self.partial_matches
 
 def add_condition_to_statement(
     file_path: str,
     condition: str,
     target_line: str,
+    parent_blocks: Optional[List[str]] = None,
     encoding: str = 'utf-8',
     dry_run: bool = False
 ) -> bool:
@@ -3309,6 +3401,7 @@ def add_condition_to_statement(
     VSlog(f"File: {file_path}")
     VSlog(f"Condition: {condition}")
     VSlog(f"Target: {target_line}")
+    VSlog(f"Parent blocks: {parent_blocks or 'None'}")
     
     try:
         with open(file_path, 'r', encoding=encoding) as f:
@@ -3317,65 +3410,90 @@ def add_condition_to_statement(
         VSlog(f"\n❌ File error: {e}")
         return False
 
-    inserter = LineInserter(target_line, condition)
+    inserter = HybridInserter(target_line, condition, parent_blocks)
     matches = inserter.find_insertion_points(lines)
     
     if not matches:
-        VSlog("\n❌ No matches found")
+        VSlog("\n❌ No valid matches found")
         return False
         
     VSlog("\n🔍 Found potential matches:")
-    for idx, (line_num, line, match_type) in enumerate(inserter.partial_matches, 1):
-        VSlog(f"  [{idx}] Line {line_num+1}: {line.strip()} ({match_type})")
+    for idx, match in enumerate(matches, 1):
+        line_num, line, match_type, blocks, valid_vars = match
+        log_lines = [
+            f"  [{idx}] Line {line_num+1}:",
+            f"    Match type: {match_type}",
+            f"    Parent blocks: {' → '.join(blocks)}",
+            f"    Variables: {'✅ All defined' if valid_vars else '❌ Missing definitions'}",
+            f"    Code: {line.strip()}"
+        ]
+        VSlog("\n".join(log_lines))
     
     modified = []
-    changes_made = 0
+    changes = []
     warnings = []
     
     for i, line in enumerate(lines):
-        if i in matches:
-            # Verify variables
-            vars_defined = all(inserter._variable_is_defined(lines, i) 
-                            for var in inserter.variables_to_check)
+        current_line = i
+        matched = next((m for m in matches if m[0] == current_line), None)
+        
+        if matched:
+            _, _, _, blocks, valid_vars = matched
             
-            if vars_defined:
+            if valid_vars:
                 modified.append(f"{condition}\n{line}")
-                changes_made += 1
-                VSlog(f"\n➕ Inserted at line {i+1}:")
-                VSlog(f"   Before: {line.strip()}")
-                VSlog(f"   After: {condition}")
+                changes.append({
+                    'line': current_line + 1,
+                    'original': line.strip(),
+                    'modified': f"{condition}\n{line}",
+                    'blocks': blocks,
+                    'variables': list(inserter.condition_vars)
+                })
             else:
-                warning = f"⚠️ Skipped line {i+1}: Variables undefined"
+                warning = f"⚠️ Skipped line {current_line+1}: Undefined variables"
                 warnings.append(warning)
-                VSlog(warning)
+                modified.append(line)
         else:
             modified.append(line)
     
-    if not changes_made:
-        VSlog("\n❌ No valid insertion points found")
+    if not changes:
+        VSlog("\n❌ No valid insertion points passed validation")
         return False
-        
+    
+    # Show changes
+    VSlog("\n✅ Validation passed changes:")
+    for change in changes:
+        log_lines = [
+            f"  ➕ Line {change['line']}:",
+            f"    Parent blocks: {' → '.join(change['blocks'])}",
+            f"    Variables checked: {', '.join(change['variables'])}",
+            f"    Original: {change['original']}",
+            f"    Modified: {condition}"
+        ]
+        VSlog("\n".join(log_lines))
+    
     # Show warnings
     if warnings:
         VSlog("\n🔶 Warnings:")
         for warn in warnings:
             VSlog(f"  - {warn}")
     
+    # Dry run handling
+    if dry_run:
+        VSlog("\n🔍 Dry run results:")
+        VSlog("".join(modified))
+        return True
+    
     # Backup and write changes
+    backup_path = f"{file_path}.bak"
     try:
-        if dry_run:
-            VSlog("\n🔍 Dry run results:")
-            VSlog("".join(modified))
-            return True
-            
-        backup_path = f"{file_path}.bak"
         shutil.copy2(file_path, backup_path)
         VSlog(f"\n🔒 Backup created: {backup_path}")
         
         with open(file_path, 'w', encoding=encoding) as f:
             f.writelines(modified)
             
-        VSlog(f"\n✅ Successfully updated {changes_made} locations")
+        VSlog(f"\n✅ Successfully updated {len(changes)} locations")
         return True
         
     except Exception as e:
