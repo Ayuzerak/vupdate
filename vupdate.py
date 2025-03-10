@@ -1,10 +1,10 @@
 
 # -*- coding: utf-8 -*-
 # https://github.com/Kodi-vStream/venom-xbmc-addons
-
 import configparser
 import datetime, time
 from datetime import datetime
+from collections import deque
 import xbmc
 import xbmcvfs
 import shutil
@@ -22,7 +22,7 @@ import random
 import string
 from string import Template
 import sys
-from typing import List, Optional, Dict, Set, Tuple, Union
+from typing import List, Optional, Dict, Set, Deque, Tuple, Union
 import glob
 import concurrent.futures
 import threading
