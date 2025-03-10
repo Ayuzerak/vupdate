@@ -3341,39 +3341,39 @@ class ConditionInserter(ast.NodeTransformer):
     def _normalize_ast(self, node: ast.AST) -> str:
         return ast.dump(node, annotate_fields=False, include_attributes=False)
 
-def _is_target_statement(self, node: ast.AST) -> bool:
-    if not hasattr(node, 'lineno'):
+    def _is_target_statement(self, node: ast.AST) -> bool:
+        if not hasattr(node, 'lineno'):
+            return False
+
+        raw_line = self.source_lines[node.lineno - 1].rstrip()
+        stmt_src = ast.get_source_segment(self.source, node)
+
+        variants = {
+            'raw_line': self._normalize_line(raw_line),
+            'stmt_src': self._normalize_line(stmt_src),
+            'ast_dump': self._normalize_ast(node)
+        }
+
+        # Exact match check.
+        if any(v == self.normalized_target for v in variants.values()):
+            return True
+
+        # Compute the best similarity ratio.
+        best_ratio = max(
+            SequenceMatcher(None, self.normalized_target, v).ratio()
+            for v in variants.values()
+        )
+
+        # If the best ratio meets the threshold, treat it as a match.
+        if best_ratio >= self.partial_match_threshold:
+            self.partial_matches.append((
+                node.lineno,
+                raw_line,
+                f"{best_ratio:.0%} match"
+            ))
+            return True  # <-- Changed from always returning False.
+
         return False
-
-    raw_line = self.source_lines[node.lineno - 1].rstrip()
-    stmt_src = ast.get_source_segment(self.source, node)
-
-    variants = {
-        'raw_line': self._normalize_line(raw_line),
-        'stmt_src': self._normalize_line(stmt_src),
-        'ast_dump': self._normalize_ast(node)
-    }
-
-    # Exact match check.
-    if any(v == self.normalized_target for v in variants.values()):
-        return True
-
-    # Compute the best similarity ratio.
-    best_ratio = max(
-        SequenceMatcher(None, self.normalized_target, v).ratio()
-        for v in variants.values()
-    )
-
-    # If the best ratio meets the threshold, treat it as a match.
-    if best_ratio >= self.partial_match_threshold:
-        self.partial_matches.append((
-            node.lineno,
-            raw_line,
-            f"{best_ratio:.0%} match"
-        ))
-        return True  # <-- Changed from always returning False.
-
-    return False
 
     def _handle_missed_target(self):
         normalized_target = self._normalize_line(self.target_line)
