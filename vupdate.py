@@ -3349,7 +3349,7 @@ class HybridInserter:
             direct_match = self.normalized_target in normalized
             similarity = SequenceMatcher(None, self.normalized_target, normalized).ratio()
             
-            if direct_match or similarity >= 0.8:
+            if direct_match or similarity >= 1:
                 line_num = idx
                 current_blocks = self._current_parent_blocks(line_num)
                 
