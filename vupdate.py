@@ -3302,11 +3302,9 @@ class LineInserter:
         # Filter and sort best matches
         self.partial_matches = sorted(
             [m for m in matches if m[2] != "direct partial" or m[1] == self.original_target],
-            key=lambda x: (-SequenceMatcher(None, self.original_target, x[1]).ratio(), 
+            key=lambda x: -SequenceMatcher(None, self.original_target, x[1]).ratio(),
             reverse=False
         )
-        
-        return [m[0] for m in self.partial_matches]
 
 def add_condition_to_statement(
     file_path: str,
