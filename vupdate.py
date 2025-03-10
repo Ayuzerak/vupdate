@@ -3467,7 +3467,7 @@ class ContextTracker:
 
     def _add_variable(self, var: str):
         var = var.strip()
-        if var and not var.iskeyword() and var not in dir(builtins):
+        if var and not keyword.iskeyword(var) and var not in dir(builtins):
             self.current_vars.add(var)
 
     def get_current_blocks(self) -> List[str]:
