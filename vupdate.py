@@ -1452,7 +1452,7 @@ def addVstreamVoiceControl():
         add_parameter_to_function(file_path, 'getMediaLink', 'autoPlay=False')
         add_parameter_to_function(file_path, '_getMediaLinkForGuest', 'autoPlay=False')
         add_parameter_to_function_call(file_path, '_getMediaLinkForGuest', 'autoPlay')
-        add_condition_to_statement(file_path, 'if not autoPlay:', 'oDialog = dialog().VSok', ["def getMediaLink(self, autoPlay=False):"])
+        add_condition_to_statement(file_path, 'if not autoPlay:', 'oDialog = dialog().VSok', ["getMediaLink"])
 
     file_path = VSPath('special://home/addons/plugin.video.vstream/resources/lib/gui/gui.py').replace('\\', '/')
     codeblock = """
@@ -3239,303 +3239,286 @@ def add_parameter_to_function_call(file_path, function_name, parameter):
     except Exception as e:
         VSlog(f"Error while modifying file '{file_path}': {str(e)}")
 
-class CodeModifier:
-    def __init__(self, file_path: str):
-        self.file_path = file_path
-        self.source_lines = []
-        # {line_number: (indent_level, scope_type, parent_scopes)}
-        self.scope_map: Dict[int, Tuple[int, str, List[str]]] = {}
-        # {scope_id: Set[variables]}
-        self.symbol_table: Dict[str, Set[str]] = {}
-        self.current_scope = []
-        self.current_indent = 0
-        self.scope_counter = 0
+class CodeScopeAnalyzer:
+    """Tracks code structure without AST parsing"""
+    
+    def __init__(self, source: str):
+        self.lines = source.split('\n')
+        self.scope_stack = [{'variables': set(), 'indent': 0, 'type': 'global'}]
+        self.block_hierarchy = []
+        self.variable_origins = {}
+        self._analyze()
 
-    def analyze_scopes(self):
-        scope_stack = []
-        current_indent_stack = [0]
-        parent_scopes = []
-        
-        for lineno, line in enumerate(self.source_lines, 1):
-            stripped = line.lstrip()
-            indent = len(line) - len(stripped)
-            
-            # Handle indentation changes
-            while indent < current_indent_stack[-1]:
-                current_indent_stack.pop()
-                if scope_stack:
-                    scope_stack.pop()
-                if parent_scopes:
-                    parent_scopes = parent_scopes[:-1]
+    def _analyze(self):
+        current_indent = 0
+        for line_num, line in enumerate(self.lines):
+            line = line.rstrip()
+            indent = len(line) - len(line.lstrip())
+            stripped = line.strip()
 
-            if indent > current_indent_stack[-1]:
-                current_indent_stack.append(indent)
+            self._update_scopes(indent, line_num)
+            self._track_blocks(stripped, line_num, indent)
+            self._track_variables(stripped, line_num)
 
-            # Detect scope types
-            scope_type = "module"
-            if stripped.startswith("class "):
-                scope_type = "class"
-                self._handle_class(line, parent_scopes)
-            elif stripped.startswith("def "):
-                scope_type = "function"
-                self._handle_function(line, parent_scopes)
-            elif any(stripped.startswith(kw) for kw in ["for ", "if ", "while ", "try:", "with "]):
-                scope_type = "block"
-            
-            scope_id = f"{lineno}_{scope_type}"
-            self.scope_map[lineno] = (indent, scope_type, parent_scopes.copy())
-            scope_stack.append(scope_id)
-            parent_scopes.append(scope_id)
-            
-            # Collect variables
-            self._collect_symbols(lineno, stripped)
+    def _update_scopes(self, indent: int, line_num: int):
+        # Maintain block hierarchy based on indentation
+        while self.block_hierarchy and self.block_hierarchy[-1]['indent'] >= indent:
+            self.block_hierarchy.pop()
 
-    def _handle_class(self, line: str, parent_scopes: List[str]):
-        class_name = line.split("class ")[1].split(":")[0].strip()
-        self.current_scope.append(f"class:{class_name}")
-        # Add self reference
-        self._add_symbol("self", parent_scopes)
+        # Update scope stack
+        current_scope = self.scope_stack[-1]
+        if indent > current_scope['indent']:
+            new_scope = {
+                'variables': set(),
+                'indent': indent,
+                'type': 'block',
+                'start_line': line_num,
+                'parent': current_scope
+            }
+            self.scope_stack.append(new_scope)
+        elif indent < current_scope['indent']:
+            while self.scope_stack[-1]['indent'] > indent:
+                self.scope_stack.pop()
 
-    def _handle_function(self, line: str, parent_scopes: List[str]):
-        func_def = line.split("def ")[1].split("(")[0].strip()
-        self.current_scope.append(f"def:{func_def}")
-        # Process parameters
-        params = line.split("(")[1].split(")")[0].split(",")
-        for param in params:
-            param = param.strip()
-            if '=' in param:
-                param = param.split('=')[0].strip()
-            self._add_symbol(param, parent_scopes)
+    def _track_blocks(self, stripped: str, line_num: int, indent: int):
+        # Only track class/def for parent hierarchy
+        block_match = re.match(r'^(def|class)\s+(\w+)', stripped)
+        if block_match:
+            block_type, name = block_match.groups()
+            self.block_hierarchy.append({
+                'type': block_type,
+                'name': name,
+                'line': line_num,
+                'indent': indent
+            })
 
-    def _collect_symbols(self, lineno: int, line: str):
-        # Handle variable assignments
-        if '=' in line and not line.startswith(('import ', 'from ')):
-            targets = line.split('=')[0].split(',')
-            for target in targets:
-                var_name = target.strip().split(' ')[-1]
-                self._add_symbol(var_name, self.scope_map[lineno][2])
-
-    def _add_symbol(self, var: str, parent_scopes: List[str]):
-        scope_id = "_".join(parent_scopes) if parent_scopes else "module"
-        if scope_id not in self.symbol_table:
-            self.symbol_table[scope_id] = set()
-        self.symbol_table[scope_id].add(var)
-
-    def find_exact_matches(self, target_line: str, parent_blocks: List[str] = None) -> List[Tuple[int, str]]:
-        normalized_target = self._normalize_line(target_line)
-        matches = []
-        
-        for lineno, line in enumerate(self.source_lines, 1):
-            # Multi-layer matching
-            if self._is_exact_match(line, normalized_target):
-                if self._validate_parent_scopes(lineno, parent_blocks):
-                    matches.append((lineno, line))
-        
-        return matches
-
-    def _is_exact_match(self, line: str, normalized_target: str) -> bool:
-        line_normalized = self._normalize_line(line)
-        
-        # Multi-factor matching criteria
-        return (
-            line_normalized == normalized_target and  # Normalized match
-            not line.strip().startswith('#') and      # Not a comment
-            not line.strip().startswith('@')          # Not a decorator
+    def _track_variables(self, stripped: str, line_num: int):
+        var_matches = re.finditer(
+            r'(?:^|[\s(])(?P<name>[A-Za-z_][A-Za-z0-9_]*)\s*(?==|:)', 
+            stripped
         )
+        for match in var_matches:
+            var_name = match.group('name')
+            if var_name in {'def', 'class', 'return'}: continue
+            current_scope = self.scope_stack[-1]
+            current_scope['variables'].add(var_name)
+            self.variable_origins[var_name] = {
+                'line': line_num,
+                'scope': current_scope['type'],
+                'blocks': [b['name'] for b in self.block_hierarchy]
+            }
 
-    def _normalize_line(self, line: str) -> str:
-        """Mirror Python's parser normalization rules"""
-        line = line.split('#')[0].strip()             # Remove comments
-        line = ''.join(line.split('\\'))              # Remove line continuations
-        line = line.replace(' = ', '=')               # Standardize spacing
-        line = line.replace(' =', '=').replace('= ', '=')
-        line = line.replace('( ', '(').replace(' )', ')')
-        line = line.replace(': ', ':').replace(' :', ':')
-        return line
+class StructuralMatcher:
+    """Finds code patterns with AST-like precision"""
+    
+    def __init__(self, target_line: str):
+        self.target = self._normalize(target_line)
+        self.struct_pattern = self._create_pattern(self.target)
 
-    def _validate_parent_scopes(self, lineno: int, expected_blocks: List[str]) -> bool:
-        if not expected_blocks:
-            return True
-            
-        # Get actual scope hierarchy
-        _, current_type, parent_scopes = self.scope_map[lineno]
-        actual_blocks = [self._get_scope_name(s) for s in parent_scopes] + [current_type]
-        
-        # Compare last N blocks
-        return actual_blocks[-len(expected_blocks):] == expected_blocks
+    def _normalize(self, line: str) -> str:
+        line = re.sub(r'#.*', '', line)  # Remove comments
+        line = re.sub(r'\s*=\s*', '=', line)
+        line = re.sub(r'\s*:\s*', ':', line)
+        line = re.sub(r'[\'"`]', '', line)  # Remove strings
+        return ' '.join(line.strip().split())
 
-    def _get_scope_name(self, scope_id: str) -> str:
-        # Convert internal scope ID to code-like representation
-        if 'class:' in scope_id:
-            return f"class {scope_id.split(':')[1]}"
-        if 'def:' in scope_id:
-            return f"def {scope_id.split(':')[1]}"
-        return scope_id.split('_')[-1]
+    def _create_pattern(self, line: str) -> str:
+        return re.sub(r'\b\w+\b', lambda m: 'X' if m.group(0).islower() else 'F', line)
 
-    def validate_condition(self, condition: str, lineno: int) -> Tuple[bool, List[str]]:
-        variables = self._extract_variables(condition)
-        current_scope = "_".join(self.scope_map[lineno][2])
-        available_symbols = self.symbol_table.get(current_scope, set())
-        
-        missing = []
-        status = []
-        for var in variables:
-            if var in available_symbols:
-                status.append(f"{var}: Defined")
-            else:
-                status.append(f"{var}: Undefined")
-                missing.append(var)
-        
-        return len(missing) == 0, status
+    def match(self, line: str) -> Dict:
+        norm_line = self._normalize(line)
+        struct_line = self._create_pattern(norm_line)
+        return {
+            'original': line,
+            'score': (0.6 * SequenceMatcher(None, norm_line.split(), self.target.split()).ratio() +
+                      0.4 * SequenceMatcher(None, struct_line, self.struct_pattern).ratio())
+        }
 
-    def _extract_variables(self, condition: str) -> Set[str]:
-        # Simple but precise variable extraction
-        vars = set()
-        current_var = []
-        in_string = False
-        
-        for char in condition:
-            if char in ('"', "'"):
-                in_string = not in_string
-            if not in_string and char.isalnum() or char == '_':
-                current_var.append(char)
-            elif current_var:
-                vars.add(''.join(current_var))
-                current_var = []
-        
-        if current_var:
-            vars.add(''.join(current_var))
-        
-        return vars - {'if', 'not', 'and', 'or'}
+class CodeModifier:
+    """Handles code modifications with validation"""
+    
+    def __init__(self, analyzer: CodeScopeAnalyzer):
+        self.analyzer = analyzer
+        self.modified = analyzer.lines.copy()
 
-    def insert_condition(self, condition: str, target_lineno: int) -> List[str]:
-        original_line = self.source_lines[target_lineno - 1]
-        indent = len(original_line) - len(original_line.lstrip())
-        
-        # Preserve original formatting
-        new_lines = [
-            ' ' * indent + condition.strip() + ':',
-            original_line
-        ]
-        
-        # Reconstruct with original line endings
-        return self.source_lines[:target_lineno-1] + new_lines + self.source_lines[target_lineno:]
+    def insert_condition(self, condition: str, matches: List[Dict]):
+        for match in reversed(matches):
+            line_num = match['line_num']
+            indent = ' ' * match['indent']
+            self.modified[line_num] = f"{indent}{condition}\n{self.modified[line_num]}"
 
-    def add_condition_to_statement(
-        self,
-        condition: str,
-        target_line: str,
-        parent_blocks: List[str] = None,
-        dry_run: bool = False
-    ) -> bool:
+    def validate(self) -> bool:
+        # Basic structure validation
+        orig_blocks = sum(1 for line in self.analyzer.lines if re.match(r'^\s*(def|class)\b', line))
+        mod_blocks = sum(1 for line in self.modified if re.match(r'^\s*(def|class)\b', line))
+        return orig_blocks == mod_blocks and len(self.modified) == len(self.analyzer.lines)
+
+class CodeSafety:
+    """Ensures safe file operations"""
+    
+    @staticmethod
+    def create_backup(src_path: str) -> Optional[str]:
+        backup_path = f"{src_path}.bak"
         try:
-            with open(self.file_path, 'r', encoding='utf-8') as f:
-                self.source_lines = f.readlines()
-                
-            self.analyze_scopes()
-            matches = self.find_exact_matches(target_line, parent_blocks)
-            
-            if not matches:
-                self._log_potential_matches(target_line)
-                return False
-                
-            for lineno, original_line in matches:
-                valid, var_status = self.validate_condition(condition, lineno)
-                if not valid:
-                    self._log_validation_error(lineno, var_status)
-                    return False
-                    
-                self._log_exact_match_header(lineno)
-                self._log_code_context(lineno, original_line)
-                
-                if not dry_run:
-                    modified = self.insert_condition(condition, lineno)
-                    self._write_changes(modified)
-                    
-                self._log_variable_status(var_status)
-                self._log_diff(lineno, original_line, condition)
-            
-            return True
-            
+            with open(src_path, 'rb') as src, open(backup_path, 'wb') as dst:
+                content = src.read()
+                dst.write(content)
+            if hashlib.sha256(content).hexdigest() != hashlib.sha256(open(backup_path, 'rb').read()).hexdigest():
+                raise RuntimeError("Backup verification failed")
+            return backup_path
         except Exception as e:
-            self._log_error(f"Operation failed: {str(e)}")
+            VSlog(f"Backup failed: {e}")
+            return None
+
+    @staticmethod
+    def restore(src_path: str, backup_path: str) -> bool:
+        try:
+            shutil.copy2(backup_path, src_path)
+            return True
+        except Exception as e:
+            VSlog(f"Restore failed: {e}")
             return False
 
-    def _log_exact_match_header(self, lineno: int):
-        header = f"―――― ⚠️ Exact match Change at line {lineno} ――――"
-        self._log(header)
-        self._log("Original:")
-        self._log_code_context(lineno, before_context=1, after_context=1)
-
-    def _log_code_context(self, lineno: int, before_context=1, after_context=1):
-        start = max(1, lineno - before_context)
-        end = min(len(self.source_lines), lineno + after_context)
+def add_condition_to_statement(
+    file_path: str,
+    condition: str,
+    target_line: str,
+    context_blocks: Optional[List[str]] = None,
+    encoding: str = 'utf-8',
+    dry_run: bool = False
+) -> bool:
+    """Main function to add condition before target lines"""
+    try:
+        with open(file_path, 'r', encoding=encoding) as f:
+            source = f.read()
         
-        for i in range(start, end + 1):
-            prefix = ">>>" if i == lineno else "   "
-            self._log(f"{i:4d} {prefix} {self.source_lines[i-1].rstrip()}")
+        analyzer = CodeScopeAnalyzer(source)
+        matcher = StructuralMatcher(target_line)
+        context = context_blocks or []
 
-    def _log_variable_status(self, status: List[str]):
-        self._log("\nVariable validation:")
-        for s in status:
-            self._log(f"  - {s}")
+        matches = []
+        for line_num, line in enumerate(analyzer.lines):
+            match = matcher.match(line)
+            if match['score'] < 0.85:
+                continue
 
-    def _log_diff(self, lineno: int, original_line: str, condition: str):
-        indent = len(original_line) - len(original_line.lstrip())
-        modified = [
-            ' ' * indent + condition.strip() + ':',
-            original_line.rstrip()
-        ]
-        
-        diff = [
-            f"{lineno-1:4d}   {self.source_lines[lineno-2].strip()}",
-            f"{lineno:4d}>>> {original_line.strip()}",
-            " " * 15 + "+++ Modified +++",
-            f"{lineno:4d}   {modified[0]}",
-            f"{lineno+1:4d}   {modified[1]}"
-        ]
-        
-        self._log("\nModified:")
-        self._log('\n'.join(diff))
+            # Validate parent hierarchy
+            current_hierarchy = [b['name'] for b in analyzer.block_hierarchy]
+            valid_context = (
+                len(current_hierarchy) >= len(context) and
+                current_hierarchy[-len(context):] == context
+            ) if context else True
 
-    def _log_potential_matches(self, target_line: str):
-        normalized_target = self._normalize_line(target_line)
-        candidates = []
+            # Check variable existence
+            condition_vars = re.findall(r'\b([A-Za-z_]\w*)\b', condition.split(':', 1)[0])
+            current_vars = set()
+            for scope in reversed(analyzer.scope_stack):
+                if scope['start_line'] <= line_num:
+                    current_vars.update(scope['variables'])
+            var_status = {var: var in current_vars for var in condition_vars}
+
+            if valid_context:
+                matches.append({
+                    'line_num': line_num,
+                    'original': line,
+                    'indent': len(line) - len(line.lstrip()),
+                    'type': 'exact' if match['score'] >= 0.99 else 'partial',
+                    'vars': var_status,
+                    'context': current_hierarchy.copy()
+                })
+
+        if not matches:
+            VSlog("No valid matches found")
+            return False
+
+        modifier = CodeModifier(analyzer)
+        modifier.insert_condition(condition, matches)
         
-        for idx, line in enumerate(self.source_lines, 1):
-            ratio = difflib.SequenceMatcher(
-                None, 
-                normalized_target, 
-                self._normalize_line(line)
-            ).ratio()
+        if not modifier.validate():
+            VSlog("Validation failed: structure mismatch")
+            return False
+
+        _generate_report(
+            original=analyzer.lines,
+            modified=modifier.modified,
+            matches=matches,
+            condition=condition,
+            is_dry_run=dry_run
+        )
+
+        if dry_run:
+            return True
+
+        backup = CodeSafety.create_backup(file_path)
+        if not backup:
+            return False
             
-            if ratio > 0.8:
-                candidates.append((idx, line, ratio))
-                
-        if candidates:
-            self._log("\nPotential partial matches:")
-            for idx, line, ratio in sorted(candidates, key=lambda x: -x[2]):
-                self._log(f"  Line {idx}: {line.strip()} ({ratio:.0%} match)")
+        try:
+            with open(file_path, 'w', encoding=encoding) as f:
+                f.write('\n'.join(modifier.modified))
+            
+            # Verify write
+            with open(file_path, 'r', encoding=encoding) as f:
+                if f.read() != '\n'.join(modifier.modified):
+                    raise RuntimeError("File content mismatch")
+            
+            VSlog("Modification successful")
+            return True
+        except Exception as e:
+            VSlog(f"Write failed: {e}")
+            CodeSafety.restore(file_path, backup)
+            return False
 
-    def _log_validation_error(self, lineno: int, status: List[str]):
-        self._log("\n❌ Condition validation failed:")
-        self._log(f"At line {lineno}:")
-        for s in status:
-            self._log(f"  {s}")
-        self._log(f"Available symbols: {sorted(self.symbol_table.get(self.current_scope, []))}")
+    except Exception as e:
+        VSlog(f"Critical error: {e}")
+        return False
 
-    def _write_changes(self, modified_lines: List[str]):
-        backup_path = f"{self.file_path}.bak"
-        shutil.copy2(self.file_path, backup_path)
-        
-        with open(self.file_path, 'w', encoding='utf-8') as f:
-            f.writelines(modified_lines)
+def _generate_report(
+    original: List[str],
+    modified: List[str],
+    matches: List[Dict],
+    condition: str,
+    is_dry_run: bool
+):
+    """Generates standardized operation report"""
+    border = "=" * 40
+    report_type = "DRY RUN" if is_dry_run else "EXECUTION"
+    VSlog(f"\n{border} {report_type} REPORT {border}")
+    
+    # Match details
+    VSlog(f"\nFound {len(matches)} insertion points:")
+    for idx, match in enumerate(matches, 1):
+        match_type = "✅ Exact" if match['type'] == 'exact' else "⚠️ Partial"
+        VSlog(f"\n―――― {match_type} Match [Change #{idx}] ――――")
+        VSlog(f"Line {match['line_num'] + 1}:")
+        VSlog(f"Original: {match['original']}")
+        VSlog(f"Modified: {' ' * match['indent']}{condition}")
+        VSlog(f"Parent Hierarchy: {match['context']}")
+        VSlog("Variable Status:")
+        for var, defined in match['vars'].items():
+            VSlog(f"  - {var}: {'DEFINED' if defined else 'UNDEFINED'}")
 
-    def _log(self, message: str):
-        VSlog(f"[vStream Update]: {message}")
+    # Diff summary
+    diff = difflib.unified_diff(
+        original,
+        modified,
+        fromfile='Original',
+        tofile='Modified',
+        lineterm='',
+        n=2
+    )
+    diff_lines = list(diff)
+    
+    if diff_lines:
+        VSlog("\nChange Summary:")
+        VSlog("@@ Diff Preview @@")
+        for line in diff_lines:
+            if line.startswith('@@'):
+                VSlog(f"\n{line}")
+            else:
+                VSlog(f"  {line}")
 
-    def _log_error(self, message: str):
-        VSlog(f"[vStream Update]: ❌ {message}")
+    VSlog(f"\n{border} END REPORT {border}\n")
         
 def add_codeblock_after_block(file_path, block_header, codeblock, insert_after_line=None):
     """
