@@ -3242,16 +3242,19 @@ def add_parameter_to_function_call(file_path, function_name, parameter):
     except Exception as e:
         VSlog(f"Error while modifying file '{file_path}': {str(e)}")
 
-class HybridInserter:
+class TransactionalInserter:
     def __init__(self, target_line: str, condition: str, parent_blocks: Optional[List[str]] = None):
         self.original_target = target_line.strip()
         self.condition = condition.strip()
-        self.parent_blocks = [pb.strip() for pb in parent_blocks] if parent_blocks else None
+        self.parent_blocks = parent_blocks
         self.normalized_target = self._normalize_line(target_line)
-        self.partial_matches = []
+        self.valid_changes = []
+        self.failed_changes = []
+        self.var_status_cache = {}
+        
+        # Extract condition variables using AST
         self.condition_vars = self._parse_condition_vars()
-        self.scope_hierarchy = []
-        self.source_lines = []
+        self.required_indent = None
 
     def _normalize_line(self, line: str) -> str:
         line = re.sub(r'#.*$', '', line)
@@ -3263,121 +3266,138 @@ class HybridInserter:
     def _parse_condition_vars(self) -> Set[str]:
         try:
             condition_ast = ast.parse(self.condition).body[0]
-            if isinstance(condition_ast, ast.If):
-                return {
-                    node.id for node in ast.walk(condition_ast.test)
-                    if isinstance(node, ast.Name)
-                }
-            return set()
+            return {
+                node.id for node in ast.walk(condition_ast.test)
+                if isinstance(node, ast.Name)
+            }
         except Exception:
             return set()
 
-    def _build_scope_hierarchy(self, lines: List[str]):
-        self.scope_hierarchy = []
-        self.source_lines = lines
-        tree = ast.parse("".join(lines))
-        
-        class ScopeVisitor(ast.NodeVisitor):
-            def __init__(self, outer):
-                self.outer = outer
-                self.current_blocks = []
-            
-            def _track_block(self, node, block_type: str):
-                start = node.lineno - 1
-                end = node.end_lineno - 1 if hasattr(node, 'end_lineno') else start
-                self.current_blocks.append((start, end, block_type))
-                self.generic_visit(node)
-                self.current_blocks.pop()
-            
-            def visit_FunctionDef(self, node):
-                self._track_block(node, f'def {node.name}')
-            
-            def visit_ClassDef(self, node):
-                self._track_block(node, f'class {node.name}')
-            
-            def visit_For(self, node):
-                self._track_block(node, 'for')
-            
-            def visit_While(self, node):
-                self._track_block(node, 'while')
-            
-            def visit_With(self, node):
-                self._track_block(node, 'with')
-            
-            def visit_Try(self, node):
-                self._track_block(node, 'try')
-        
-        visitor = ScopeVisitor(self)
-        visitor.visit(tree)
-        self.scope_hierarchy = visitor.current_blocks
+    def _get_line_indent(self, line: str) -> str:
+        return re.match(r'^(\s*)', line).group(1)
 
-    def _current_parent_blocks(self, line_num: int) -> List[str]:
-        return [
-            block[2] for block in self.scope_hierarchy
-            if block[0] <= line_num <= block[1]
-        ]
-
-    def _validate_parent_blocks(self, current_blocks: List[str]) -> bool:
-        if not self.parent_blocks:
-            return True
-        
-        normalize = lambda s: re.sub(r'\s+', ' ', s).strip()
-        target_blocks = [normalize(b) for b in self.parent_blocks]
-        current_normalized = [normalize(b) for b in current_blocks]
-        
-        return current_normalized[-len(target_blocks):] == target_blocks
-
-    def _validate_variables(self, line_num: int) -> bool:
+    def _validate_insertion(self, original_lines: List[str], modified_lines: List[str], line_num: int) -> bool:
+        """AST validation for syntax and indentation"""
         try:
-            code = "".join(self.source_lines[:line_num+1])
-            table = symtable.symtable(code, "<string>", "exec")
-            return all(
-                table.lookup(var).is_assigned()
-                for var in self.condition_vars
-            )
-        except Exception:
+            # Validate syntax
+            ast.parse(''.join(modified_lines))
+            
+            # Validate indentation pattern
+            indent = self._get_line_indent(modified_lines[line_num])
+            next_line_indent = self._get_line_indent(modified_lines[line_num+1])
+            
+            if len(next_line_indent) != len(indent) + 4:
+                VSlog(f"❌ Indentation error at line {line_num+1}")
+                VSlog(f"   Expected {len(indent)+4} spaces, got {len(next_line_indent)}")
+                return False
+                
+            return True
+        except IndentationError as e:
+            VSlog(f"❌ Indentation error at line {e.lineno}: {e.msg}")
+            return False
+        except SyntaxError as e:
+            VSlog(f"❌ Syntax error at line {e.lineno}: {e.msg}")
+            return False
+        except Exception as e:
+            VSlog(f"❌ Validation error: {str(e)}")
             return False
 
-    def find_insertion_points(self, lines: List[str]):
-        self._build_scope_hierarchy(lines)
-        matches = []
+    def _check_variables(self, lines: List[str], line_num: int) -> Dict[str, bool]:
+        """Check variable definitions using symbol table"""
+        var_status = {}
+        try:
+            code = ''.join(lines[:line_num+1])
+            table = symtable.symtable(code, "<string>", "exec")
+            for var in self.condition_vars:
+                try:
+                    var_status[var] = table.lookup(var).is_assigned()
+                except KeyError:
+                    var_status[var] = False
+            return var_status
+        except Exception:
+            return {var: False for var in self.condition_vars}
+
+    def _log_change(self, line_num: int, original: str, modified: str, var_status: Dict[str, bool]):
+        VSlog(f"\n―――― Change at line {line_num+1} ――――")
+        VSlog("[Before]")
+        VSlog(f"{line_num+1:4d} | {original.rstrip()}")
+        VSlog("\n[After]")
+        VSlog(f"{line_num+1:4d} | {modified.splitlines()[0].rstrip()}")
+        VSlog(f"{line_num+2:4d} | {modified.splitlines()[1].rstrip()}")
         
-        for idx, line in enumerate(lines):
-            normalized = self._normalize_line(line)
+        VSlog("\nVariable Status:")
+        all_defined = True
+        for var, defined in var_status.items():
+            status = "✅ Defined" if defined else "❌ Undefined"
+            VSlog(f"  {var}: {status}")
+            all_defined &= defined
             
-            # Line matching strategies
-            direct_match = self.normalized_target in normalized
-            similarity = SequenceMatcher(None, self.normalized_target, normalized).ratio()
-            
-            if direct_match or similarity >= 1:
-                line_num = idx
-                current_blocks = self._current_parent_blocks(line_num)
-                
-                # Validate parent blocks
-                if not self._validate_parent_blocks(current_blocks):
-                    continue
-                
-                # Validate variables
-                valid_vars = self._validate_variables(line_num)
-                
-                matches.append((
-                    idx,
-                    line,
-                    "direct" if direct_match else f"{similarity:.0%}",
-                    current_blocks,
-                    valid_vars
-                ))
+        if all_defined:
+            VSlog("🔧 All variables defined - proceeding with insertion")
+        else:
+            VSlog("⛔ Missing variable definitions - skipping insertion")
+
+    def process_file(self, file_path: str, encoding: str = 'utf-8', dry_run: bool = False) -> bool:
+        try:
+            with open(file_path, 'r', encoding=encoding) as f:
+                original_lines = f.readlines()
+        except Exception as e:
+            VSlog(f"\n❌ File error: {e}")
+            return False
+
+        backup_path = f"{file_path}.bak"
+        shutil.copy2(file_path, backup_path)
+        VSlog(f"\n🔒 Backup created: {backup_path}")
+
+        modified_lines = original_lines.copy()
+        changes = []
         
-        # Sort by best matches first
-        self.partial_matches = sorted(
-            matches,
-            key=lambda x: (
-                -float(x[2].rstrip('%')) if '%' in x[2] else -1,
-                -len(x[3])
-            ),
-            reverse=False
-        )
-        return self.partial_matches
+        # Find potential matches first
+        for line_num, line in enumerate(original_lines):
+            if self.normalized_target not in self._normalize_line(line):
+                continue
+                
+            # Found potential match
+            var_status = self._check_variables(original_lines, line_num)
+            self._log_change(line_num, line, f"{self.condition}\n{line}", var_status)
+            
+            if not all(var_status.values()):
+                self.failed_changes.append(line_num)
+                continue
+                
+            # Create modified version
+            temp_modified = original_lines.copy()
+            indent = self._get_line_indent(line)
+            temp_modified[line_num] = f"{indent}{self.condition}\n{indent}    {line.lstrip()}"
+            
+            if self._validate_insertion(original_lines, temp_modified, line_num):
+                changes.append(line_num)
+                modified_lines = temp_modified.copy()
+                VSlog(f"✅ Successfully validated line {line_num+1}")
+            else:
+                self.failed_changes.append(line_num)
+                modified_lines = original_lines.copy()
+                VSlog(f"⛔ Reverted changes at line {line_num+1}")
+
+        # Apply changes
+        if dry_run:
+            VSlog("\n🔍 Dry run results:")
+            VSlog(''.join(modified_lines))
+            return True
+            
+        try:
+            with open(file_path, 'w', encoding=encoding) as f:
+                f.writelines(modified_lines)
+                
+            VSlog(f"\n✅ Successfully updated {len(changes)} locations")
+            if self.failed_changes:
+                VSlog(f"⛔ Skipped {len(self.failed_changes)} invalid insertions")
+            return True
+        except Exception as e:
+            VSlog(f"\n❌ Write failed: {e}")
+            shutil.move(backup_path, file_path)
+            VSlog("🔙 Restored from backup")
+            return False
 
 def add_condition_to_statement(
     file_path: str,
@@ -3392,106 +3412,9 @@ def add_condition_to_statement(
     VSlog(f"Condition: {condition}")
     VSlog(f"Target: {target_line}")
     VSlog(f"Parent blocks: {parent_blocks or 'None'}")
-    
-    try:
-        with open(file_path, 'r', encoding=encoding) as f:
-            lines = f.readlines()
-    except Exception as e:
-        VSlog(f"\n❌ File error: {e}")
-        return False
 
-    inserter = HybridInserter(target_line, condition, parent_blocks)
-    matches = inserter.find_insertion_points(lines)
-    
-    if not matches:
-        VSlog("\n❌ No valid matches found")
-        return False
-        
-    VSlog("\n🔍 Found potential matches:")
-    for idx, match in enumerate(matches, 1):
-        line_num, line, match_type, blocks, valid_vars = match
-        log_lines = [
-            f"  [{idx}] Line {line_num+1}:",
-            f"    Match type: {match_type}",
-            f"    Parent blocks: {' → '.join(blocks)}",
-            f"    Variables: {'✅ All defined' if valid_vars else '❌ Missing definitions'}",
-            f"    Code: {line.strip()}"
-        ]
-        VSlog("\n".join(log_lines))
-    
-    modified = []
-    changes = []
-    warnings = []
-    
-    for i, line in enumerate(lines):
-        current_line = i
-        matched = next((m for m in matches if m[0] == current_line), None)
-        
-        if matched:
-            _, _, _, blocks, valid_vars = matched
-            
-            if valid_vars:
-                modified.append(f"{condition}\n{line}")
-                changes.append({
-                    'line': current_line + 1,
-                    'original': line.strip(),
-                    'modified': f"{condition}\n{line}",
-                    'blocks': blocks,
-                    'variables': list(inserter.condition_vars)
-                })
-            else:
-                warning = f"⚠️ Skipped line {current_line+1}: Undefined variables"
-                warnings.append(warning)
-                modified.append(line)
-        else:
-            modified.append(line)
-    
-    if not changes:
-        VSlog("\n❌ No valid insertion points passed validation")
-        return False
-    
-    # Show changes
-    VSlog("\n✅ Validation passed changes:")
-    for change in changes:
-        log_lines = [
-            f"  ➕ Line {change['line']}:",
-            f"    Parent blocks: {' → '.join(change['blocks'])}",
-            f"    Variables checked: {', '.join(change['variables'])}",
-            f"    Original: {change['original']}",
-            f"    Modified: {condition}"
-        ]
-        VSlog("\n".join(log_lines))
-    
-    # Show warnings
-    if warnings:
-        VSlog("\n🔶 Warnings:")
-        for warn in warnings:
-            VSlog(f"  - {warn}")
-    
-    # Dry run handling
-    if dry_run:
-        VSlog("\n🔍 Dry run results:")
-        VSlog("".join(modified))
-        return True
-    
-    # Backup and write changes
-    backup_path = f"{file_path}.bak"
-    try:
-        shutil.copy2(file_path, backup_path)
-        VSlog(f"\n🔒 Backup created: {backup_path}")
-        
-        with open(file_path, 'w', encoding=encoding) as f:
-            f.writelines(modified)
-            
-        VSlog(f"\n✅ Successfully updated {len(changes)} locations")
-        return True
-        
-    except Exception as e:
-        VSlog(f"\n❌ Write failed: {e}")
-        if os.path.exists(backup_path):
-            shutil.move(backup_path, file_path)
-            VSlog("🔙 Restored from backup")
-        return False
+    inserter = TransactionalInserter(target_line, condition, parent_blocks)
+    return inserter.process_file(file_path, encoding, dry_run)
         
 def add_codeblock_after_block(file_path, block_header, codeblock, insert_after_line=None):
     """
