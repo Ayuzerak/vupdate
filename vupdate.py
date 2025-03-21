@@ -4742,12 +4742,29 @@ def get_livetv_url():
 
     current_valid_url = None
 
+    # Candidate 0: Try the URL saved in the json file.
+    if not current_valid_url:
+        sites_json = VSPath('special://home/addons/plugin.video.vstream/resources/sites.json').replace('\\', '/')
+    
+        try:
+            # Load the JSON file
+            with open(sites_json, 'r') as fichier:
+                data = json.load(fichier)
+
+            if 'livetv' in data['sites']:
+                effective_url = data['sites']['livetv']['url']
+                if effective_url:
+                    VSlog(f"sites.json saved URL is valid: {effective_url}")
+                    save_valid_url(effective_url)
+                    current_valid_url = effective_url   
+
     # Candidate 1: Try the URL saved in the config file.
-    effective_url = load_and_validate_url()
-    if effective_url:
-        VSlog(f"Saved URL is valid: {effective_url}")
-        save_valid_url(effective_url)
-        current_valid_url = effective_url
+    if not current_valid_url:
+        effective_url = load_and_validate_url()
+        if effective_url:
+            VSlog(f"Saved URL is valid: {effective_url}")
+            save_valid_url(effective_url)
+            current_valid_url = effective_url
 
     # Candidate 2: Try the bypass URL.
     if not current_valid_url:
