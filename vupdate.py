@@ -4741,7 +4741,7 @@ def get_livetv_url():
             return None
 
     current_valid_url = None
-
+    
     # Candidate 0: Try the URL saved in the json file.
     if not current_valid_url:
         sites_json = VSPath('special://home/addons/plugin.video.vstream/resources/sites.json').replace('\\', '/')
@@ -4756,7 +4756,9 @@ def get_livetv_url():
                 if effective_url:
                     VSlog(f"sites.json saved URL is valid: {effective_url}")
                     save_valid_url(effective_url)
-                    current_valid_url = effective_url   
+                    current_valid_url = effective_url
+        except Exception as e:
+            VSlog(f"Erreur lors de la récupération de l'URL de LiveTV depuis le fichier json : {e}")
 
     # Candidate 1: Try the URL saved in the config file.
     if not current_valid_url:
