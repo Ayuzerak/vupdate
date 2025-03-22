@@ -1963,7 +1963,8 @@ def get_livetv_url():
             }
             response = requests.get(url, headers=headers, timeout=15, allow_redirects=True)
             effective_url = response.url  # Final URL after any redirects
-            if "matchs" in response.text.lower():
+            response_lowered = response.text.lower()
+            if "matchs" in response_lowered and "direct" in response_lowered and "nba" in response_lowered:
                 if effective_url != url:
                     VSlog(f"Redirection detected: {url} -> {effective_url}")
                 return effective_url
