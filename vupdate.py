@@ -4597,19 +4597,18 @@ def get_elitegol_url():
             try:
                 """Fecthing a new URL for EliteGol from the sites.json file."""
                 sites_json = VSPath('special://home/addons/plugin.video.vstream/resources/sites.json').replace('\\', '/')
-    
-                try:
-                    # Load the JSON file
-                    with open(sites_json, 'r') as fichier:
-                        data = json.load(fichier)
+                        
+                # Load the JSON file
+                with open(sites_json, 'r') as fichier:
+                    data = json.load(fichier)
         
-                    # Get the Url
-                    if 'elitegol' in data['sites']:
-                        processed_url = data['sites']['elitegol']['url']
-                    if validate_url_content(processed_url):
-                        current_valid_url = processed_url
-                except Exception as e:
-                    VSlog(f"sites.json processing error: {str(e)}")         
+                # Get the Url
+                if 'elitegol' in data['sites']:
+                    processed_url = data['sites']['elitegol']['url']
+                if validate_url_content(processed_url):
+                    current_valid_url = processed_url
+            except Exception as e:
+                VSlog(f"sites.json processing error: {str(e)}")         
                     
         # First source: fulldeals.fr
         if not current_valid_url:
