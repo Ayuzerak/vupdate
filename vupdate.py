@@ -4497,11 +4497,11 @@ def get_darkiworld_url():
     """Retrieve the Darkiworld URL from its website."""
     VSlog("Retrieving Darkiworld URL from its website.")
     try:
-        response = requests.get("https://www.julsa.fr/darkiworld-la-nouvelle-adresse-url-pour-acceder-au-site/")
+        response = requests.get("https://top-infos.com/darkino-nouvelle-adresse/")
         content = response.text
-        target_position = content.find("Darkiworld, rendez-vous sur")
+        target_position = content.find("adresse actuelle de Darkino est")
         if target_position == -1:
-            VSlog("Target position 'Darkiworld, rendez-vous sur' not found in the response.")
+            VSlog("Target position 'adresse actuelle de Darkino est' not found in the response.")
             return None
         content_after_target = content[target_position:]
         web_addresses = re.findall('href="(https?://[\\w.-]+(?:\\.[\\w\\.-]+)+(?:/[\\w\\.-]*)*)', content_after_target) 
