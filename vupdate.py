@@ -4618,7 +4618,7 @@ def get_elitegol_url():
                     processed_url = data['sites']['elitegol']['url']
                 if validate_url_content(processed_url):
                     current_valid_url = processed_url
-                    VSlog(f"Elitegol URL found: {current_valid_url}")
+                    VSlog(f"Elitegol URL found (sites.json file): {current_valid_url}")
             except Exception as e:
                 VSlog(f"sites.json processing error: {str(e)}")
 
@@ -4641,7 +4641,7 @@ def get_elitegol_url():
                     processed_url = match.group(1).replace("http", "https").replace("httpss", "https") + "/"
                 if validate_url_content(processed_url):
                     current_valid_url = processed_url
-                    VSlog(f"Elitegol URL found: {current_valid_url}")
+                    VSlog(f"Elitegol URL found (site_info): {current_valid_url}")
             except requests.RequestException as e:
                 VSlog(f"Error while retrieving Elitegol URL from source_info: {e}")
                     
