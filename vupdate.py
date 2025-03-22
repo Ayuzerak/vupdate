@@ -4607,8 +4607,32 @@ def get_elitegol_url():
                     processed_url = data['sites']['elitegol']['url']
                 if validate_url_content(processed_url):
                     current_valid_url = processed_url
+                    VSlog(f"Elitegol URL found: {current_valid_url}")
             except Exception as e:
-                VSlog(f"sites.json processing error: {str(e)}")         
+                VSlog(f"sites.json processing error: {str(e)}")
+
+        #0.1 source : sites.json file site_info
+        if not current_valid_url:
+            try:
+                with open(sites_json, 'r') as fichier:
+                    data = json.load(fichier)
+                if 'elitegol' in data['sites']:
+                    site_info_new_address = data['sites']['elitegol']['site_info']
+
+                response = requests.get(site_info_new_address)
+                html_content = response.text
+
+                # Rechercher l'URL dans l'attribut href
+                match = re.search(r"<a href='(.*?)'", html_content)
+
+                # Extraire et afficher l'URL si elle existe
+                if match:
+                    processed_url = match.group(1).replace("http", "https").replace("httpss", "https") + "/"
+                if validate_url_content(processed_url):
+                    current_valid_url = processed_url
+                    VSlog(f"Elitegol URL found: {current_valid_url}")
+            except requests.RequestException as e:
+                VSlog(f"Error while retrieving Elitegol URL from source_info: {e}")
                     
         # First source: fulldeals.fr
         if not current_valid_url:
