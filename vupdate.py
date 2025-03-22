@@ -4603,9 +4603,9 @@ def get_elitegol_url():
                     with open(sites_json, 'r') as fichier:
                         data = json.load(fichier)
         
-                # Get the Url
-                if 'elitegol' in data['sites']:
-                    processed_url = data['sites']['elitegol']['url']
+                    # Get the Url
+                    if 'elitegol' in data['sites']:
+                        processed_url = data['sites']['elitegol']['url']
                     if validate_url_content(processed_url):
                         current_valid_url = processed_url
                 except Exception as e:
