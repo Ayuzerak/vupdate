@@ -4592,23 +4592,43 @@ def get_elitegol_url():
     current_valid_url = None
     
     try:
+        #Zero source : sites.json file
+        if not current_valid_url:
+            try:
+                """Fecthing a new URL for EliteGol from the sites.json file."""
+                sites_json = VSPath('special://home/addons/plugin.video.vstream/resources/sites.json').replace('\\', '/')
+    
+                try:
+                    # Load the JSON file
+                    with open(sites_json, 'r') as fichier:
+                        data = json.load(fichier)
+        
+                # Get the Url
+                if 'elitegol' in data['sites']:
+                    processed_url = data['sites']['elitegol']['url']
+                    if validate_url_content(processed_url):
+                        current_valid_url = processed_url
+                except Exception as e:
+                    VSlog(f"sites.json processing error: {str(e)}")         
+                    
         # First source: fulldeals.fr
-        try:
-            response = requests.get("https://fulldeals.fr/streamonsport/", timeout=10)
-            content = response.text
-            target_pos = content.find("<strong>la vraie adresse")
+        if not current_valid_url:
+            try:
+                response = requests.get("https://fulldeals.fr/streamonsport/", timeout=10)
+                content = response.text
+                target_pos = content.find("<strong>la vraie adresse")
             
-            if target_pos != -1:
-                section = content[target_pos:]
-                urls = re.findall(r'href="(https?://[^"]+)"', section)
+                if target_pos != -1:
+                    section = content[target_pos:]
+                    urls = re.findall(r'href="(https?://[^"]+)"', section)
                 if urls:
                     raw_url = urls[0]
                     processed_url = raw_url.replace("http", "https").replace("httpss", "https").rstrip('/') + '/'
                     VSlog(f"Found fulldeals URL candidate: {processed_url}")
                     if validate_url_content(processed_url):
                         current_valid_url = processed_url
-        except Exception as e:
-            VSlog(f"fulldeals processing error: {str(e)}")
+            except Exception as e:
+                VSlog(f"fulldeals processing error: {str(e)}")
         
         # Second source: lefoot.ru (only if first failed)
         if not current_valid_url:
