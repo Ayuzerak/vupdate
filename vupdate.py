@@ -4594,7 +4594,8 @@ def get_elitegol_url():
     def validate_url_content(url):
         try:
             response = requests.get(url, timeout=15)
-            return 'match' in response.text.lower()
+            response_lowered = response.text.lower()
+            return "matchs" in response_lowered and "direct" in response_lowered and "nba" in response_lowered
         except Exception as e:
             VSlog(f"Content validation failed for {url}: {str(e)}")
             return False
@@ -4781,8 +4782,10 @@ def get_livetv_url():
                 )
             }
             response = requests.get(url, headers=headers, timeout=15, allow_redirects=True)
+            response_lowered = response.text.lower()
             effective_url = response.url  # Final URL after any redirects
-            if "matchs" in response.text.lower():
+            
+            if "matchs" in response_lowered and "direct" in response_lowered and "nba" in response_lowered:
                 if effective_url != url:
                     VSlog(f"Redirection detected: {url} -> {effective_url}")
                 return effective_url
