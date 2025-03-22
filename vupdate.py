@@ -4497,7 +4497,17 @@ def get_darkiworld_url():
     """Retrieve the Darkiworld URL from its website."""
     VSlog("Retrieving Darkiworld URL from its website.")
     try:
-        response = requests.get("https://top-infos.com/darkino-nouvelle-adresse/")
+        response = requests.get(
+            "https://top-infos.com/darkino-nouvelle-adresse/",
+            headers={
+                "User-Agent": (
+                    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                    "AppleWebKit/537.36 (KHTML, like Gecko) "
+                    "Chrome/91.0.4472.124 Safari/537.36"
+                )
+            },
+            timeout=10
+        )
         content = response.text
         target_position = content.find("adresse actuelle de Darkino est")
         if target_position == -1:
