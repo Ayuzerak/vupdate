@@ -5238,7 +5238,10 @@ def showMovies(sSearch=''):
     oGui = cGui()
     oInputParameterHandler = cInputParameterHandler()
     sUrl = oInputParameterHandler.getValue('siteUrl')
-    urlMain = URL_MAIN
+    urlMain = GetUrlMain()
+
+    if not "https" in sUrl:
+        sUrl = urlMain
 
     oRequestHandler = cRequestHandler(sUrl)
     sHtmlContent = oRequestHandler.request()
@@ -5358,8 +5361,8 @@ def showLive():
             # Supprimer les anciennes lignes
             del content[start_index:end_index]
             # Insérer le nouveau code
-            for idx, line in enumerate(new_code.split('\\n')):
-                content.insert(start_index + idx, line + '\\n')
+            for idx, line in enumerate(new_code.split('\n')):
+                content.insert(start_index + idx, line + '\n')
             return True
         return False
 
@@ -5371,7 +5374,7 @@ def showLive():
     with open(file_path, 'w', encoding='utf-8') as f:
         f.writelines(content)
 
-    print('Mise à jour effectuée avec succès!')
+    VSlog('Streamonsport.py : Mise à jour effectuée avec succès!')
 
 # def save_watched_recommendations_to_json():
 #     oDb = cDb()
