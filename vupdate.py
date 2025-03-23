@@ -4553,6 +4553,179 @@ def set_darkiworld_url(url):
     except Exception as e:
         VSlog(f"Error while setting Darkiworld URL: {e}")
 
+def get_streamonsport_url():
+    """Retrieve Streamonsport URL with content validation and fallback to saved URL."""
+    VSlog("Starting Streamonsport URL retrieval process")
+    
+    CONFIG_FILE = VSPath('special://home/addons/service.vstreamupdate/site_config.ini').replace('\\', '/')
+
+    default_url = 'https://jokertv.ru/'
+
+    def save_valid_url(url):
+        try:
+            config = configparser.ConfigParser()
+            config["elitegol"] = {"current_url": url}
+            with open(CONFIG_FILE, "w") as configfile:
+                config.write(configfile)
+        except Exception as e:
+            VSlog(f"Cannot save valid url: {str(e)}")
+    
+    def load_and_validate_url():
+
+        VSlog("load_and_validate_url()")
+
+        try:
+            config = configparser.ConfigParser()
+            if os.path.exists(CONFIG_FILE):
+                config.read(CONFIG_FILE)
+                if "streamonsport" in config and "current_url" in config["elitegol"]:
+                    saved_url = config["streamonsport"]["current_url"]
+                    if validate_url_content(saved_url):
+                        return saved_url
+                else:
+                    return default_url
+        except FileNotFoundError:
+            VSlog("No saved URL file found")
+            return default_url
+        except Exception as e:
+            VSlog(f"URL load error: {str(e)}")
+            return default_url
+    
+    def validate_url_content(url):
+        try:
+            response = requests.get(url, timeout=15)
+            response_lowered = response.text.lower()
+            return "matchs" in response_lowered and "direct" in response_lowered and "nba" in response_lowered
+        except Exception as e:
+            VSlog(f"Content validation failed for {url}: {str(e)}")
+            return False
+    
+    current_valid_url = None
+    
+    try:
+        #Zero source : sites.json file
+        if not current_valid_url:
+            try:
+                """Fecthing a new URL for Streamonsport from the sites.json file."""
+                sites_json = VSPath('special://home/addons/plugin.video.vstream/resources/sites.json').replace('\\', '/')
+                        
+                # Load the JSON file
+                with open(sites_json, 'r') as fichier:
+                    data = json.load(fichier)
+        
+                # Get the Url
+                if 'streamonsport' in data['sites']:
+                    processed_url = data['sites']['streamonsport']['url']
+                if validate_url_content(processed_url):
+                    current_valid_url = processed_url
+                    VSlog(f"Streamonsport URL found (sites.json file): {current_valid_url}")
+            except Exception as e:
+                VSlog(f"sites.json processing error: {str(e)}")
+
+        #0.1 source : sites.json file site_info
+        if not current_valid_url:
+            try:
+                with open(sites_json, 'r') as fichier:
+                    data = json.load(fichier)
+                if 'streamonsport' in data['sites']:
+                    site_info_new_address = data['sites']['streamonsport']['site_info']
+
+                response = requests.get(site_info_new_address)
+                html_content = response.text
+
+                # Rechercher l'URL dans l'attribut href
+                match = re.search(r"<a href='(.*?)'", html_content)
+
+                # Extraire et afficher l'URL si elle existe
+                if match:
+                    processed_url = match.group(1).replace("http", "https").replace("httpss", "https") + "/"
+                if validate_url_content(processed_url):
+                    current_valid_url = processed_url
+                    VSlog(f"Streamonsport URL found (site_info): {current_valid_url}")
+            except requests.RequestException as e:
+                VSlog(f"Error while retrieving Streamonsport URL from source_info: {e}")
+                    
+        # First source: fulldeals.fr
+        if not current_valid_url:
+            try:
+                response = requests.get("https://fulldeals.fr/streamonsport/", timeout=10)
+                content = response.text
+                target_pos = content.find("<strong>la vraie adresse")
+            
+                if target_pos != -1:
+                    section = content[target_pos:]
+                    urls = re.findall(r'href="(https?://[^"]+)"', section)
+                if urls:
+                    raw_url = urls[0]
+                    processed_url = raw_url.replace("http", "https").replace("httpss", "https").rstrip('/') + '/'
+                    VSlog(f"Found fulldeals URL candidate: {processed_url}")
+                    if validate_url_content(processed_url):
+                        current_valid_url = processed_url
+            except Exception as e:
+                VSlog(f"fulldeals processing error: {str(e)}")
+        
+        # Second source: lefoot.ru (only if first failed)
+        if not current_valid_url:
+            try:
+                response = requests.get("https://lefoot.ru/", timeout=10)
+                content = response.text
+                urls = re.findall(r'href="(https?://[^"]+)"', content)
+                if urls:
+                    raw_url = urls[0]
+                    processed_url = raw_url.replace("http", "https").replace("httpss", "https").rstrip('/') + '/'
+                    VSlog(f"Found lefoot URL candidate: {processed_url}")
+                    if validate_url_content(processed_url):
+                        current_valid_url = processed_url
+            except Exception as e:
+                VSlog(f"lefoot processing error: {str(e)}")
+        
+        # Save and return if found new valid URL
+        if current_valid_url:
+            save_valid_url(current_valid_url)
+            return current_valid_url
+        
+        # Fallback to saved URL
+        saved_url = load_and_validate_url()
+        if saved_url:
+            VSlog("Using validated fallback URL")
+            return saved_url
+        
+        VSlog("No valid URLs found in current check or saved file")
+        return None
+
+    except Exception as e:
+        VSlog(f"Critical error: {str(e)}")
+        default_url = load_and_validate_default_url()
+        return default_url if default_url else None
+    
+def set_streamonsport_url(url):
+    """Set a new URL for Streamonsport in the sites.json file."""
+    VSlog(f"Setting new Streamonsport URL to {url}.")
+    sites_json = VSPath('special://home/addons/plugin.video.vstream/resources/sites.json').replace('\\', '/')
+    
+    try:
+        # Load the JSON file
+        with open(sites_json, 'r') as fichier:
+            data = json.load(fichier)
+        
+        # Update the URL and cloudflare status
+        if 'streamonsport' in data['sites']:
+            data['sites']['streamonsport']['url'] = url
+            cloudflare_status = is_using_cloudflare(url)
+            data['sites']['streamonsport']['cloudflare'] = "False" if not cloudflare_status else "True"
+            VSlog(f"Updated Streamonsport URL to {url} with Cloudflare status: {'Enabled' if cloudflare_status else 'Disabled'}.")
+        else:
+            VSlog("Failed to find or add the Streamonsport entry.")
+            return
+        
+        # Save changes to the JSON file
+        with open(sites_json, 'w') as fichier:
+            json.dump(data, fichier, indent=4)
+        VSlog("Streamonsport URL updated successfully.")
+    
+    except Exception as e:
+        VSlog(f"Error while setting Streamonsport URL: {e}")
+
 def get_elitegol_url():
     """Retrieve EliteGol URL with content validation and fallback to saved URL."""
     VSlog("Starting EliteGol URL retrieval process")
@@ -4644,40 +4817,6 @@ def get_elitegol_url():
                     VSlog(f"Elitegol URL found (site_info): {current_valid_url}")
             except requests.RequestException as e:
                 VSlog(f"Error while retrieving Elitegol URL from source_info: {e}")
-                    
-        # First source: fulldeals.fr
-        if not current_valid_url:
-            try:
-                response = requests.get("https://fulldeals.fr/streamonsport/", timeout=10)
-                content = response.text
-                target_pos = content.find("<strong>la vraie adresse")
-            
-                if target_pos != -1:
-                    section = content[target_pos:]
-                    urls = re.findall(r'href="(https?://[^"]+)"', section)
-                if urls:
-                    raw_url = urls[0]
-                    processed_url = raw_url.replace("http", "https").replace("httpss", "https").rstrip('/') + '/'
-                    VSlog(f"Found fulldeals URL candidate: {processed_url}")
-                    if validate_url_content(processed_url):
-                        current_valid_url = processed_url
-            except Exception as e:
-                VSlog(f"fulldeals processing error: {str(e)}")
-        
-        # Second source: lefoot.ru (only if first failed)
-        if not current_valid_url:
-            try:
-                response = requests.get("https://lefoot.ru/", timeout=10)
-                content = response.text
-                urls = re.findall(r'href="(https?://[^"]+)"', content)
-                if urls:
-                    raw_url = urls[0]
-                    processed_url = raw_url.replace("http", "https").replace("httpss", "https").rstrip('/') + '/'
-                    VSlog(f"Found lefoot URL candidate: {processed_url}")
-                    if validate_url_content(processed_url):
-                        current_valid_url = processed_url
-            except Exception as e:
-                VSlog(f"lefoot processing error: {str(e)}")
         
         # Save and return if found new valid URL
         if current_valid_url:
@@ -5140,6 +5279,7 @@ class cUpdate:
             set_wiflix_url(get_wiflix_url())
             set_frenchstream_url(get_frenchstream_url())
             set_papadustream_url(get_papadustream_url())
+            set_streamonsport_url(get_streamonsport_url())
             set_elitegol_url(get_elitegol_url())
             set_livetv_url(get_livetv_url())
             set_darkiworld_url(get_darkiworld_url())
@@ -5147,6 +5287,8 @@ class cUpdate:
             check_all_sites()
 
             activate_site("channelstream", "False")
+            activate_site("streamonsport", "True")
+
 
             # Add new site if necessary
             VSlog("Adding PapaDuStream if not present.")
