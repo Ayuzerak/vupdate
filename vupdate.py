@@ -4508,21 +4508,37 @@ def get_darkiworld_url():
             },
             timeout=10
         )
+        response.raise_for_status()  # Check for HTTP request errors
+
         content = response.text
-        target_position = content.find("adresse actuelle de Darkino est")
+        target_phrase = "adresse actuelle de Darkino est"
+        target_position = content.find(target_phrase)
+        
         if target_position == -1:
-            VSlog("Target position 'adresse actuelle de Darkino est' not found in the response.")
+            VSlog(f"Target phrase '{target_phrase}' not found in the response.")
             return None
+        
         content_after_target = content[target_position:]
-        web_addresses = re.findall('href="(https?://[\\w.-]+(?:\\.[\\w\\.-]+)+(?:/[\\w\\.-]*)*)', content_after_target) 
-        if web_addresses:
-            url = web_addresses[0].replace("http", "https").replace("httpss", "https")
-            VSlog(f"Darkiworld URL found: {url}")
-            return url
-        VSlog("No web addresses found after 'Darkiworld'.")
-        return None
+        # Use regex to find href URLs within the content after the target phrase
+        web_addresses = re.findall(r'href="(https?://[^"]+)"', content_after_target)
+        
+        if not web_addresses:
+            VSlog("No valid URLs found after the target phrase.")
+            return None
+        
+        # Select the first URL and enforce HTTPS
+        url = web_addresses[0].strip()
+        if url.startswith('http://'):
+            url = url.replace('http://', 'https://', 1)
+        
+        VSlog(f"Darkiworld URL found: {url}")
+        return url
+        
     except requests.RequestException as e:
         VSlog(f"Error while retrieving Darkiworld URL: {e}")
+        return None
+    except Exception as e:
+        VSlog(f"Unexpected error retrieving Darkiworld URL: {e}")
         return None
         
 def set_darkiworld_url(url):
