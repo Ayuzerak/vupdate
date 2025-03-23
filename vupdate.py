@@ -2798,7 +2798,7 @@ PLATFORM = platform.system()
 if PLATFORM == 'Windows':
     # Adjust Windows thread pool parameters
     ThreadPoolExecutor._max_workers = min(32, (os.cpu_count() or 1) + 4)
-    VSlog("Configured Windows thread pool with %d workers", ThreadPoolExecutor._max_workers)
+    VSlog(f"Configured Windows thread pool with {ThreadPoolExecutor._max_workers} workers")
     resource = None  # Resource module not available on Windows
 else:
     try:
