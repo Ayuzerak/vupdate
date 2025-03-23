@@ -2933,11 +2933,11 @@ def _windows_thread_task(regex_pattern, sample):
     try:
         if len(sample) > MAX_INPUT_LENGTH:
             sample = sample[:MAX_INPUT_LENGTH]
-            VSlog("Input truncated to %d chars", MAX_INPUT_LENGTH)
+            VSlog(f"Input truncated to {MAX_INPUT_LENGTH} chars")
         
         return re.compile(regex_pattern).findall(sample)
     except Exception as e:
-        VSlog("Thread task failed: %s", str(e))
+        VSlog(f"Thread task failed: {str(e)}")
         return None
 
 def _unix_subprocess_task(serialized_data):
@@ -2955,7 +2955,7 @@ def _unix_subprocess_task(serialized_data):
         
         return re.compile(regex_pattern).findall(sample)
     except Exception as e:
-        VSlog("Subprocess failed: %s", str(e))
+        VSlog(f"Subprocess failed: {str(e)}")
         return None
 
 ######################################
@@ -2975,10 +2975,10 @@ def safe_findall(regex_pattern, sample, timeout=DEFAULT_TIMEOUT):
                 future = executor.submit(_unix_subprocess_task, serialized)
                 return future.result(timeout=timeout)
     except FutureTimeoutError:
-        VSlog("Execution timeout for pattern: %s", regex_pattern[:50])
+        VSlog(f"Execution timeout for pattern: {regex_pattern[:50]}")
         return None
     except Exception as e:
-        VSlog("Execution failed: %s", str(e))
+        VSlog(f"Execution failed: {str(e)}")
         return None
 
 def test_equivalence(original, transformed, samples=None, max_dynamic_samples=20):
