@@ -4511,7 +4511,7 @@ def get_darkiworld_url():
         response.raise_for_status()  # Check for HTTP request errors
 
         content = response.text
-        target_phrase = "adresse actuelle de Darkino est"
+        target_phrase = "adresse actuelle de Darkino est <strong>"
         target_position = content.find(target_phrase)
         
         if target_position == -1:
