@@ -4496,54 +4496,88 @@ def set_papadustream_url(url):
 def get_darkiworld_url():
     """Retrieve the Darkiworld URL from its website by extracting the content of the <strong> tag."""
     VSlog("Fetching Darkiworld URL...")
+
+    def validate_url_content(url):
+        try:
+            response = requests.get(url, timeout=15)
+            response_lowered = response.text.lower()
+            return "films" in response_lowered and "ajout" in response_lowered in response_lowered
+        except Exception as e:
+            VSlog(f"Content validation failed for {url}: {str(e)}")
+            return False
+    
+    current_valid_url = None
+    
     try:
-        response = requests.get(
-            "https://top-infos.com/darkino-nouvelle-adresse/",
-            headers={
-                "User-Agent": (
-                    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-                    "AppleWebKit/537.36 (KHTML, like Gecko) "
-                    "Chrome/91.0.4472.124 Safari/537.36"
-                )
-            },
-            timeout=10
-        )
-        response.raise_for_status()
+        #Zero source : sites.json file
+        if not current_valid_url:
+            try:
+                """Fecthing a new URL for Darkiworld from the sites.json file."""
+                sites_json = VSPath('special://home/addons/plugin.video.vstream/resources/sites.json').replace('\\', '/')
+                        
+                # Load the JSON file
+                with open(sites_json, 'r') as fichier:
+                    data = json.load(fichier)
+        
+                # Get the Url
+                if 'darkiworld' in data['sites']:
+                    processed_url = data['sites']['darkiworld']['url']
+                if validate_url_content(processed_url):
+                    current_valid_url = processed_url
+                    VSlog(f"Darkiworld URL found (sites.json file): {current_valid_url}")
+            except Exception as e:
+                VSlog(f"sites.json processing error: {str(e)}")
+    
+        if not current_valid_url:
+            response = requests.get(
+                "https://top-infos.com/darkino-nouvelle-adresse/",
+                headers={
+                    "User-Agent": (
+                        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                        "AppleWebKit/537.36 (KHTML, like Gecko) "
+                        "Chrome/91.0.4472.124 Safari/537.36"
+                    )
+                },
+                timeout=10
+            )
+            response.raise_for_status()
 
-        content = response.text
-        target_phrase = "L’adresse actuelle de Darkino est"
-        pos = content.find(target_phrase)
+            content = response.text
+            target_phrase = "L’adresse actuelle de Darkino est"
+            pos = content.find(target_phrase)
 
-        if pos == -1:
-            VSlog(f"Key phrase '{target_phrase}' not found.")
-            return None
+            if pos == -1:
+                VSlog(f"Key phrase '{target_phrase}' not found.")
+                return None
 
-        # Look for the <strong> tag immediately after the target phrase
-        remaining_content = content[pos:]
-        match = re.search(
-            r'<strong[^>]*>\s*(https?://[^\s<]+)\s*</strong>',
-            remaining_content,
-            re.IGNORECASE
-        )
+            # Look for the <strong> tag immediately after the target phrase
+            remaining_content = content[pos:]
+            match = re.search(
+                r'<strong[^>]*>\s*(https?://[^\s<]+)\s*</strong>',
+                remaining_content,
+                re.IGNORECASE
+            )
 
-        if not match:
-            VSlog("No URL found in a <strong> tag after the key phrase.")
-            return None
+            if match:
+                VSlog("No URL found in a <strong> tag after the key phrase.")
 
-        url = match.group(1).strip()
-        # Enforce HTTPS if needed
-        if url.startswith('http://'):
-            url = url.replace('http://', 'https://', 1)
+                url = match.group(1).strip()
+                # Enforce HTTPS if needed
+                if url.startswith('http://'):
+                    url = url.replace('http://', 'https://', 1)
 
-        VSlog(f"URL found: {url}")
-        return url
+                VSlog(f"URL found (top-infos.com): {url}")
+
+                current_valid_url = url
+            
+        return current_valid_url
 
     except requests.RequestException as e:
         VSlog(f"Network error: {e}")
-        return None
+        return current_valid_url
     except Exception as e:
         VSlog(f"Unexpected error: {e}")
-        return None
+        return current_valid_url
         
 def set_darkiworld_url(url):
     """Set a new URL for Darkworld in the sites.json file."""
