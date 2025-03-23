@@ -5231,6 +5231,148 @@ def create_recommendation_files_to_watch():
         get_series_examples()
     )
 
+def update_streamonsport_module():
+    # Définir les nouvelles fonctions comme des chaînes multilignes
+    new_code_movies = """
+def showMovies(sSearch=''):
+    oGui = cGui()
+    oInputParameterHandler = cInputParameterHandler()
+    sUrl = oInputParameterHandler.getValue('siteUrl')
+    urlMain = URL_MAIN
+
+    oRequestHandler = cRequestHandler(sUrl)
+    sHtmlContent = oRequestHandler.request()
+
+    sPattern = r'<a class="game-name"[^>]+href="([^"]+)"[^>]*><span>([^<]+)</span></a>.*?<time class="DISDATE"[^>]+data-timestamp="([^"]+)".*?·\\s*([^<]+)<'
+    oParser = cParser()
+    aResult = oParser.parse(sHtmlContent, sPattern)
+
+    if not aResult[0]:
+        oGui.addText(SITE_IDENTIFIER)
+    else:
+        oOutputParameterHandler = cOutputParameterHandler()
+        for aEntry in aResult[1]:
+            sUrl2 = aEntry[0]
+            sTitle = aEntry[1].replace(' streaming gratuit', '').strip()
+            sTimestamp = aEntry[2]
+            sCategory = aEntry[3].strip()
+
+            try:
+                timestamp = int(sTimestamp)
+                d = datetime.utcfromtimestamp(timestamp / 1000)
+                sDate = d.strftime('%d/%m/%y %H:%M')
+            except Exception as e:
+                sDate = ''
+
+            sDisplayTitle = f'{sDate} - {sTitle} ({sCategory})' if sDate else f'{sTitle} ({sCategory})'
+            sThumb = f'{urlMain}theme2/avif/logo.avif'
+
+            oOutputParameterHandler.addParameter('siteUrl', sUrl2)
+            oOutputParameterHandler.addParameter('sMovieTitle', sTitle)
+            oOutputParameterHandler.addParameter('sDesc', sDisplayTitle)
+            oOutputParameterHandler.addParameter('sThumb', sThumb)
+
+            oGui.addLink(SITE_IDENTIFIER, 'showLive', sDisplayTitle, sThumb, sDisplayTitle, oOutputParameterHandler)
+
+    oGui.setEndOfDirectory()
+"""
+
+    new_code_live = """
+def showLive():
+    oGui = cGui()
+    oInputParameterHandler = cInputParameterHandler()
+    sUrl = oInputParameterHandler.getValue('siteUrl')
+    sThumb = oInputParameterHandler.getValue('sThumb')
+    sDesc = oInputParameterHandler.getValue('sDesc')
+    sMovieTitle = oInputParameterHandler.getValue('sMovieTitle')
+    urlMain = URL_MAIN
+
+    oRequestHandler = cRequestHandler(sUrl)
+    sHtmlContent = oRequestHandler.request()
+
+    sPattern = r'<span class="change-video[^"]*" data-embed="([^"]+)".*?<img[^>]*alt="([^"]+)"'
+    oParser = cParser()
+    aResult = oParser.parse(sHtmlContent, sPattern)
+
+    if aResult[0]:
+        oOutputParameterHandler = cOutputParameterHandler()
+        for i, (sPath, sLang) in enumerate(aResult[1], 1):
+            sLang = sLang.upper()
+            if len(sLang) > 2:
+                sLang = sLang[:2]
+            
+            if sPath.startswith('/'):
+                sUrl2 = urlMain[:-1] + sPath if urlMain.endswith('/') else urlMain + sPath
+            else:
+                sUrl2 = sPath
+
+            sDisplayTitle = f'{sMovieTitle} - Lien {i} ({sLang})'
+            
+            oOutputParameterHandler.addParameter('siteUrl', sUrl2)
+            oOutputParameterHandler.addParameter('sMovieTitle', sMovieTitle)
+            oOutputParameterHandler.addParameter('sThumb', sThumb)
+            oOutputParameterHandler.addParameter('siterefer', sUrl)
+            
+            oGui.addLink(SITE_IDENTIFIER, 'showLink', sDisplayTitle, sThumb, sDesc, oOutputParameterHandler)
+
+    oGui.setEndOfDirectory()
+"""
+
+    # Chemin du fichier à modifier
+    file_path = VSPath('special://home/addons/plugin.video.vstream/resources/sites/streamonsport.py').replace('\\', '/')
+    
+    # Lire le contenu actuel
+    with open(file_path, 'r', encoding='utf-8') as f:
+        content = f.readlines()
+
+    # Fonction utilitaire pour remplacer une fonction
+    def replace_function(content, func_name, new_code):
+        in_function = False
+        start_index = None
+        end_index = None
+        indent_level = 0
+        
+        for i, line in enumerate(content):
+            if line.strip().startswith(f'def {func_name}('):
+                start_index = i
+                in_function = True
+                # Déterminer l'indentation du corps de la fonction
+                for j in range(i+1, len(content)):
+                    if content[j].strip():
+                        indent_level = len(content[j]) - len(content[j].lstrip())
+                        break
+                continue
+            
+            if in_function:
+                current_indent = len(line) - len(line.lstrip())
+                if line.strip() == '':
+                    continue
+                if current_indent < indent_level:
+                    end_index = i
+                    break
+        else:
+            if in_function:
+                end_index = len(content)
+
+        if start_index is not None and end_index is not None:
+            # Supprimer les anciennes lignes
+            del content[start_index:end_index]
+            # Insérer le nouveau code
+            for idx, line in enumerate(new_code.split('\\n')):
+                content.insert(start_index + idx, line + '\\n')
+            return True
+        return False
+
+    # Effectuer les remplacements
+    replace_function(content, 'showMovies', new_code_movies)
+    replace_function(content, 'showLive', new_code_live)
+
+    # Écrire le nouveau contenu
+    with open(file_path, 'w', encoding='utf-8') as f:
+        f.writelines(content)
+
+    print('Mise à jour effectuée avec succès!')
+
 # def save_watched_recommendations_to_json():
 #     oDb = cDb()
 #     ADDON = addon()
@@ -5317,6 +5459,8 @@ class cUpdate:
             check_all_sites()
 
             activate_site("channelstream", "False")
+            # Exécuter la mise à jour
+            update_streamonsport_module()
             activate_site("streamonsport", "True")
 
 
