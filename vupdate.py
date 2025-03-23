@@ -2915,29 +2915,55 @@ def safe_regex_pattern(regex_pattern):
         VSlog(f"Unexpected error: {e}")
         return regex_pattern
 
-def safe_findall(regex, sample, timeout=DEFAULT_TIMEOUT):
-    """
-    Runs re.findall() in a separate thread with a timeout to avoid hangs.
-    Truncates the input sample if it exceeds MAX_INPUT_LENGTH.
-    """
-    if len(sample) > MAX_INPUT_LENGTH:
-        sample = sample[:MAX_INPUT_LENGTH]
+######################################
+# OS-Level Resource Limits (Run in Subprocess)
+######################################
 
-    def task():
-        try:
-            if resource is not None:
-                set_resource_limits()
-            return re.compile(regex).findall(sample)
-        except Exception as e:
-            VSlog(f"Error in safe_findall task: {e}")
-            return None
+def _run_regex_in_subprocess(serialized_data):
+    """
+    Runs in a subprocess: Sets resource limits and executes regex findall.
+    """
+    regex_pattern, sample = pickle.loads(serialized_data)
+    
+    try:
+        # Set resource limits
+        if resource is not None:
+            resource.setrlimit(resource.RLIMIT_CPU, (1, 1))  # 1 second CPU
+            resource.setrlimit(resource.RLIMIT_AS, (100 * 1024 * 1024, 100 * 1024 * 1024))  # 100MB RAM
+        
+        # Truncate sample if too long
+        truncated_sample = sample[:MAX_INPUT_LENGTH] if len(sample) > MAX_INPUT_LENGTH else sample
+        
+        # Execute regex safely
+        return re.compile(regex_pattern).findall(truncated_sample)
+    except Exception as e:
+        VSlog(f"Subprocess error: {e}")
+        return None
 
-    with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
-        future = executor.submit(task)
+######################################
+# Regex Execution with Subprocess Timeout
+######################################
+
+def safe_findall(regex_pattern, sample, timeout=DEFAULT_TIMEOUT):
+    """
+    Runs regex.findall in a subprocess with timeout and resource limits.
+    """
+    try:
+        # Serialize data for subprocess
+        serialized_data = pickle.dumps((regex_pattern, sample))
+    except pickle.PicklingError as e:
+        VSlog(f"Data serialization failed: {e}")
+        return None
+
+    with ProcessPoolExecutor(max_workers=1) as executor:
+        future = executor.submit(_run_regex_in_subprocess, serialized_data)
         try:
             return future.result(timeout=timeout)
-        except concurrent.futures.TimeoutError:
-            VSlog(f"Timeout occurred for regex: {regex} on sample: {sample}")
+        except FutureTimeoutError:
+            VSlog(f"Timeout for regex: {regex_pattern}")
+            return None
+        except Exception as e:
+            VSlog(f"Unexpected error: {e}")
             return None
 
 def test_equivalence(original, transformed, samples=None, max_dynamic_samples=20):
