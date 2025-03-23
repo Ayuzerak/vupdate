@@ -4578,7 +4578,7 @@ def get_streamonsport_url():
             config = configparser.ConfigParser()
             if os.path.exists(CONFIG_FILE):
                 config.read(CONFIG_FILE)
-                if "streamonsport" in config and "current_url" in config["elitegol"]:
+                if "streamonsport" in config and "current_url" in config["streamonsport"]:
                     saved_url = config["streamonsport"]["current_url"]
                     if validate_url_content(saved_url):
                         return saved_url
@@ -4733,7 +4733,7 @@ def get_elitegol_url():
     
     CONFIG_FILE = VSPath('special://home/addons/service.vstreamupdate/site_config.ini').replace('\\', '/')
 
-    default_url = 'https://jokertv.ru/'
+    default_url = 'https://kakarotfoot.ru/'
 
     def save_valid_url(url):
         try:
