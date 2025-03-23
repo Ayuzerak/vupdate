@@ -4559,7 +4559,7 @@ def get_streamonsport_url():
     
     CONFIG_FILE = VSPath('special://home/addons/service.vstreamupdate/site_config.ini').replace('\\', '/')
 
-    default_url = 'https://jokertv.ru/'
+    default_url = 'https://stream-onsport.ru/'
 
     def save_valid_url(url):
         try:
@@ -4628,21 +4628,22 @@ def get_streamonsport_url():
                 with open(sites_json, 'r') as fichier:
                     data = json.load(fichier)
                 if 'streamonsport' in data['sites']:
-                    site_info_new_address = data['sites']['streamonsport']['site_info']
+                    if 'site_info' in data['sites']['streamonsport']:
+                        site_info_new_address = data['sites']['streamonsport']['site_info']
 
-                response = requests.get(site_info_new_address)
-                html_content = response.text
+                        response = requests.get(site_info_new_address)
+                        html_content = response.text
 
-                # Rechercher l'URL dans l'attribut href
-                match = re.search(r"<a href='(.*?)'", html_content)
+                        # Rechercher l'URL dans l'attribut href
+                        match = re.search(r"<a href='(.*?)'", html_content)
 
-                # Extraire et afficher l'URL si elle existe
-                if match:
-                    processed_url = match.group(1).replace("http", "https").replace("httpss", "https") + "/"
-                if validate_url_content(processed_url):
-                    current_valid_url = processed_url
-                    VSlog(f"Streamonsport URL found (site_info): {current_valid_url}")
-            except requests.RequestException as e:
+                        # Extraire et afficher l'URL si elle existe
+                        if match:
+                            processed_url = match.group(1).replace("http", "https").replace("httpss", "https") + "/"
+                        if validate_url_content(processed_url):
+                            current_valid_url = processed_url
+                            VSlog(f"Streamonsport URL found (site_info): {current_valid_url}")
+            except Exception as e:
                 VSlog(f"Error while retrieving Streamonsport URL from source_info: {e}")
                     
         # First source: fulldeals.fr
@@ -4695,7 +4696,7 @@ def get_streamonsport_url():
 
     except Exception as e:
         VSlog(f"Critical error: {str(e)}")
-        default_url = load_and_validate_default_url()
+        default_url = load_and_validate_url()
         return default_url if default_url else None
     
 def set_streamonsport_url(url):
@@ -4834,7 +4835,7 @@ def get_elitegol_url():
 
     except Exception as e:
         VSlog(f"Critical error: {str(e)}")
-        default_url = load_and_validate_default_url()
+        default_url = load_and_validate_url()
         return default_url if default_url else None
     
 def set_elitegol_url(url):
