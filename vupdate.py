@@ -4559,8 +4559,6 @@ def get_darkiworld_url():
             )
 
             if match:
-                VSlog("No URL found in a <strong> tag after the key phrase.")
-
                 url = match.group(1).strip()
                 # Enforce HTTPS if needed
                 if url.startswith('http://'):
