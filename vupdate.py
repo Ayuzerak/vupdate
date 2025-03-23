@@ -5232,9 +5232,8 @@ def create_recommendation_files_to_watch():
     )
 
 def update_streamonsport_module():
-    # Définir les nouvelles fonctions comme des chaînes multilignes
-    new_code_movies = """
-def showMovies(sSearch=''):
+    # Définir les nouvelles fonctions comme des chaînes multilignes sans nouvelles lignes initiales/finales
+    new_code_movies = """def showMovies(sSearch=''):
     oGui = cGui()
     oInputParameterHandler = cInputParameterHandler()
     sUrl = oInputParameterHandler.getValue('siteUrl')
@@ -5277,11 +5276,9 @@ def showMovies(sSearch=''):
 
             oGui.addLink(SITE_IDENTIFIER, 'showLive', sDisplayTitle, sThumb, sDisplayTitle, oOutputParameterHandler)
 
-    oGui.setEndOfDirectory()
-"""
+    oGui.setEndOfDirectory()"""
 
-    new_code_live = """
-def showLive():
+    new_code_live = """def showLive():
     oGui = cGui()
     oInputParameterHandler = cInputParameterHandler()
     sUrl = oInputParameterHandler.getValue('siteUrl')
@@ -5318,8 +5315,7 @@ def showLive():
             
             oGui.addLink(SITE_IDENTIFIER, 'showLink', sDisplayTitle, sThumb, sDesc, oOutputParameterHandler)
 
-    oGui.setEndOfDirectory()
-"""
+    oGui.setEndOfDirectory()"""
 
     # Chemin du fichier à modifier
     file_path = VSPath('special://home/addons/plugin.video.vstream/resources/sites/streamonsport.py').replace('\\', '/')
@@ -5328,7 +5324,7 @@ def showLive():
     with open(file_path, 'r', encoding='utf-8') as f:
         content = f.readlines()
 
-    # Fonction utilitaire pour remplacer une fonction
+    # Fonction utilitaire pour remplacer une fonction si nécessaire
     def replace_function(content, func_name, new_code):
         in_function = False
         start_index = None
@@ -5358,23 +5354,28 @@ def showLive():
                 end_index = len(content)
 
         if start_index is not None and end_index is not None:
-            # Supprimer les anciennes lignes
+            existing_lines = content[start_index:end_index]
+            new_code_lines = [line + '\n' for line in new_code.split('\n')]
+            if existing_lines == new_code_lines:
+                return False  # Aucun changement nécessaire
+            # Remplacer l'ancien code par le nouveau
             del content[start_index:end_index]
-            # Insérer le nouveau code
             for idx, line in enumerate(new_code.split('\n')):
                 content.insert(start_index + idx, line + '\n')
             return True
         return False
 
-    # Effectuer les remplacements
-    replace_function(content, 'showMovies', new_code_movies)
-    replace_function(content, 'showLive', new_code_live)
+    # Effectuer les remplacements seulement si nécessaires
+    updated_movies = replace_function(content, 'showMovies', new_code_movies)
+    updated_live = replace_function(content, 'showLive', new_code_live)
 
-    # Écrire le nouveau contenu
-    with open(file_path, 'w', encoding='utf-8') as f:
-        f.writelines(content)
-
-    VSlog('Streamonsport.py : Mise à jour effectuée avec succès!')
+    # Écrire le nouveau contenu seulement si des modifications ont été faites
+    if updated_movies or updated_live:
+        with open(file_path, 'w', encoding='utf-8') as f:
+            f.writelines(content)
+        VSlog('Streamonsport.py : Mise à jour effectuée avec succès!')
+    else:
+        VSlog('Streamonsport.py : Aucune mise à jour nécessaire.')
 
 # def save_watched_recommendations_to_json():
 #     oDb = cDb()
