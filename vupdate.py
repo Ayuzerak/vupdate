@@ -4595,7 +4595,7 @@ def get_streamonsport_url():
         try:
             response = requests.get(url, timeout=15)
             response_lowered = response.text.lower()
-            return "matchs" in response_lowered and "direct" in response_lowered and "nba" in response_lowered
+            return "matchs" in response_lowered and "direct" in response_lowered
         except Exception as e:
             VSlog(f"Content validation failed for {url}: {str(e)}")
             return False
@@ -4769,7 +4769,7 @@ def get_elitegol_url():
         try:
             response = requests.get(url, timeout=15)
             response_lowered = response.text.lower()
-            return "matchs" in response_lowered and "direct" in response_lowered and "nba" in response_lowered
+            return "matchs" in response_lowered and "direct" in response_lowered in response_lowered
         except Exception as e:
             VSlog(f"Content validation failed for {url}: {str(e)}")
             return False
@@ -4795,29 +4795,6 @@ def get_elitegol_url():
                     VSlog(f"Elitegol URL found (sites.json file): {current_valid_url}")
             except Exception as e:
                 VSlog(f"sites.json processing error: {str(e)}")
-
-        #0.1 source : sites.json file site_info
-        if not current_valid_url:
-            try:
-                with open(sites_json, 'r') as fichier:
-                    data = json.load(fichier)
-                if 'elitegol' in data['sites']:
-                    site_info_new_address = data['sites']['elitegol']['site_info']
-
-                response = requests.get(site_info_new_address)
-                html_content = response.text
-
-                # Rechercher l'URL dans l'attribut href
-                match = re.search(r"<a href='(.*?)'", html_content)
-
-                # Extraire et afficher l'URL si elle existe
-                if match:
-                    processed_url = match.group(1).replace("http", "https").replace("httpss", "https") + "/"
-                if validate_url_content(processed_url):
-                    current_valid_url = processed_url
-                    VSlog(f"Elitegol URL found (site_info): {current_valid_url}")
-            except requests.RequestException as e:
-                VSlog(f"Error while retrieving Elitegol URL from source_info: {e}")
         
         # Save and return if found new valid URL
         if current_valid_url:
