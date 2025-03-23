@@ -4494,8 +4494,8 @@ def set_papadustream_url(url):
         VSlog(f"Error while setting PapaDuStream URL: {e}")
 
 def get_darkiworld_url():
-    """Retrieve the Darkiworld URL from its website, ensuring 'darkiworld' is in the URL."""
-    VSlog("Retrieving Darkiworld URL from its website.")
+    """Retrieve the Darkiworld URL from its website by extracting the content of the <strong> tag."""
+    VSlog("Fetching Darkiworld URL...")
     try:
         response = requests.get(
             "https://top-infos.com/darkino-nouvelle-adresse/",
@@ -4508,40 +4508,38 @@ def get_darkiworld_url():
             },
             timeout=10
         )
-        response.raise_for_status()  # Check for HTTP errors
+        response.raise_for_status()
 
         content = response.text
-        target_phrase = "adresse actuelle de Darkino est"
-        target_position = content.find(target_phrase)
-        
-        if target_position == -1:
-            VSlog(f"Target phrase '{target_phrase}' not found.")
+        target_phrase = "L’adresse actuelle de Darkino est"
+        pos = content.find(target_phrase)
+
+        if pos == -1:
+            VSlog(f"Key phrase '{target_phrase}' not found.")
             return None
-        
-        content_after_target = content[target_position:]
-        # Extract all href URLs in the narrowed-down content
-        web_addresses = re.findall(r'href="(https?://[^"]+)"', content_after_target)
-        
-        # Filter URLs containing 'darkiworld' (case-insensitive)
-        darkiworld_urls = [
-            url.strip() for url in web_addresses 
-            if "darkiworld" in url.lower()
-        ]
-        
-        if not darkiworld_urls:
-            VSlog("No URLs containing 'darkiworld' found after the target phrase.")
+
+        # Look for the <strong> tag immediately after the target phrase
+        remaining_content = content[pos:]
+        match = re.search(
+            r'<strong[^>]*>\s*(https?://[^\s<]+)\s*</strong>',
+            remaining_content,
+            re.IGNORECASE
+        )
+
+        if not match:
+            VSlog("No URL found in a <strong> tag after the key phrase.")
             return None
-        
-        # Select the first valid URL and enforce HTTPS
-        url = darkiworld_urls[0]
+
+        url = match.group(1).strip()
+        # Enforce HTTPS if needed
         if url.startswith('http://'):
             url = url.replace('http://', 'https://', 1)
-        
-        VSlog(f"Valid Darkiworld URL found: {url}")
+
+        VSlog(f"URL found: {url}")
         return url
-        
+
     except requests.RequestException as e:
-        VSlog(f"Network error retrieving Darkiworld URL: {e}")
+        VSlog(f"Network error: {e}")
         return None
     except Exception as e:
         VSlog(f"Unexpected error: {e}")
