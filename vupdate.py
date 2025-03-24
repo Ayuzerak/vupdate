@@ -36,6 +36,9 @@ import tokenize
 import symtable
 import xml.etree.ElementTree as ET
 
+from requests.adapters import HTTPAdapter
+from urllib3.util.retry import Retry
+
 from requests.exceptions import RequestException, SSLError
 from resources.lib import logger
 from resources.lib.logger import VSlog, VSPath
@@ -3953,20 +3956,59 @@ def cloudflare_protected(url):
         return False
 
 def is_using_cloudflare(url):
-    """Check if a URL uses Cloudflare based on HTTP headers."""
+    """Check if a URL uses Cloudflare with improved network handling."""
     VSlog(f"Checking Cloudflare headers for {url}.")
+    
+    # Configure retry strategy
+    retries = Retry(
+        total=3,
+        backoff_factor=1,
+        status_forcelist=[500, 502, 503, 504],
+        allowed_methods=['GET']
+    )
+    
+    # Configure headers to mimic browser request
+    headers = {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8'
+    }
+
     try:
-        response = requests.get(url)
-        headers = response.headers
-        cloudflare_headers = ['server', 'cf-ray', 'cf-cache-status', 'cf-request-id']
-        for header in cloudflare_headers:
-            if header in headers and 'cloudflare' in headers[header].lower():
-                VSlog(f"Cloudflare header detected: {header}={headers[header]}.")
+        with requests.Session() as session:
+            # Mount retry adapter for HTTPS
+            session.mount('https://', HTTPAdapter(max_retries=retries))
+            
+            response = session.get(
+                url,
+                headers=headers,
+                timeout=10,
+                verify=True  # Keep SSL verification but add exception handling
+            )
+            
+            headers = response.headers
+            cloudflare_headers = ['cf-ray', 'cf-cache-status', 'cf-request-id']
+            
+            # Check for CF-specific headers
+            for header in cloudflare_headers:
+                if header in headers:
+                    VSlog(f"Cloudflare header detected: {header}={headers[header]}.")
+                    return True
+
+            # Check server header
+            if 'cloudflare' in headers.get('server', '').lower():
+                VSlog("Cloudflare server header detected.")
                 return True
-        VSlog(f"No Cloudflare headers detected for {url}.")
-        return False
+
+            VSlog(f"No Cloudflare headers detected for {url}.")
+            return False
+
     except requests.RequestException as e:
-        VSlog(f"Error while checking headers for {url}: {e}")
+        VSlog(f"Connection error for {url}: {str(e)}")
+        # Additional SSL error handling
+        if 'SSLError' in str(e):
+            VSlog("SSL/TLS handshake failed. Consider certificate pinning.")
+        elif 'NewConnectionError' in str(e):
+            VSlog("Network layer failure. Check DNS/firewall settings.")
         return False
 
 def set_wiflix_url(url):
