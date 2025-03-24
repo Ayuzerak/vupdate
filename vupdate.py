@@ -2916,30 +2916,45 @@ def safe_regex_pattern(regex_pattern):
         VSlog(f"Unexpected error: {e}")
         return regex_pattern
 
+def _regex_task(regex, sample):
+    """Top-level helper function for regex processing (must be picklable for multiprocessing)."""
+    try:
+        if resource is not None:
+            set_resource_limits()
+        return re.compile(regex).findall(sample)
+    except Exception as e:
+        VSlog(f"Error in safe_findall task: {e}")
+        return None
+
 def safe_findall(regex, sample, timeout=DEFAULT_TIMEOUT):
     """
-    Runs re.findall() in a separate thread with a timeout to avoid hangs.
-    Truncates the input sample if it exceeds MAX_INPUT_LENGTH.
+    Runs re.findall() with OS-specific isolation:
+    - Uses processes on Android/Unix to avoid threading limits.
+    - Uses threads on Windows for compatibility.
     """
     if len(sample) > MAX_INPUT_LENGTH:
         sample = sample[:MAX_INPUT_LENGTH]
+        VSlog(f"Truncated input sample to {MAX_INPUT_LENGTH} characters")
 
-    def task():
-        try:
-            if resource is not None:
-                set_resource_limits()
-            return re.compile(regex).findall(sample)
-        except Exception as e:
-            VSlog(f"Error in safe_findall task: {e}")
-            return None
+    # OS-Specific Execution Strategy
+    if sys.platform == "win32":
+        executor_class = concurrent.futures.ThreadPoolExecutor  # Threads on Windows
+    else:
+        executor_class = concurrent.futures.ProcessPoolExecutor  # Processes on Unix/Android
 
-    with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
-        future = executor.submit(task)
-        try:
-            return future.result(timeout=timeout)
-        except concurrent.futures.TimeoutError:
-            VSlog(f"Timeout occurred for regex: {regex} on sample: {sample}")
-            return None
+    try:
+        with executor_class(max_workers=1) as executor:
+            future = executor.submit(_regex_task, regex, sample)
+            try:
+                return future.result(timeout=timeout)
+            except concurrent.futures.TimeoutError:
+                VSlog(f"Timeout for regex: {regex} on sample: {sample[:50]}...")
+                return None
+            finally:
+                future.cancel()  # Cleanup
+    except Exception as e:
+        VSlog(f"Error in executor: {e}")
+        return None
 
 def test_equivalence(original, transformed, samples=None, max_dynamic_samples=20):
     """
