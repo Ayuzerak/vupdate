@@ -56,10 +56,20 @@ from functools import lru_cache
 
 from resources.lib.unparser import Unparser
 
+import socket
+import ipaddress
+import json
+import threading
+from urllib.request import urlopen
+import time
+import sys
+
+VSlog = print  # Replace with your actual logging implementation
+
 # Global configuration
 CACHE_TTL = 300  # 5 minutes
-BYPASS_DOMAINS = {'dns.google', '8.8.8.8', '1.1.1.1'}  # Critical infrastructure domains
-PUBLIC_DNS_SERVERS = ['8.8.8.8', '1.1.1.1']  # Google and Cloudflare DNS
+BYPASS_DOMAINS = {'dns.google', '8.8.8.8', '1.1.1.1'}
+PUBLIC_DNS_SERVERS = ['8.8.8.8', '1.1.1.1']
 
 # Thread-safe resources
 _resolution_lock = threading.Lock()
@@ -71,148 +81,143 @@ _cache_lock = threading.Lock()
 try:
     import dns.resolver
     DNS_MODULE_AVAILABLE = True
-    VSlog("[DNS] dnspython module loaded successfully")
 except ImportError:
-    VSlog("[DNS] dnspython module not found, attempting installation...")
+    DNS_MODULE_AVAILABLE = False
     try:
         import subprocess
         subprocess.check_call([sys.executable, "-m", "pip", "install", "dnspython"])
         import dns.resolver
         DNS_MODULE_AVAILABLE = True
-        VSlog("[DNS] dnspython installed successfully")
-    except Exception as e:
-        DNS_MODULE_AVAILABLE = False
-        VSlog(f"[DNS] Failed to install dnspython: {e}")
+    except Exception:
+        pass
 
-# Save original socket implementation
 original_getaddrinfo = socket.getaddrinfo
 
 def is_valid_ip(ip_str):
     """Check if the IP is valid (not loopback, multicast, etc.)."""
     try:
         ip = ipaddress.ip_address(ip_str)
-        checks = {
-            'loopback': ip.is_loopback,
-            'multicast': ip.is_multicast,
-            'reserved': ip.is_reserved
-        }
-        if any(checks.values()):
-            VSlog(f"[VALIDATION] Rejected IP {ip_str} - failed checks: {checks}")
-            return False
-        return True
+        return not any([ip.is_loopback, ip.is_multicast, ip.is_reserved])
     except ValueError:
         return False
 
 def resolve_with_public_dns(hostname, family):
-    """Resolve using public DNS servers with recursion prevention."""
+    """Resolve using public DNS servers with source tracking."""
     if not DNS_MODULE_AVAILABLE:
-        return None
+        return None, 'public-dns-unavailable'
 
-    record_type = 'A' if family == socket.AF_INET else 'AAAA' if family == socket.AF_INET6 else None
-    if not record_type:
-        return None
-
+    record_type = 'A' if family == socket.AF_INET else 'AAAA'
     try:
         resolver = dns.resolver.Resolver()
         resolver.nameservers = PUBLIC_DNS_SERVERS
+        VSlog(f"[RESOLVER] Trying public DNS ({PUBLIC_DNS_SERVERS}) for {hostname}")
         answers = resolver.resolve(hostname, record_type, lifetime=5)
         for answer in answers:
             ip = answer.address
             if is_valid_ip(ip):
-                return ip
-    except dns.resolver.NXDOMAIN:
-        VSlog(f"[PUBDNS] NXDOMAIN for {hostname}")
-    except dns.resolver.Timeout:
-        VSlog(f"[PUBDNS] Timeout resolving {hostname}")
+                VSlog(f"[RESOLVER] Public DNS resolved {hostname} to {ip}")
+                return ip, 'public-dns'
+        return None, 'public-dns-no-valid-ip'
     except Exception as e:
-        VSlog(f"[PUBDNS] Error resolving {hostname}: {e}")
-    return None
+        VSlog(f"[RESOLVER] Public DNS failed for {hostname}: {str(e)}")
+        return None, 'public-dns-error'
 
 def resolve_with_doh(hostname, family):
-    """Resolve using DNS-over-HTTPS with bypass protection."""
+    """Resolve using DNS-over-HTTPS with source tracking."""
     record_type = 'A' if family == socket.AF_INET else 'AAAA'
     doh_url = f"https://dns.google/resolve?name={hostname}&type={record_type}"
-    
     try:
+        VSlog(f"[RESOLVER] Trying DoH resolution for {hostname}")
         response = urlopen(doh_url, timeout=10)
         data = json.loads(response.read())
         for answer in data.get('Answer', []):
             if answer.get('type') == (1 if record_type == 'A' else 28):
                 ip = answer.get('data', '')
                 if is_valid_ip(ip):
-                    return ip
+                    VSlog(f"[RESOLVER] DoH resolved {hostname} to {ip}")
+                    return ip, 'doh'
+        return None, 'doh-no-valid-ip'
     except Exception as e:
-        VSlog(f"[DOH] Failed to resolve {hostname}: {e}")
-    return None
+        VSlog(f"[RESOLVER] DoH failed for {hostname}: {str(e)}")
+        return None, 'doh-error'
 
 def resolve_hostname(hostname, family):
-    """Main resolution logic with caching and fallback handling."""
+    """Main resolution logic with source tracking."""
     # Cache check
     with _cache_lock:
         cached = _dns_cache.get((hostname, family))
         if cached and (time.time() - cached['timestamp']) < CACHE_TTL:
-            VSlog(f"[CACHE] Returning cached result for {hostname}")
-            return cached['ip']
+            VSlog(f"[CACHE] Cache hit for {hostname} from {cached['source']}")
+            return cached['ip'], cached['source']
 
     result = None
+    source = 'unresolved'
+    
     try:
         # System DNS resolution
+        VSlog(f"[RESOLVER] Trying system DNS for {hostname}")
         addr_info = original_getaddrinfo(hostname, 0, family, socket.SOCK_STREAM)
         system_ips = [info[4][0] for info in addr_info]
-        result = next((ip for ip in system_ips if is_valid_ip(ip)), None)
+        valid_ips = [ip for ip in system_ips if is_valid_ip(ip)]
         
+        if valid_ips:
+            result = valid_ips[0]
+            source = 'system-dns'
+            VSlog(f"[RESOLVER] System DNS resolved {hostname} to {result}")
+
         # Public DNS fallback
         if not result and DNS_MODULE_AVAILABLE:
-            result = resolve_with_public_dns(hostname, family)
+            result, source = resolve_with_public_dns(hostname, family)
             
         # DoH final fallback
         if not result:
-            result = resolve_with_doh(hostname, family)
+            result, source = resolve_with_doh(hostname, family)
             
-    except (socket.gaierror, socket.herror):
-        pass
+    except (socket.gaierror, socket.herror) as e:
+        VSlog(f"[RESOLVER] System DNS failed for {hostname}: {str(e)}")
+        source = 'system-dns-error'
     except Exception as e:
-        VSlog(f"[RESOLVER] Unexpected error: {e}")
+        VSlog(f"[RESOLVER] Unexpected error resolving {hostname}: {str(e)}")
+        source = 'resolution-error'
 
     # Update cache
     if result:
         with _cache_lock:
             _dns_cache[(hostname, family)] = {
                 'ip': result,
+                'source': source,
                 'timestamp': time.time()
             }
-    return result
+    return result, source
 
 def patched_getaddrinfo(host, port, family=0, type=0, proto=0, flags=0):
-    """Monkey-patched getaddrinfo with recursion prevention."""
-    # Bypass critical domains
+    """Monkey-patched getaddrinfo with resolver verification."""
     if host in BYPASS_DOMAINS:
-        VSlog(f"[PATCH] Bypassing resolution for critical domain: {host}")
+        VSlog(f"[RESOLVER] Bypassing resolution for critical domain: {host}")
         return original_getaddrinfo(host, port, family, type, proto, flags)
 
-    # Recursion prevention
     with _resolution_lock:
         if host in _ongoing_resolutions:
-            VSlog(f"[PATCH] Recursion detected for {host}, using system resolver")
             return original_getaddrinfo(host, port, family, type, proto, flags)
         _ongoing_resolutions.add(host)
 
     try:
-        # IP validation check
         if is_valid_ip(host):
             return original_getaddrinfo(host, port, family, type, proto, flags)
 
-        # Family handling
-        resolved_ip = None
+        resolved_ip, source = None, 'unresolved'
         families = [socket.AF_INET, socket.AF_INET6] if family == 0 else [family]
+        
         for fam in families:
-            resolved_ip = resolve_hostname(host, fam)
+            resolved_ip, source = resolve_hostname(host, fam)
             if resolved_ip:
                 break
 
         if resolved_ip:
+            VSlog(f"[RESOLVER] Final resolution for {host} using {source} → {resolved_ip}")
             return original_getaddrinfo(resolved_ip, port, family, type, proto, flags)
         
+        VSlog(f"[RESOLVER] All resolution methods failed for {host}")
         return original_getaddrinfo(host, port, family, type, proto, flags)
     
     finally:
@@ -221,7 +226,7 @@ def patched_getaddrinfo(host, port, family=0, type=0, proto=0, flags=0):
 
 # Apply the patch
 socket.getaddrinfo = patched_getaddrinfo
-VSlog("[PATCH] DNS resolution patch applied successfully")
+VSlog("[SYSTEM] DNS resolution patch applied with resolver verification")
 
 def insert_update_service_addon():
     """
