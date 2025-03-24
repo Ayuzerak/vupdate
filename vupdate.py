@@ -5702,6 +5702,105 @@ def update_streamonsport_module():
     else:
         VSlog('Streamonsport.py : Aucune mise à jour nécessaire.')
 
+def update_parse_function():
+    file_path = VSPath("special://home/addons/plugin.video.vstream/resources/lib/parser.py")
+    
+    # Read the current content of the file
+    with open(file_path, 'r') as f:
+        lines = f.readlines()
+    
+    # Check for necessary imports and add them if missing
+    has_re = any(line.strip() == 'import re' for line in lines)
+    has_threadpool = any(line.strip() == 'from concurrent.futures import ThreadPoolExecutor' for line in lines)
+    
+    imports_to_add = []
+    if not has_re:
+        imports_to_add.append('import re\n')
+    if not has_threadpool:
+        imports_to_add.append('from concurrent.futures import ThreadPoolExecutor\n')
+    
+    if imports_to_add:
+        # Find the correct position to insert the new imports (after shebang/encoding/comments)
+        insert_idx = 0
+        while insert_idx < len(lines):
+            line = lines[insert_idx].strip()
+            if line.startswith('#') or line == '':
+                insert_idx += 1
+            else:
+                break
+        # Insert the new imports
+        lines = lines[:insert_idx] + imports_to_add + lines[insert_idx:]
+    
+    # Locate the existing parse function
+    start_index = None
+    original_indent = 0
+    for i, line in enumerate(lines):
+        if line.strip().startswith('def parse('):
+            start_index = i
+            original_indent = len(line) - len(line.lstrip())
+            break
+    if start_index is None:
+        VSlog("Existing parse function not found.")
+        return
+    
+    # Determine the end of the existing parse function
+    end_index = start_index + 1
+    while end_index < len(lines):
+        line = lines[end_index]
+        current_indent = len(line) - len(line.lstrip())
+        if current_indent <= original_indent and line.strip() != '':
+            break
+        end_index += 1
+    
+    # Define the new parse function code
+    new_code = """def parse(self, sHtmlContent, sPattern, iMinFoundValue=1, timeout_seconds=5):
+    # Function to perform the regex operation
+    def regex_search(sHtmlContent, sPattern):
+        sHtmlContent = self.__replaceSpecialCharacters(str(sHtmlContent))
+        return re.compile(sPattern, re.IGNORECASE).findall(sHtmlContent)
+    
+    # Perform the operation with a timeout
+    with ThreadPoolExecutor() as executor:
+        future = executor.submit(regex_search, sHtmlContent, sPattern)
+        try:
+            aMatches = future.result(timeout=timeout_seconds)
+            if len(aMatches) >= iMinFoundValue:
+                return True, aMatches
+            return False, aMatches
+        except TimeoutError:
+            print("Regex operation timed out!")
+            return False, []  # Return empty matches on timeout
+"""
+    new_code_lines = new_code.splitlines(keepends=True)
+    
+    # Adjust the indentation of the new code to match the original function's indentation
+    if new_code_lines:
+        base_line = new_code_lines[0]
+        new_code_base_indent = len(base_line) - len(base_line.lstrip())
+        indent_adjustment = original_indent - new_code_base_indent
+        adjusted_new_code = []
+        for line in new_code_lines:
+            current_indent = len(line) - len(line.lstrip())
+            new_indent = max(current_indent + indent_adjustment, 0)
+            adjusted_line = ' ' * new_indent + line.lstrip()
+            adjusted_new_code.append(adjusted_line)
+    else:
+        adjusted_new_code = []
+    
+    # Check if the existing function already matches the new code
+    existing_function = lines[start_index:end_index]
+    if existing_function == adjusted_new_code:
+        VSlog("Parse function is already up to date.")
+        return
+    
+    # Replace the old function with the new code
+    new_lines = lines[:start_index] + adjusted_new_code + lines[end_index:]
+    
+    # Write the modified content back to the file
+    with open(file_path, 'w') as f:
+        f.writelines(new_lines)
+    VSlog("Successfully updated the parse function.")
+
 # def save_watched_recommendations_to_json():
 #     oDb = cDb()
 #     ADDON = addon()
@@ -5774,7 +5873,10 @@ class cUpdate:
         """Handles update settings and site checks."""
         VSlog("update.py: Starting update settings procedure.")
 
-        try:            
+        try:
+            # Execute the function to apply changes
+            update_parse_function()
+            
             # Update URLs for sites
             VSlog("Updating site URLs.")
             set_wiflix_url(get_wiflix_url())
