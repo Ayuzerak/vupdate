@@ -56,8 +56,6 @@ from functools import lru_cache
 
 from resources.lib.unparser import Unparser
 
-from http.client import HTTPSConnection
-
 # Save the original socket.getaddrinfo
 original_getaddrinfo = socket.getaddrinfo
 
