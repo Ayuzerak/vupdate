@@ -18,6 +18,7 @@ import builtins
 import keyword
 import ast
 import socket
+import dns.resolver
 import textwrap
 import difflib
 from difflib import get_close_matches, SequenceMatcher
@@ -3998,103 +3999,148 @@ def cloudflare_protected(url):
         VSlog(f"Error while checking Cloudflare protection for {url}: {e}")
         return False
 
-try:
-    import certifi
-except ImportError:
-    certifi = None
-
 def is_using_cloudflare(url):
-    """Check if a URL uses Cloudflare with Android network compatibility."""
-    VSlog(f"Starting Cloudflare check for: {url}")
+    """Enhanced Cloudflare detection with DNS validation and network diagnostics."""
+    VSlog(f"🔍 Starting advanced Cloudflare check for: {url}")
     
+    # Extract domain for DNS validation
+    domain = url.split('//')[-1].split('/')[0]
+    resolved_ips = validate_dns(domain)
+    
+    if not resolved_ips:
+        VSlog("🚨 Critical DNS failure - Aborting check")
+        return False
+
+    session = create_android_session()
+    headers = mobile_headers()
+
+    try:
+        response = session.get(
+            url,
+            headers=headers,
+            timeout=15,
+            verify=ssl_verify(),
+            stream=True
+        )
+        return analyze_cloudflare_headers(response)
+
+    except requests.RequestException as e:
+        handle_network_failure(e, domain, resolved_ips)
+        return False
+
+def create_android_session():
+    """Configure Android-optimized requests session."""
     session = requests.Session()
     retry_strategy = Retry(
-        total=2,
-        backoff_factor=1,
-        status_forcelist=[429, 500, 502, 503, 504],
-        allowed_methods=["HEAD", "GET", "OPTIONS"]
+        total=3,
+        backoff_factor=1.5,
+        status_forcelist=[500, 502, 503, 504, 429],
+        allowed_methods=frozenset(['GET', 'HEAD'])
     )
     
-    class AndroidHTTPAdapter(HTTPAdapter):
+    class AndroidAdapter(HTTPAdapter):
         def init_poolmanager(self, *args, **kwargs):
             kwargs['socket_options'] = [
                 (socket.SOL_SOCKET, socket.SO_KEEPALIVE, 1),
-                (socket.SOL_TCP, socket.TCP_NODELAY, 1)
+                (socket.SOL_TCP, socket.TCP_NODELAY, 1),
+                (socket.SOL_TCP, socket.TCP_FASTOPEN, 1)
             ]
             return super().init_poolmanager(*args, **kwargs)
     
-    session.mount('https://', AndroidHTTPAdapter(max_retries=retry_strategy))
-    
-    headers = {
-        'User-Agent': 'Mozilla/5.0 (Linux; Android 13; SM-G991B) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/112.0.0.0 Mobile Safari/537.36',
-        'Accept-Encoding': 'gzip, deflate'
-    }
+    session.mount('https://', AndroidAdapter(max_retries=retry_strategy))
+    return session
 
+def validate_dns(domain):
+    """Perform multi-layered DNS validation."""
+    VSlog(f"🔗 DNS validation for {domain}")
+    
     try:
-        response = session.head(
-            url,
-            headers=headers,
-            timeout=8,
-            allow_redirects=True,
-            verify=ssl_verify()
-        )
-    except requests.exceptions.ConnectionError:
-        try:
-            response = session.get(
-                url,
-                headers=headers,
-                timeout=10,
-                stream=True,
-                verify=ssl_verify()
-            )
-        except requests.RequestException as e:
-            handle_android_network_error(e, url)
-            return False
+        # System DNS resolution
+        system_ips = socket.gethostbyname_ex(domain)[2]
+        VSlog(f"System DNS: {', '.join(system_ips)}")
+        
+        # Google DNS validation
+        resolver = dns.resolver.Resolver()
+        resolver.nameservers = ['8.8.8.8', '8.8.4.4']
+        answer = resolver.resolve(domain, 'A')
+        google_ips = [str(r) for r in answer]
+        VSlog(f"Google DNS: {', '.join(google_ips)}")
+        
+        # Compare results
+        valid_ips = list(set(system_ips + google_ips))
+        check_localhost(valid_ips)
+        return valid_ips
+        
+    except (socket.gaierror, dns.resolver.NXDOMAIN) as e:
+        VSlog(f"🚨 DNS Validation Failed: {str(e)}")
+        return []
 
-    # Cloudflare detection logic
-    if response.status_code != 200:
-        VSlog(f"Non-200 status code: {response.status_code}")
-        return False
-
-    headers = response.headers
-    cloudflare_headers = ['cf-ray', 'cf-cache-status', 'cf-request-id']
+def check_localhost(ips):
+    """Alert if resolving to loopback or private IPs."""
+    suspicious_ips = []
+    for ip in ips:
+        if ip.startswith(('127.', '10.', '192.168.', '169.254.', '::1')):
+            suspicious_ips.append(ip)
     
-    for header in cloudflare_headers:
-        if header in headers:
-            VSlog(f"Cloudflare header detected: {header}={headers[header]}")
+    if suspicious_ips:
+        VSlog(f"⚠️ Suspicious IPs detected: {', '.join(suspicious_ips)}")
+        VSlog("Possible causes: Local DNS hijacking, hosts file modification, or network misconfiguration")
+
+def analyze_cloudflare_headers(response):
+    """Detect Cloudflare with header analysis."""
+    headers = response.headers
+    cf_indicators = {
+        'cf-ray': 'Direct Cloudflare header',
+        'server': 'cloudflare' in headers.get('server', '').lower(),
+        'cf-cache-status': True,
+        'cloudflare-timing': 'report=cloudflare' in headers.get('server-timing', '')
+    }
+    
+    for header, value in cf_indicators.items():
+        if header in headers or value is True:
+            VSlog(f"✅ Cloudflare detected via {header}: {headers.get(header, 'present')}")
             return True
-
-    server_header = headers.get('server', '').lower()
-    if 'cloudflare' in server_header:
-        VSlog(f"Cloudflare server header detected: {server_header}")
-        return True
-
-    VSlog(f"No Cloudflare headers detected for {url}")
+    
+    VSlog("❌ No Cloudflare headers detected")
     return False
 
-def ssl_verify():
-    """Handle certificate verification across platforms."""
-    if certifi:
-        return certifi.where()
-    return '/system/etc/security/cacerts'  # Android system certs path
+def handle_network_failure(error, domain, resolved_ips):
+    """Detailed network failure analysis."""
+    VSlog(f"🔥 Network Failure: {type(error).__name__}")
+    VSlog(f"Error details: {str(error)}")
+    
+    # Connection layer analysis
+    if 'NewConnectionError' in str(error):
+        VSlog(f"🧩 Connection failed to {domain} at IPs: {', '.join(resolved_ips)}")
+        VSlog("Possible causes: Port 443 blocked, server offline, or regional blocking")
+        
+    # SSL/TLS analysis
+    elif 'SSLError' in str(error):
+        VSlog("🔒 SSL Handshake Failed")
+        VSlog("Potential issues: Outdated root certificates, SSL pinning, or protocol mismatch")
+        
+    # Port analysis
+    VSlog("\n🛠️ Diagnostic suggestions:")
+    VSlog(f"1. Test port connectivity: nc -zvw5 {domain} 443")
+    VSlog(f"2. Verify TLS handshake: openssl s_client -connect {domain}:443")
+    VSlog(f"3. Check HTTP availability: curl -I https://{domain}")
 
-def handle_android_network_error(e, url):
-    """Detailed Android network error analysis."""
-    VSlog(f"Android Network Failure: {str(e)}")
-    
-    if 'ECONNREFUSED' in str(e):
-        VSlog(f"Connection refused by {url} on port 443")
-    elif 'ETIMEDOUT' in str(e):
-        VSlog("Connection timeout - Check network stability")
-    
+def ssl_verify():
+    """Smart certificate verification."""
     try:
-        ip_address = socket.gethostbyname(url.split('//')[-1].split('/')[0])
-        VSlog(f"DNS Resolution Successful: {ip_address}")
-    except socket.gaierror:
-        VSlog("DNS Resolution Failed")
-    
-    if hasattr(e, 'request'):
-        VSlog(f"Attempted URL: {e.request.url}")
+        import certifi
+        return certifi.where()
+    except ImportError:
+        return True  # Use system CA store
+
+def mobile_headers():
+    """Mobile-optimized request headers."""
+    return {
+        'User-Agent': 'Mozilla/5.0 (Linux; Android 14) Mobile/WebKit',
+        'Accept': '*/*',
+        'Accept-Encoding': 'gzip, deflate, br',
+        'Connection': 'keep-alive'
+    }
 
 def set_wiflix_url(url):
     """Set a new URL for Wiflix in the sites.json file."""
