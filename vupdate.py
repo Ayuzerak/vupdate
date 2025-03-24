@@ -61,25 +61,6 @@ from http.client import HTTPSConnection
 # Save the original socket.getaddrinfo
 original_getaddrinfo = socket.getaddrinfo
 
-def resolve_doh(host):
-    # Query Cloudflare's DNS-over-HTTPS API
-    url = f"https://cloudflare-dns.com/dns-query?name={host}&type=A"
-    with urlopen(url, headers={"Accept": "application/dns-json"}) as response:
-        data = json.load(response)
-        return [answer["data"] for answer in data.get("Answer", []) if answer["type"] == 1]
-
-def custom_getaddrinfo(host, port, family=0, type=0, proto=0, flags=0):
-    try:
-        ips = resolve_doh(host)
-        if not ips:
-            raise socket.gaierror(f"Could not resolve {host}")
-        return [(socket.AF_INET, socket.SOCK_STREAM, 6, '', (ip, port)) for ip in ips]
-    except Exception:
-        return original_getaddrinfo(host, port, family, type, proto, flags)
-
-# Patch the socket module
-socket.getaddrinfo = custom_getaddrinfo
-
 def insert_update_service_addon():
     """
     Opens the file at
