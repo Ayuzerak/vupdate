@@ -18,7 +18,6 @@ import builtins
 import keyword
 import ast
 import socket
-import platform
 import textwrap
 import difflib
 from difflib import get_close_matches, SequenceMatcher
@@ -30,7 +29,7 @@ import pickle
 from typing import List, Optional, Dict, Set, Deque, Tuple, Union
 import glob
 import concurrent.futures
-from concurrent.futures import ThreadPoolExecutor, ProcessPoolExecutor, TimeoutError as FutureTimeoutError
+from concurrent.futures import ProcessPoolExecutor, TimeoutError as FutureTimeoutError
 import threading
 import tokenize
 import symtable
@@ -2788,24 +2787,16 @@ def modify_showEpisodes(file_path):
     with open(file_path, 'w') as file:
         file.writelines(corrected_lines)
         
-# Configuration constants (adjust based on platform)
-MAX_REPETITION_BOUND = 100
-DEFAULT_TIMEOUT = 1.5  # Increased timeout for cross-platform stability
-MAX_INPUT_LENGTH = 5000
-PLATFORM = platform.system()
+# Try to import the resource module (works on Unix-like systems)
+try:
+    import resource
+except ImportError:
+    resource = None
 
-# Resource configuration
-if PLATFORM == 'Windows':
-    # Adjust Windows thread pool parameters
-    ThreadPoolExecutor._max_workers = min(32, (os.cpu_count() or 1) + 4)
-    VSlog(f"Configured Windows thread pool with {ThreadPoolExecutor._max_workers} workers")
-    resource = None  # Resource module not available on Windows
-else:
-    try:
-        import resource
-        set_resource_limits()
-    except ImportError:
-        resource = None
+# Configuration constants
+MAX_REPETITION_BOUND = 100
+DEFAULT_TIMEOUT = 0.5
+MAX_INPUT_LENGTH = 10000  # Maximum length of input sample strings
 
 # Configuration for whitelist/blacklist constructs
 BLACKLIST_REGEX_CONSTRUCTS = [
@@ -2924,62 +2915,30 @@ def safe_regex_pattern(regex_pattern):
         VSlog(f"Unexpected error: {e}")
         return regex_pattern
 
-######################################
-# Platform-Specific Execution Engines
-######################################
+def safe_findall(regex, sample, timeout=DEFAULT_TIMEOUT):
+    """
+    Runs re.findall() in a separate thread with a timeout to avoid hangs.
+    Truncates the input sample if it exceeds MAX_INPUT_LENGTH.
+    """
+    if len(sample) > MAX_INPUT_LENGTH:
+        sample = sample[:MAX_INPUT_LENGTH]
 
-def _windows_thread_task(regex_pattern, sample):
-    """Thread-based execution for Windows with simplified limits"""
-    try:
-        if len(sample) > MAX_INPUT_LENGTH:
-            sample = sample[:MAX_INPUT_LENGTH]
-            VSlog(f"Input truncated to {MAX_INPUT_LENGTH} chars")
-        
-        return re.compile(regex_pattern).findall(sample)
-    except Exception as e:
-        VSlog(f"Thread task failed: {str(e)}")
-        return None
+    def task():
+        try:
+            if resource is not None:
+                set_resource_limits()
+            return re.compile(regex).findall(sample)
+        except Exception as e:
+            VSlog(f"Error in safe_findall task: {e}")
+            return None
 
-def _unix_subprocess_task(serialized_data):
-    """Subprocess execution with resource limits for Unix-like systems"""
-    try:
-        regex_pattern, sample = pickle.loads(serialized_data)
-        
-        if resource:
-            # Set stricter limits for subprocesses
-            resource.setrlimit(resource.RLIMIT_CPU, (2, 2))
-            resource.setrlimit(resource.RLIMIT_AS, (150 * 1024 * 1024, 150 * 1024 * 1024))
-
-        if len(sample) > MAX_INPUT_LENGTH:
-            sample = sample[:MAX_INPUT_LENGTH]
-        
-        return re.compile(regex_pattern).findall(sample)
-    except Exception as e:
-        VSlog(f"Subprocess failed: {str(e)}")
-        return None
-
-######################################
-# Unified Safe Execution Interface
-######################################
-
-def safe_findall(regex_pattern, sample, timeout=DEFAULT_TIMEOUT):
-    """Platform-optimized regex execution with safety controls"""
-    try:
-        if PLATFORM == 'Windows':
-            with ThreadPoolExecutor(max_workers=1) as executor:
-                future = executor.submit(_windows_thread_task, regex_pattern, sample)
-                return future.result(timeout=timeout)
-        else:
-            with ProcessPoolExecutor(max_workers=1) as executor:
-                serialized = pickle.dumps((regex_pattern, sample))
-                future = executor.submit(_unix_subprocess_task, serialized)
-                return future.result(timeout=timeout)
-    except FutureTimeoutError:
-        VSlog(f"Execution timeout for pattern: {regex_pattern[:50]}")
-        return None
-    except Exception as e:
-        VSlog(f"Execution failed: {str(e)}")
-        return None
+    with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
+        future = executor.submit(task)
+        try:
+            return future.result(timeout=timeout)
+        except concurrent.futures.TimeoutError:
+            VSlog(f"Timeout occurred for regex: {regex} on sample: {sample}")
+            return None
 
 def test_equivalence(original, transformed, samples=None, max_dynamic_samples=20):
     """
