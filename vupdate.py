@@ -56,16 +56,6 @@ from functools import lru_cache
 
 from resources.lib.unparser import Unparser
 
-import socket
-import ipaddress
-import json
-import threading
-from urllib.request import urlopen
-import time
-import sys
-
-VSlog = print  # Replace with your actual logging implementation
-
 # Global configuration
 CACHE_TTL = 300  # 5 minutes
 BYPASS_DOMAINS = {'dns.google', '8.8.8.8', '1.1.1.1'}
