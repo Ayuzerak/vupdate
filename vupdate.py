@@ -3935,52 +3935,186 @@ def add_codeblock_after_block(file_path, block_header, codeblock, insert_after_l
     except Exception as e:
         VSlog(f"Error while modifying file '{file_path}': {str(e)}")
 
-def ping_server(server: str, timeout=10, retries=1, backoff_factor=2, verify_ssl=True):
-    """
-    Ping server to check if it's reachable, with retry mechanism and optional SSL verification.
+# Conditional DNS module import
+try:
+    import dns.resolver
+    DNS_MODULE_AVAILABLE = True
+except ImportError:
+    DNS_MODULE_AVAILABLE = False
 
-    Args:
-        server (str): Server URL to ping.
-        timeout (int): Timeout for each request in seconds.
-        retries (int): Number of retry attempts on failure.
-        backoff_factor (int): Exponential backoff multiplier for retry delays.
-        verify_ssl (bool): Whether to verify SSL certificates. Default is True.
-        
-    Returns:
-        bool: True if the server is reachable, False otherwise.
-    """
+def is_valid_ip(ip):
+    """Check if IP is valid and not localhost"""
+    invalid_ips = ['127.0.0.1', '0.0.0.0', '::']
+    return ip not in invalid_ips and any(
+        family in (socket.AF_INET, socket.AF_INET6)
+        for family in (socket.AF_INET, socket.AF_INET6)
+        if is_ip_address(ip, family)
+    )
+
+def is_ip_address(ip, family):
+    try:
+        socket.inet_pton(family, ip)
+        return True
+    except (socket.error, ValueError):
+        return False
+
+def resolve_dns2(domain):
+    """DNS resolution with fallback strategy"""
+    # System DNS resolution
+    try:
+        system_ips = socket.gethostbyname_ex(domain)[2]
+        valid_system = [ip for ip in system_ips if is_valid_ip(ip)]
+        if valid_system:
+            VSlog(f"System DNS resolved to valid IPs: {valid_system}")
+            return valid_system
+    except socket.gaierror:
+        system_ips = []
+        VSlog("System DNS resolution failed")
+
+    # Custom DNS resolution
+    custom_ips = []
+    if DNS_MODULE_AVAILABLE:
+        VSlog("Attempting DNS module resolution")
+        try:
+            resolver = dns.resolver.Resolver()
+            resolver.nameservers = ['8.8.8.8', '1.1.1.1']
+            answer = resolver.resolve(domain, 'A')
+            custom_ips = [str(ip) for ip in answer]
+        except Exception as e:
+            VSlog(f"DNS module failed: {e}")
+    else:
+        VSlog("Falling back to DNS-over-HTTPS")
+        try:
+            response = requests.get(
+                f"https://cloudflare-dns.com/dns-query?name={domain}&type=A",
+                headers={'Accept': 'application/dns-json'},
+                timeout=5
+            )
+            data = response.json()
+            custom_ips = [a['data'] for a in data.get('Answer', []) if a['type'] == 1]
+        except Exception as e:
+            VSlog(f"DNS-over-HTTPS failed: {e}")
+
+    valid_custom = [ip for ip in custom_ips if is_valid_ip(ip)]
+    if valid_custom:
+        VSlog(f"Custom DNS resolved to valid IPs: {valid_custom}")
+        return valid_custom
+
+    # Final fallback to original system results
+    VSlog("Using original system DNS results as fallback")
+    return system_ips
+
+class ForcedIPAdapter(HTTPAdapter):
+    """Adapter to force specific IP while maintaining host validation"""
+    def __init__(self, ip):
+        self.ip = ip
+        super().__init__()
+
+    def get_connection(self, url, proxies=None):
+        parsed = urlparse(url)
+        url = parsed._replace(netloc=self.ip).geturl()
+        return super().get_connection(url, proxies)
+
+    def cert_verify(self, conn, url, verify, cert):
+        original_host = urlparse(url).hostname
+        conn.assert_hostname = original_host
+        return super().cert_verify(conn, url, verify, cert)
+
+def ping_server(server: str, timeout=10, retries=3, backoff_factor=2, verify_ssl=True):
+    """Enhanced server ping with DNS fallback strategy"""
     if not server.startswith(("http://", "https://")):
-        server = "https://" + server
+        server = f"https://{server}"
+
+    parsed = urlparse(server)
+    domain = parsed.hostname
+    if not domain:
+        VSlog(f"Invalid server format: {server}")
+        return False
+
+    VSlog(f"Starting ping sequence for {domain}")
+    ips = resolve_dns2(domain)
+    if not ips:
+        VSlog("No valid IP addresses found")
+        return False
 
     headers = {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/58.0.3029.110 Safari/537.3'
+        'User-Agent': 'Mozilla/5.0 (Linux; Android 13) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/112.0.0.0 Mobile Safari/537.36',
+        'Accept-Encoding': 'gzip, deflate'
     }
 
-    for attempt in range(1, retries + 1):
-        try:
-            response = requests.get(server, headers=headers, timeout=timeout, verify=verify_ssl)
-            if response.status_code == 200:
-                VSlog(f"Ping succeeded for {server}. Status code: {response.status_code}")
-                return True
-            else:
-                VSlog(f"Ping failed for {server}. Status code: {response.status_code}")
-                return False
-        except SSLError as ssl_error:
-            if verify_ssl:
-                VSlog(f"Ping failed for {server}. SSL Error: {ssl_error}")
-                return ping_server(server, timeout, retries, backoff_factor, False)  # SSL errors are critical if SSL verification is enabled
-            else:
-                VSlog(f"Ping attempt {attempt} failed for {server}. Ignoring SSL Error due to verify_ssl=False.")
-        except RequestException as error:
-            VSlog(f"Ping attempt {attempt} failed for {server}. Error: {error}")
+    for ip in ips:
+        VSlog(f"Attempting connection to {ip}")
+        adapter = ForcedIPAdapter(ip)
+        
+        retry_strategy = Retry(
+            total=retries,
+            backoff_factor=backoff_factor,
+            status_forcelist=[500, 502, 503, 504],
+            allowed_methods=['HEAD', 'GET']
+        )
 
-            if attempt < retries:
-                delay = backoff_factor * (2 ** (attempt - 1))
-                VSlog(f"Retrying in {delay} seconds...")
-                time.sleep(delay)
-            else:
-                VSlog(f"All {retries} attempts failed for {server}.")
-                return False
+        with requests.Session() as session:
+            session.mount('http://', adapter)
+            session.mount('https://', adapter)
+            session.verify = verify_ssl
+
+            for attempt in range(1, retries + 1):
+                try:
+                    # Try HEAD first for efficiency
+                    response = session.head(
+                        server,
+                        headers=headers,
+                        timeout=timeout,
+                        allow_redirects=True
+                    )
+                    if response.ok:
+                        VSlog(f"Successfully connected via HEAD to {ip}")
+                        return True
+                except SSLError as e:
+                    handle_ssl_error(e, domain, verify_ssl)
+                    if not verify_ssl:
+                        return True  # Controversial but matches original logic
+                    return False
+                except RequestException as e:
+                    VSlog(f"Attempt {attempt} failed: {str(e)}")
+                    if attempt < retries:
+                        delay = backoff_factor * (2 ** (attempt - 1))
+                        VSlog(f"Waiting {delay}s before retry...")
+                        time.sleep(delay)
+                    else:
+                        VSlog("All retries exhausted")
+
+            # Fallback to GET if HEAD failed
+            try:
+                response = session.get(
+                    server,
+                    headers=headers,
+                    timeout=timeout,
+                    stream=True,
+                    allow_redirects=True
+                )
+                if response.ok:
+                    VSlog(f"Successfully connected via GET to {ip}")
+                    return True
+            except RequestException as e:
+                VSlog(f"Final GET attempt failed: {str(e)}")
+
+    VSlog("All connection attempts failed")
+    return False
+
+def handle_ssl_error(error, domain, verify_ssl):
+    """Detailed SSL error handling"""
+    error_str = str(error).lower()
+    if 'certificate' in error_str:
+        VSlog(f"Certificate error for {domain}: {error}")
+    elif 'hostname' in error_str:
+        VSlog(f"Hostname mismatch for {domain}: {error}")
+    else:
+        VSlog(f"Generic SSL error: {error}")
+
+    if verify_ssl:
+        VSlog("Retrying with SSL verification disabled...")
+        return ping_server(domain, verify_ssl=False)
 
 def cloudflare_protected(url):
     """Check if a URL is protected by Cloudflare."""
@@ -3998,13 +4132,6 @@ def cloudflare_protected(url):
     except requests.RequestException as e:
         VSlog(f"Error while checking Cloudflare protection for {url}: {e}")
         return False
-
-# Conditional DNS module import
-try:
-    import dns.resolver
-    DNS_MODULE_AVAILABLE = True
-except ImportError:
-    DNS_MODULE_AVAILABLE = False
 
 def resolve_dns(domain, provider='system'):
     """Universal DNS resolver with multiple fallback methods"""
