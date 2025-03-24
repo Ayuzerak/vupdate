@@ -61,6 +61,54 @@ from http.client import HTTPSConnection
 # Save the original socket.getaddrinfo
 original_getaddrinfo = socket.getaddrinfo
 
+# DNS-over-HTTPS resolver with caching
+@lru_cache(maxsize=100)  # Cache up to 100 DNS entries
+def resolve_doh(host, record_type="A"):
+    try:
+        url = f"https://cloudflare-dns.com/dns-query?name={host}&type={record_type}"
+        # Add headers to mimic a browser (some DoH providers require this)
+        req = Request(url, headers={"Accept": "application/dns-json", "User-Agent": "Python"})
+        with urlopen(req, timeout=5) as response:
+            data = json.load(response)
+            return [
+                answer["data"] 
+                for answer in data.get("Answer", []) 
+                if answer["type"] in (1, 28)  # A (IPv4) or AAAA (IPv6)
+            ]
+    except Exception as e:
+        print(f"DNS-over-HTTPS failed: {e}")
+        return []
+
+# Custom getaddrinfo with IPv4/IPv6 support
+def custom_getaddrinfo(host, port, family=0, type=0, proto=0, flags=0):
+    try:
+        ips = []
+        # Resolve IPv4 (A) if family allows it
+        if family in (0, socket.AF_INET):
+            ips += resolve_doh(host, "A")
+        # Resolve IPv6 (AAAA) if family allows it
+        if family in (0, socket.AF_INET6):
+            ips += resolve_doh(host, "AAAA")
+        
+        if not ips:
+            raise socket.gaierror(f"Could not resolve {host}")
+
+        # Format results for socket.getaddrinfo
+        results = []
+        for ip in ips:
+            # Determine address family (IPv4 or IPv6)
+            af = socket.AF_INET6 if ":" in ip else socket.AF_INET
+            results.append(
+                (af, socket.SOCK_STREAM, 6, '', (ip, port))
+            )
+        return results
+    except Exception as e:
+        # Fallback to original resolver
+        return original_getaddrinfo(host, port, family, type, proto, flags)
+
+# Apply the patch globally
+socket.getaddrinfo = custom_getaddrinfo
+
 def insert_update_service_addon():
     """
     Opens the file at
