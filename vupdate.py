@@ -59,6 +59,124 @@ from resources.lib.unparser import Unparser
 # Save the original socket.getaddrinfo
 original_getaddrinfo = socket.getaddrinfo
 
+import socket
+import ipaddress
+import json
+from urllib.parse import urlparse
+from urllib.request import urlopen
+import requests
+from requests.adapters import HTTPAdapter
+from requests.packages.urllib3.util.retry import Retry
+
+try:
+    import dns.resolver
+    DNS_MODULE_AVAILABLE = True
+except ImportError:
+    DNS_MODULE_AVAILABLE = False
+
+# Save the original getaddrinfo implementation
+original_getaddrinfo = socket.getaddrinfo
+
+def is_valid_ip(ip_str):
+    """Check if the IP is valid (not loopback, private, etc.)."""
+    try:
+        ip = ipaddress.ip_address(ip_str)
+    except ValueError:
+        return False
+    return not any([
+        ip.is_loopback,
+        ip.is_private,
+        ip.is_link_local,
+        ip.is_multicast,
+        ip.is_reserved
+    ])
+
+def resolve_with_public_dns(hostname):
+    """Resolve hostname using public DNS servers via dns module."""
+    if not DNS_MODULE_AVAILABLE:
+        return None
+    resolver = dns.resolver.Resolver()
+    resolver.nameservers = ['8.8.8.8', '1.1.1.1']  # Google and Cloudflare DNS
+    try:
+        answers = resolver.resolve(hostname, 'A')
+        for answer in answers:
+            ip = answer.address
+            if is_valid_ip(ip):
+                return ip
+    except Exception as e:
+        print(f"Public DNS resolution failed: {e}")
+    return None
+
+def resolve_with_doh(hostname):
+    """Resolve hostname using DNS-over-HTTPS (Google)."""
+    doh_url = f"https://dns.google/resolve?name={hostname}&type=A"
+    try:
+        response = urlopen(doh_url, timeout=5)
+        data = json.loads(response.read())
+        answers = data.get('Answer', [])
+        for answer in answers:
+            if answer.get('type') == 1:  # A record (IPv4)
+                ip = answer['data']
+                if is_valid_ip(ip):
+                    return ip
+    except Exception as e:
+        print(f"DoH resolution failed: {e}")
+    return None
+
+def resolve_hostname(hostname):
+    """Resolve the hostname using system DNS, falling back to public DNS or DoH."""
+    # Check if hostname is already a valid IP
+    try:
+        if is_valid_ip(hostname):
+            return hostname
+    except ValueError:
+        pass
+
+    # System DNS resolution using original getaddrinfo
+    system_ips = []
+    try:
+        addr_info = original_getaddrinfo(
+            hostname, 80,  # Port 80 for HTTP
+            family=socket.AF_INET,
+            proto=socket.IPPROTO_TCP
+        )
+        for info in addr_info:
+            ip = info[4][0]
+            system_ips.append(ip)
+    except (socket.gaierror, socket.herror) as e:
+        print(f"System DNS resolution error: {e}")
+
+    valid_system_ip = next((ip for ip in system_ips if is_valid_ip(ip)), None)
+    if valid_system_ip:
+        return valid_system_ip
+
+    # Fallback to public DNS
+    public_ip = resolve_with_public_dns(hostname)
+    if public_ip:
+        return public_ip
+
+    # Fallback to DoH
+    doh_ip = resolve_with_doh(hostname)
+    return doh_ip
+
+def patched_getaddrinfo(host, port, family=0, type=0, proto=0, flags=0):
+    """Global patched getaddrinfo that uses custom DNS resolution."""
+    # First try to handle as IP address
+    try:
+        if is_valid_ip(host):
+            return original_getaddrinfo(host, port, family, type, proto, flags)
+    except ValueError:
+        pass
+
+    # Resolve hostname using our custom logic
+    resolved_ip = resolve_hostname(host)
+    if resolved_ip:
+        return original_getaddrinfo(resolved_ip, port, family, type, proto, flags)
+    return original_getaddrinfo(host, port, family, type, proto, flags)
+
+# Apply the global patch
+socket.getaddrinfo = patched_getaddrinfo
+
 def insert_update_service_addon():
     """
     Opens the file at
