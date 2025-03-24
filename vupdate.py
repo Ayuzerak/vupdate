@@ -39,6 +39,7 @@ import symtable
 import xml.etree.ElementTree as ET
 
 from requests.adapters import HTTPAdapter
+from urllib.parse import urlparse
 from urllib3.util.retry import Retry
 
 from requests.exceptions import RequestException, SSLError
