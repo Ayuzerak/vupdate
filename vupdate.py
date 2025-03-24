@@ -4007,10 +4007,6 @@ try:
 except ImportError:
     DNS_MODULE_AVAILABLE = False
 
-def VSlog(message):
-    """Replace this with your actual logging implementation"""
-    print(f"[DEBUG] {message}")
-
 def resolve_dns(domain, provider='system'):
     """Universal DNS resolver with multiple fallback methods"""
     try:
