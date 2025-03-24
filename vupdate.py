@@ -37,11 +37,15 @@ import subprocess
 import tokenize
 import symtable
 import xml.etree.ElementTree as ET
+import ipaddress
 
+from requests.packages.urllib3.util.retry import Retry
 from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
 from urllib3.exceptions import InsecureRequestWarning
 from urllib.parse import urlparse
+from urllib.request import urlopen
+
 
 from requests.exceptions import RequestException, SSLError
 from resources.lib import logger
@@ -3937,52 +3941,146 @@ def add_codeblock_after_block(file_path, block_header, codeblock, insert_after_l
     except Exception as e:
         VSlog(f"Error while modifying file '{file_path}': {str(e)}")
 
+try:
+    import dns.resolver
+    DNS_MODULE_AVAILABLE = True
+except ImportError:
+    DNS_MODULE_AVAILABLE = False
+
+class PatchedDNSContext:
+    """Context manager to override DNS resolution for a specific hostname."""
+    def __init__(self, hostname, ip):
+        self.hostname = hostname
+        self.ip = ip
+        self.original_getaddrinfo = socket.getaddrinfo
+
+    def __enter__(self):
+        def patched_getaddrinfo(host, port, family=0, type=0, proto=0, flags=0):
+            if host == self.hostname:
+                host = self.ip
+            return self.original_getaddrinfo(host, port, family, type, proto, flags)
+        socket.getaddrinfo = patched_getaddrinfo
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        socket.getaddrinfo = self.original_getaddrinfo
+
+def is_valid_ip(ip_str):
+    """Check if the IP is valid (not loopback, private, etc.)."""
+    try:
+        ip = ipaddress.ip_address(ip_str)
+    except ValueError:
+        return False
+    return not any([
+        ip.is_loopback,
+        ip.is_private,
+        ip.is_link_local,
+        ip.is_multicast,
+        ip.is_reserved
+    ])
+
+def resolve_with_public_dns(hostname):
+    """Resolve hostname using public DNS servers via dns module."""
+    if not DNS_MODULE_AVAILABLE:
+        return None
+    resolver = dns.resolver.Resolver()
+    resolver.nameservers = ['8.8.8.8', '1.1.1.1']  # Google and Cloudflare DNS
+    try:
+        answers = resolver.resolve(hostname, 'A')
+        for answer in answers:
+            ip = answer.address
+            if is_valid_ip(ip):
+                return ip
+    except Exception as e:
+        print(f"Public DNS resolution failed: {e}")
+    return None
+
+def resolve_with_doh(hostname):
+    """Resolve hostname using DNS-over-HTTPS (Google)."""
+    doh_url = f"https://dns.google/resolve?name={hostname}&type=A"
+    try:
+        response = urlopen(doh_url, timeout=5)
+        data = json.loads(response.read())
+        answers = data.get('Answer', [])
+        for answer in answers:
+            if answer.get('type') == 1:  # A record (IPv4)
+                ip = answer['data']
+                if is_valid_ip(ip):
+                    return ip
+    except Exception as e:
+        print(f"DoH resolution failed: {e}")
+    return None
+
+def resolve_hostname(hostname):
+    """Resolve the hostname using system DNS, falling back to public DNS or DoH."""
+    # System DNS resolution
+    system_ips = []
+    try:
+        addr_info = socket.getaddrinfo(
+            hostname, 80,  # Port 80 for HTTP (port doesn't affect resolution)
+            family=socket.AF_INET,
+            proto=socket.IPPROTO_TCP
+        )
+        for info in addr_info:
+            ip = info[4][0]
+            system_ips.append(ip)
+    except (socket.gaierror, socket.herror) as e:
+        print(f"System DNS resolution error: {e}")
+
+    valid_system_ip = next((ip for ip in system_ips if is_valid_ip(ip)), None)
+    if valid_system_ip:
+        return valid_system_ip
+
+    # Fallback to public DNS
+    public_ip = resolve_with_public_dns(hostname)
+    if public_ip:
+        return public_ip
+
+    # Fallback to DoH
+    doh_ip = resolve_with_doh(hostname)
+    return doh_ip
+
 def ping_server(server: str, timeout=10, retries=1, backoff_factor=2, verify_ssl=True):
-    """
-    Ping server to check if it's reachable, with retry mechanism and optional SSL verification.
+    # Parse the server URL to extract hostname
+    parsed = urlparse(server)
+    if not parsed.scheme:
+        server = f"http://{server}"
+        parsed = urlparse(server)
+    hostname = parsed.hostname
 
-    Args:
-        server (str): Server URL to ping.
-        timeout (int): Timeout for each request in seconds.
-        retries (int): Number of retry attempts on failure.
-        backoff_factor (int): Exponential backoff multiplier for retry delays.
-        verify_ssl (bool): Whether to verify SSL certificates. Default is True.
-        
-    Returns:
-        bool: True if the server is reachable, False otherwise.
-    """
-    if not server.startswith(("http://", "https://")):
-        server = "https://" + server
+    if not hostname:
+        print("Invalid server format")
+        return False
 
-    headers = {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/58.0.3029.110 Safari/537.3'
-    }
+    resolved_ip = resolve_hostname(hostname)
+    if not resolved_ip:
+        return False
 
-    for attempt in range(1, retries + 1):
+    # Configure retry settings
+    retry_strategy = Retry(
+        total=retries,
+        backoff_factor=backoff_factor,
+        status_forcelist=[500, 502, 503, 504],
+        allowed_methods=["HEAD", "GET", "OPTIONS"]
+    )
+    adapter = HTTPAdapter(max_retries=retry_strategy)
+
+    with PatchedDNSContext(hostname, resolved_ip):
+        session = requests.Session()
+        session.mount("http://", adapter)
+        session.mount("https://", adapter)
         try:
-            response = requests.get(server, headers=headers, timeout=timeout, verify=verify_ssl)
-            if response.status_code == 200:
-                VSlog(f"Ping succeeded for {server}. Status code: {response.status_code}")
-                return True
-            else:
-                VSlog(f"Ping failed for {server}. Status code: {response.status_code}")
-                return False
-        except SSLError as ssl_error:
-            if verify_ssl:
-                VSlog(f"Ping failed for {server}. SSL Error: {ssl_error}")
-                return ping_server(server, timeout, retries, backoff_factor, False)  # SSL errors are critical if SSL verification is enabled
-            else:
-                VSlog(f"Ping attempt {attempt} failed for {server}. Ignoring SSL Error due to verify_ssl=False.")
-        except RequestException as error:
-            VSlog(f"Ping attempt {attempt} failed for {server}. Error: {error}")
-
-            if attempt < retries:
-                delay = backoff_factor * (2 ** (attempt - 1))
-                VSlog(f"Retrying in {delay} seconds...")
-                time.sleep(delay)
-            else:
-                VSlog(f"All {retries} attempts failed for {server}.")
-                return False
+            response = session.get(
+                server,
+                timeout=timeout,
+                verify=verify_ssl
+            )
+            return response.status_code < 500
+        except requests.exceptions.SSLError as e:
+            print(f"SSL verification failed: {e}")
+            return False
+        except requests.exceptions.RequestException as e:
+            print(f"Request failed: {e}")
+            return False
 
 def cloudflare_protected(url):
     """Check if a URL is protected by Cloudflare."""
