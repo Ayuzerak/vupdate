@@ -101,26 +101,40 @@ def is_valid_ip(ip_str):
         return False
 
 def resolve_system_dns(hostname, family):
-    """System DNS resolution with detailed error handling"""
+    """System DNS resolution with comprehensive logging"""
     try:
-        VSlog(f"[SYSTEM-DNS] Attempting system resolution for {hostname}")
-        addr_info = original_getaddrinfo(hostname, 0, family, socket.SOCK_STREAM)
+        VSlog(f"[SYSTEM-DNS] Starting system resolution for {hostname} (family: {family})")
+        
+        # Attempt system resolution
+        addr_info = original_getaddrinfo(
+            hostname, 
+            0,  # port
+            family, 
+            socket.SOCK_STREAM,
+            socket.IPPROTO_TCP
+        )
+        
+        # Extract IP addresses
         ips = [info[4][0] for info in addr_info]
         VSlog(f"[SYSTEM-DNS] Received {len(ips)} IP(s) for {hostname}")
         
-        for ip in ips:
-            if is_valid_ip(ip):
-                VSlog(f"[SYSTEM-DNS] Valid system IP found: {ip}")
-                return ip
-        VSlog(f"[SYSTEM-DNS] No valid IPs in system response")
-        return None
-        
+        # Validate IPs
+        valid_ips = [ip for ip in ips if is_valid_ip(ip)]
+        if not valid_ips:
+            VSlog(f"[SYSTEM-DNS] No valid IPs found in {len(ips)} system responses")
+            return None
+            
+        VSlog(f"[SYSTEM-DNS] First valid IP: {valid_ips[0]}")
+        return valid_ips[0]
+
     except socket.gaierror as e:
-        VSlog(f"[SYSTEM-DNS] Resolution failed for {hostname}: {str(e)}")
-        return None
+        VSlog(f"[SYSTEM-DNS] Resolution failed (gaierror): {str(e)}")
+    except socket.herror as e:
+        VSlog(f"[SYSTEM-DNS] Resolution failed (herror): {str(e)}")
     except Exception as e:
-        VSlog(f"[SYSTEM-DNS] Unexpected error: {str(e)}")
-        return None
+        VSlog(f"[SYSTEM-DNS] Unexpected error: {type(e).__name__} - {str(e)}")
+        
+    return None
 
 def resolve_public_dns(hostname, family):
     """Public DNS resolution with timeout control"""
