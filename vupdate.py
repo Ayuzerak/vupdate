@@ -18,7 +18,6 @@ import builtins
 import keyword
 import ast
 import socket
-import dns.resolver
 import textwrap
 import difflib
 from difflib import get_close_matches, SequenceMatcher
