@@ -4039,7 +4039,7 @@ def resolve_hostname(hostname):
     doh_ip = resolve_with_doh(hostname)
     return doh_ip
 
-def ping_server(server: str, timeout=10, retries=1, backoff_factor=2, verify_ssl=True):
+def ping_server(server: str, timeout=20, retries=1, backoff_factor=2, verify_ssl=True):
     # Parse the server URL to extract hostname
     parsed = urlparse(server)
     if not parsed.scheme:
