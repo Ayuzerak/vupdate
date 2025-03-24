@@ -1,18 +1,59 @@
-import socket
-import ipaddress
+# -*- coding: utf-8 -*-
+# https://github.com/Kodi-vStream/venom-xbmc-addons
+import configparser
+import datetime, time
+from datetime import datetime
+from collections import deque, defaultdict
+import xbmc
+import xbmcvfs
+import shutil
+import os
+import traceback
 import json
-import threading
-from urllib.request import urlopen
-import time
+import io
+import requests
+import re
+import builtins
+import keyword
+import ast
+import socket
+import textwrap
+import difflib
+from difflib import get_close_matches, SequenceMatcher
+import random
+import string
+from string import Template
 import sys
+import ssl
+import pickle
+from typing import List, Optional, Dict, Set, Deque, Tuple, Union
+import glob
+import concurrent.futures
+from concurrent.futures import ProcessPoolExecutor, TimeoutError as FutureTimeoutError
+import threading
+import multiprocessing
+import subprocess
+import tokenize
+import symtable
+import xml.etree.ElementTree as ET
+import ipaddress
 
-import socket
-import ipaddress
-import json
-import threading
+from requests.packages.urllib3.util.retry import Retry
+from requests.adapters import HTTPAdapter
+from urllib3.util.retry import Retry
+from urllib3.exceptions import InsecureRequestWarning
+from urllib.parse import urlparse
 from urllib.request import urlopen
-import time
-import sys
+
+
+from requests.exceptions import RequestException, SSLError
+from resources.lib import logger
+from resources.lib.logger import VSlog, VSPath
+
+from io import StringIO, BytesIO
+from functools import lru_cache
+
+from resources.lib.unparser import Unparser
 
 # Configuration
 CACHE_TTL = 300
