@@ -31,6 +31,7 @@ import glob
 import concurrent.futures
 from concurrent.futures import ProcessPoolExecutor, TimeoutError as FutureTimeoutError
 import threading
+import multiprocessing
 import tokenize
 import symtable
 import xml.etree.ElementTree as ET
