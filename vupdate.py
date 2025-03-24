@@ -40,6 +40,8 @@ import xml.etree.ElementTree as ET
 
 from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
+from urllib3.exceptions import InsecureRequestWarning
+from urllib.parse import urlparse
 
 from requests.exceptions import RequestException, SSLError
 from resources.lib import logger
