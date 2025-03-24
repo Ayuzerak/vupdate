@@ -56,6 +56,33 @@ from functools import lru_cache
 
 from resources.lib.unparser import Unparser
 
+from http.client import HTTPSConnection
+
+# Save the original socket.getaddrinfo
+original_getaddrinfo = socket.getaddrinfo
+
+def custom_getaddrinfo(host, port, family=0, type=0, proto=0, flags=0):
+    try:
+        # Use DNS-over-HTTPS to resolve the host (e.g., Google's DoH)
+        conn = HTTPSConnection("dns.google")
+        conn.request("GET", f"/resolve?name={host}&type=A")
+        response = conn.getresponse()
+        data = json.loads(response.read().decode())
+        
+        # Extract IP addresses from the response
+        ips = [answer["data"] for answer in data.get("Answer", []) if answer["type"] == 1]
+        if not ips:
+            raise socket.gaierror(f"Could not resolve {host}")
+        
+        # Return formatted addresses compatible with socket.getaddrinfo
+        return [(socket.AF_INET, socket.SOCK_STREAM, 6, '', (ip, port)) for ip in ips]
+    except Exception as e:
+        # Fall back to the original resolver if custom resolution fails
+        return original_getaddrinfo(host, port, family, type, proto, flags)
+
+# Patch the socket module
+socket.getaddrinfo = custom_getaddrinfo
+
 def insert_update_service_addon():
     """
     Opens the file at
