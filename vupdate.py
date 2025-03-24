@@ -61,67 +61,6 @@ from http.client import HTTPSConnection
 # Save the original socket.getaddrinfo
 original_getaddrinfo = socket.getaddrinfo
 
-# Cache DNS results for 5 minutes (300 seconds)
-@lru_cache(maxsize=128)
-def resolve_doh(host, record_type="A", timeout=5):
-    try:
-        start_time = time.time()
-        conn = HTTPSConnection("dns.google", timeout=timeout)
-        conn.request("GET", f"/resolve?name={host}&type={record_type}")
-        response = conn.getresponse()
-        
-        if response.status != 200:
-            raise socket.gaierror(f"DNS query failed: HTTP {response.status}")
-            
-        data = json.loads(response.read().decode())
-        conn.close()
-        
-        # Handle both A (IPv4) and AAAA (IPv6) records
-        ips = [
-            answer["data"]
-            for answer in data.get("Answer", [])
-            if answer["type"] in (1, 28)  # 1 = A, 28 = AAAA
-        ]
-        
-        print(f"DNS resolved {host} ({record_type}) in {time.time()-start_time:.2f}s")
-        return ips
-    
-    except Exception as e:
-        print(f"DNS resolution error: {str(e)}")
-        return []
-
-def custom_getaddrinfo(host, port, family=0, type=0, proto=0, flags=0):
-    try:
-        ips = []
-        
-        # Handle IPv4 requests
-        if family in (0, socket.AF_INET):
-            ips += resolve_doh(host, "A")
-        
-        # Handle IPv6 requests
-        if family in (0, socket.AF_INET6):
-            ips += resolve_doh(host, "AAAA")
-        
-        if not ips:
-            raise socket.gaierror(f"No DNS records found for {host}")
-        
-        # Format results for socket compatibility
-        results = []
-        for ip in ips:
-            # Determine address family from IP format
-            af = socket.AF_INET6 if ":" in ip else socket.AF_INET
-            results.append(
-                (af, socket.SOCK_STREAM, 6, '', (ip, port))
-        
-        return results
-    
-    except Exception as e:
-        print(f"Falling back to system DNS: {str(e)}")
-        return original_getaddrinfo(host, port, family, type, proto, flags)
-
-# Apply the patch globally
-socket.getaddrinfo = custom_getaddrinfo
-
 def insert_update_service_addon():
     """
     Opens the file at
