@@ -3272,22 +3272,16 @@ class AssignmentVisitor(ast.NodeVisitor):
 
     def visit_FunctionDef(self, node):
         params = {arg.arg for arg in node.args.args}
-        start_line = node.lineno
-        # Fallback for Python <3.8
-        end_line = getattr(node, 'end_lineno', None) or self._estimate_function_end(node)
-        self.function_params[start_line] = {
+        # Handle parameters with non-standard formatting
+        self.function_params[node.lineno] = {
             'params': params,
-            'start_line': start_line,
-            'end_line': end_line
+            'start_line': node.lineno,
+            'end_line': self._accurate_function_end(node)
         }
-        self.generic_visit(node)
 
-    def _estimate_function_end(self, node):
-        """More reliable function end detection"""
-        if node.body:
-            last_node = node.body[-1]
-            return getattr(last_node, 'end_lineno', last_node.lineno)
-        return node.lineno
+    def _accurate_function_end(self, node):
+        """Find the actual last line of function using full AST analysis"""
+        return max(child.lineno for child in ast.walk(node) if hasattr(child, 'lineno'))
 
     def visit_For(self, node):
         self._record_assignment(node.target, node.lineno)
@@ -3489,6 +3483,13 @@ class TransactionalInserter:
             return False, original_lines
 
     def _check_variables(self, lines: List[str], line_num: int) -> Dict[str, bool]:
+        try:
+            # Validate code structure first
+            ast.parse(''.join(lines[:line_num + 1]))
+        except SyntaxError as e:
+            VSlog(f"⚠️ Partial code syntax error: {str(e)}")
+            return self._fallback_param_check(line_num)
+            
         if not self.condition_vars:
             VSlog("⚠️  No variables found in condition")
         var_status = {var: False for var in self.condition_vars}
@@ -3527,6 +3528,17 @@ class TransactionalInserter:
         except Exception as e:
             VSlog(f"Variable check error: {e}")
         return var_status
+
+    def _fallback_param_check(self, line_num):
+        """Use pre-cached function data when current parsing fails"""
+        return {
+            var: any(
+                fp['start_line'] <= line_num <= fp['end_line'] 
+                and var in fp['params']
+                for fp in self.function_params.values()
+            )
+            for var in self.condition_vars
+        }
 
     def _parse_ast_hierarchy(self, lines: List[str]) -> None:
         code = ''.join(lines)
