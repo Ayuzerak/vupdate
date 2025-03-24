@@ -3956,61 +3956,103 @@ def cloudflare_protected(url):
         VSlog(f"Error while checking Cloudflare protection for {url}: {e}")
         return False
 
+try:
+    import certifi
+except ImportError:
+    certifi = None
+
 def is_using_cloudflare(url):
-    """Check if a URL uses Cloudflare with improved network handling."""
-    VSlog(f"Checking Cloudflare headers for {url}.")
+    """Check if a URL uses Cloudflare with Android network compatibility."""
+    VSlog(f"Starting Cloudflare check for: {url}")
     
-    # Configure retry strategy
-    retries = Retry(
-        total=3,
+    session = requests.Session()
+    retry_strategy = Retry(
+        total=2,
         backoff_factor=1,
-        status_forcelist=[500, 502, 503, 504],
-        allowed_methods=['GET']
+        status_forcelist=[429, 500, 502, 503, 504],
+        allowed_methods=["HEAD", "GET", "OPTIONS"]
     )
     
-    # Configure headers to mimic browser request
+    class AndroidHTTPAdapter(HTTPAdapter):
+        def init_poolmanager(self, *args, **kwargs):
+            kwargs['socket_options'] = [
+                (socket.SOL_SOCKET, socket.SO_KEEPALIVE, 1),
+                (socket.SOL_TCP, socket.TCP_NODELAY, 1)
+            ]
+            return super().init_poolmanager(*args, **kwargs)
+    
+    session.mount('https://', AndroidHTTPAdapter(max_retries=retry_strategy))
+    
     headers = {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8'
+        'User-Agent': 'Mozilla/5.0 (Linux; Android 13; SM-G991B) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/112.0.0.0 Mobile Safari/537.36',
+        'Accept-Encoding': 'gzip, deflate'
     }
 
     try:
-        with requests.Session() as session:
-            # Mount retry adapter for HTTPS
-            session.mount('https://', HTTPAdapter(max_retries=retries))
-            
+        response = session.head(
+            url,
+            headers=headers,
+            timeout=8,
+            allow_redirects=True,
+            verify=ssl_verify()
+        )
+    except requests.exceptions.ConnectionError:
+        try:
             response = session.get(
                 url,
                 headers=headers,
                 timeout=10,
-                verify=True  # Keep SSL verification but add exception handling
+                stream=True,
+                verify=ssl_verify()
             )
-            
-            headers = response.headers
-            cloudflare_headers = ['cf-ray', 'cf-cache-status', 'cf-request-id']
-            
-            # Check for CF-specific headers
-            for header in cloudflare_headers:
-                if header in headers:
-                    VSlog(f"Cloudflare header detected: {header}={headers[header]}.")
-                    return True
-
-            # Check server header
-            if 'cloudflare' in headers.get('server', '').lower():
-                VSlog("Cloudflare server header detected.")
-                return True
-
-            VSlog(f"No Cloudflare headers detected for {url}.")
+        except requests.RequestException as e:
+            handle_android_network_error(e, url)
             return False
 
-    except requests.RequestException as e:
-        VSlog(f"Connection error for {url}: {str(e)}")
-        # Additional SSL error handling
-        if 'SSLError' in str(e):
-            VSlog("SSL/TLS handshake failed. Consider certificate pinning.")
-        elif 'NewConnectionError' in str(e):
-            VSlog("Network layer failure. Check DNS/firewall settings.")
+    # Cloudflare detection logic
+    if response.status_code != 200:
+        VSlog(f"Non-200 status code: {response.status_code}")
         return False
+
+    headers = response.headers
+    cloudflare_headers = ['cf-ray', 'cf-cache-status', 'cf-request-id']
+    
+    for header in cloudflare_headers:
+        if header in headers:
+            VSlog(f"Cloudflare header detected: {header}={headers[header]}")
+            return True
+
+    server_header = headers.get('server', '').lower()
+    if 'cloudflare' in server_header:
+        VSlog(f"Cloudflare server header detected: {server_header}")
+        return True
+
+    VSlog(f"No Cloudflare headers detected for {url}")
+    return False
+
+def ssl_verify():
+    """Handle certificate verification across platforms."""
+    if certifi:
+        return certifi.where()
+    return '/system/etc/security/cacerts'  # Android system certs path
+
+def handle_android_network_error(e, url):
+    """Detailed Android network error analysis."""
+    VSlog(f"Android Network Failure: {str(e)}")
+    
+    if 'ECONNREFUSED' in str(e):
+        VSlog(f"Connection refused by {url} on port 443")
+    elif 'ETIMEDOUT' in str(e):
+        VSlog("Connection timeout - Check network stability")
+    
+    try:
+        ip_address = socket.gethostbyname(url.split('//')[-1].split('/')[0])
+        VSlog(f"DNS Resolution Successful: {ip_address}")
+    except socket.gaierror:
+        VSlog("DNS Resolution Failed")
+    
+    if hasattr(e, 'request'):
+        VSlog(f"Attempted URL: {e.request.url}")
 
 def set_wiflix_url(url):
     """Set a new URL for Wiflix in the sites.json file."""
