@@ -2921,43 +2921,85 @@ def safe_regex_pattern(regex_pattern):
         return regex_pattern
 
 def _regex_task(regex, sample):
-    """Top-level helper function for regex processing (must be picklable for multiprocessing)."""
+    """Helper function to run regex findall in isolation."""
     try:
-        if resource is not None:
-            set_resource_limits()
         return re.compile(regex).findall(sample)
     except Exception as e:
-        VSlog(f"Error in safe_findall task: {e}")
+        VSlog(f"Regex error: {e}")
+        return None
+
+def _android_regex_eval(regex, sample, timeout):
+    """Android-specific subprocess evaluation with proper resource limits."""
+    try:
+        # Serialize inputs to avoid injection issues
+        cmd = [
+            sys.executable,
+            "-c",
+            "import sys, re, json;"
+            "regex=json.loads(sys.argv[1]);"
+            "sample=json.loads(sys.argv[2]);"
+            "print(json.dumps(re.compile(regex).findall(sample)))",
+            json.dumps(regex),
+            json.dumps(sample)
+        ]
+        
+        result = subprocess.run(
+            cmd,
+            timeout=timeout,
+            capture_output=True,
+            text=True
+        )
+        
+        if result.returncode == 0:
+            return json.loads(result.stdout)
+        return None
+        
+    except subprocess.TimeoutExpired:
+        VSlog(f"Android subprocess timeout: {regex}")
+        return None
+    except Exception as e:
+        VSlog(f"Android subprocess error: {e}")
         return None
 
 def safe_findall(regex, sample, timeout=DEFAULT_TIMEOUT):
     """
-    Runs re.findall() with OS-specific isolation:
-    - Uses processes on Android/Unix to avoid threading limits.
-    - Uses threads on Windows for compatibility.
+    OS-optimized regex evaluation:
+    - Windows: ThreadPoolExecutor
+    - Android: Subprocess isolation
+    - Linux/Mac: ProcessPoolExecutor with fallback
     """
     if len(sample) > MAX_INPUT_LENGTH:
         sample = sample[:MAX_INPUT_LENGTH]
-        VSlog(f"Truncated input sample to {MAX_INPUT_LENGTH} characters")
+        VSlog(f"Truncated input to {MAX_INPUT_LENGTH} chars")
 
-    # OS-Specific Execution Strategy
-    if sys.platform == "win32":
-        executor_class = concurrent.futures.ThreadPoolExecutor  # Threads on Windows
-    else:
-        executor_class = concurrent.futures.ProcessPoolExecutor  # Processes on Unix/Android
+    # Android Detection (sys.platform may vary)
+    is_android = "ANDROID_DATA" in os.environ  # Common Android env var
 
     try:
-        with executor_class(max_workers=1) as executor:
-            future = executor.submit(_regex_task, regex, sample)
-            try:
+        if sys.platform == "win32":
+            with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
+                future = executor.submit(_regex_task, regex, sample)
                 return future.result(timeout=timeout)
-            except concurrent.futures.TimeoutError:
-                VSlog(f"Timeout for regex: {regex} on sample: {sample[:50]}...")
-                return None
-            finally:
-                future.cancel()  # Cleanup
+                
+        elif is_android:
+            return _android_regex_eval(regex, sample, timeout)
+            
+        else:  # Unix-like systems
+            try:
+                ctx = multiprocessing.get_context("fork")
+                with concurrent.futures.ProcessPoolExecutor(
+                    max_workers=1, mp_context=ctx
+                ) as executor:
+                    future = executor.submit(_regex_task, regex, sample)
+                    return future.result(timeout=timeout)
+            except ImportError:  # Fallback for missing multiprocessing.synchronize
+                return _android_regex_eval(regex, sample, timeout)
+                
+    except concurrent.futures.TimeoutError:
+        VSlog(f"Timeout during regex evaluation: {regex}")
+        return None
     except Exception as e:
-        VSlog(f"Error in executor: {e}")
+        VSlog(f"Unexpected error: {e}")
         return None
 
 def test_equivalence(original, transformed, samples=None, max_dynamic_samples=20):
