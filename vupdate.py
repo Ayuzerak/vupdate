@@ -5722,12 +5722,21 @@ def get_file_hash(file_path):
         hasher.update(f.read())
     return hasher.hexdigest()
 
+def get_file_hash(file_path):
+    """Returns the SHA256 hash of a file's content."""
+    if not os.path.exists(file_path):
+        return None
+    hasher = hashlib.sha256()
+    with open(file_path, 'rb') as f:
+        hasher.update(f.read())
+    return hasher.hexdigest()
+
 def update_dns_resolution():
 
     """Modify requestHandler.py and create requestHandler.py if not present."""
     VSlog("Starting the process modifying requestHandler.py.")
     
-    file_path = VSPath('special://home/addons/plugin.video.vstream/resources/lib/requestHandler.py').replace('\\', '/')
+    file_path = VSPath('special://home/addons/plugin.video.vstream/resources/lib/handler/requestHandler.py').replace('\\', '/')
 
     try:
         VSlog("Checking if requestHandler.py exists...")
@@ -5958,7 +5967,7 @@ class cRequestHandler:
 
         if sContent:
             if self.__bRemoveNewLines:
-                sContent = sContent.replace("\n", "").replace("\r\t", "")
+                sContent = sContent.replace("\\n", "").replace("\\r\\t", "")
             if self.__bRemoveBreakLines:
                 sContent = sContent.replace("&nbsp;", "")
 
@@ -6072,10 +6081,10 @@ def MPencode(fields):
         if hasattr(value, 'read'):
             with value:
                 mimetype = mimetypes.guess_type(value.name)[0] or 'application/octet-stream'
-                form_data.append(f'--{random_boundary}\r\nContent-Disposition: form-data; name="{key}"; filename="{value.name}"\r\nContent-Type: {mimetype}\r\n\r\n{value.read()}\r\n')
+                form_data.append(f'--{random_boundary}\\r\\nContent-Disposition: form-data; name="{key}"; filename="{value.name}"\\r\\nContent-Type: {mimetype}\\r\\n\\r\\n{value.read()}\\r\\n')
         else:
-            form_data.append(f'--{random_boundary}\r\nContent-Disposition: form-data; name="{key}"\r\n\r\n{value}\r\n')
-    form_data.append(f'--{random_boundary}--\r\n')
+            form_data.append(f'--{random_boundary}\r\nContent-Disposition: form-data; name="{key}"\\r\\n\\r\\n{value}\\r\\n')
+    form_data.append(f'--{random_boundary}--\\r\\n')
     return content_type, ''.join(form_data)
 
 
