@@ -4165,6 +4165,23 @@ def is_using_cloudflare(url):
         VSlog(f"Critical error: {e}")
         return False
 
+def cloudflare_protected(url):
+    """Check if a URL is protected by Cloudflare."""
+    VSlog(f"Checking if {url} is Cloudflare protected.")
+    try:
+        response = requests.get(url)
+        content = response.text
+        target_position = content.find("Checking if the")
+        if target_position != -1:
+            VSlog(f"Cloudflare protection detected for {url}.")
+            return True
+        else:
+            VSlog(f"No Cloudflare protection detected for {url}.")
+            return False
+    except requests.RequestException as e:
+        VSlog(f"Error while checking Cloudflare protection for {url}: {e}")
+        return False
+
 def ssl_verify():
     """Smart certificate verification."""
     try:
