@@ -6080,6 +6080,8 @@ def __randy_boundary(length=10):
     import string
     return ''.join(random.choice(string.ascii_letters + string.digits) for _ in range(length))"""
 
+    intended_hash = hashlib.sha256(script_content.encode('utf-8')).hexdigest()
+
     try:
         VSlog(f"Checking if requestHandler.py exists at {file_path}...")
         if not os.path.exists(file_path):
