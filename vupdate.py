@@ -5743,7 +5743,7 @@ def update_dns_resolution():
                 parts = domain.encode('utf-8').split(b'.')
                 for part in parts:
                     encoded += struct.pack('B', len(part)) + part
-                return encoded + b'\\x00'
+                return encoded + b'\x00'
 
             def dns_query(ns, query_host):
                 try:
