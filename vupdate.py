@@ -1,3 +1,4 @@
+
 # -*- coding: utf-8 -*-
 # https://github.com/Kodi-vStream/venom-xbmc-addons
 import configparser
@@ -55,178 +56,8 @@ from functools import lru_cache
 
 from resources.lib.unparser import Unparser
 
-# Configuration
-CACHE_TTL = 300
-BYPASS_DOMAINS = {'dns.google', '8.8.8.8', '1.1.1.1'}
-RESOLUTION_TIMEOUT = 5
-FALLBACK_ORDER = ['system', 'public', 'doh']
-
-# Thread-safe resources
-_resolution_lock = threading.Lock()
-_ongoing_resolutions = set()
-_dns_cache = {}
-_cache_lock = threading.Lock()
-
-def is_valid_ip(ip_str):
-    """IP validation without external dependencies"""
-    try:
-        ip = ipaddress.ip_address(ip_str)
-        return not any([
-            ip.is_loopback,
-            ip.is_multicast,
-            ip.is_reserved
-        ])
-    except ValueError:
-        return False
-
-def resolve_system_dns(hostname, family):
-    """System DNS using built-in socket"""
-    try:
-        VSlog(f"[SYSTEM] Resolving {hostname} via OS DNS")
-        addr_info = socket.getaddrinfo(
-            hostname,
-            0,  # port
-            family,
-            socket.SOCK_STREAM,
-            socket.IPPROTO_TCP
-        )
-        ips = [info[4][0] for info in addr_info]
-        VSlog(f"[SYSTEM] Found {len(ips)} IP(s)")
-        
-        for ip in ips:
-            if is_valid_ip(ip):
-                VSlog(f"[SYSTEM] Valid IP: {ip}")
-                return ip
-        return None
-        
-    except socket.gaierror as e:
-        VSlog(f"[SYSTEM] Resolution failed: {str(e)}")
-    except Exception as e:
-        VSlog(f"[SYSTEM] Error: {str(e)}")
-    return None
-
-def resolve_public_dns(hostname, family):
-    """Public DNS fallback using direct UDP"""
-    try:
-        VSlog(f"[PUBLIC] Trying public DNS for {hostname}")
-        resolver = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-        resolver.settimeout(RESOLUTION_TIMEOUT)
-        
-        # DNS query for A record (IPv4)
-        query = bytearray()
-        query += b'\x00\x00'  # Transaction ID
-        query += b'\x01\x00'  # Flags
-        query += b'\x00\x01'  # Questions
-        query += b'\x00\x00'  # Answer RRs
-        query += b'\x00\x00'  # Authority RRs
-        query += b'\x00\x00'  # Additional RRs
-        
-        # Encode hostname
-        for part in hostname.split('.'):
-            query += bytes([len(part)])
-            query += part.encode()
-        query += b'\x00'  # End of name
-        
-        query += b'\x00\x01'  # Type A
-        query += b'\x00\x01'  # Class IN
-        
-        # Send to Google DNS
-        resolver.sendto(query, ('8.8.8.8', 53))
-        response = resolver.recv(1024)
-        
-        # Parse response (simple version)
-        ip = '.'.join(map(str, response[-4:]))
-        if is_valid_ip(ip):
-            VSlog(f"[PUBLIC] Resolved to {ip}")
-            return ip
-        return None
-        
-    except Exception as e:
-        VSlog(f"[PUBLIC] Failed: {str(e)}")
-    return None
-
-def resolve_doh(hostname, family):
-    """DNS-over-HTTPS fallback"""
-    try:
-        record_type = 'A' if family == socket.AF_INET else 'AAAA'
-        VSlog(f"[DOH] Trying Google DoH for {hostname}")
-        
-        with urlopen(
-            f"https://dns.google/resolve?name={hostname}&type={record_type}",
-            timeout=RESOLUTION_TIMEOUT
-        ) as response:
-            data = json.loads(response.read())
-            
-            for answer in data.get('Answer', []):
-                if answer.get('type') == (1 if record_type == 'A' else 28):
-                    ip = answer.get('data', '')
-                    if is_valid_ip(ip):
-                        VSlog(f"[DOH] Valid IP: {ip}")
-                        return ip
-            return None
-            
-    except Exception as e:
-        VSlog(f"[DOH] Failed: {str(e)}")
-    return None
-
-def resolve_hostname(hostname, family):
-    """Resolution flow with fallbacks"""
-    # Cache check
-    with _cache_lock:
-        cached = _dns_cache.get((hostname, family))
-        if cached and (time.time() - cached['timestamp']) < CACHE_TTL:
-            VSlog(f"[CACHE] Using cached {cached['ip']}")
-            return cached['ip']
-
-    result = None
-    
-    for method in FALLBACK_ORDER:
-        if method == 'system':
-            result = resolve_system_dns(hostname, family)
-        elif method == 'public':
-            result = resolve_public_dns(hostname, family)
-        elif method == 'doh':
-            result = resolve_doh(hostname, family)
-        
-        if result:
-            with _cache_lock:
-                _dns_cache[(hostname, family)] = {
-                    'ip': result,
-                    'timestamp': time.time()
-                }
-            break
-
-    return result
-
-def patched_getaddrinfo(host, port, family=0, type=0, proto=0, flags=0):
-    """Monkey-patched getaddrinfo with fallbacks"""
-    if host in BYPASS_DOMAINS:
-        return socket.getaddrinfo(host, port, family, type, proto)
-
-    with _resolution_lock:
-        if host in _ongoing_resolutions:
-            return socket.getaddrinfo(host, port, family, type, proto)
-        _ongoing_resolutions.add(host)
-
-    try:
-        if is_valid_ip(host):
-            return socket.getaddrinfo(host, port, family, type, proto)
-
-        families = [socket.AF_INET, socket.AF_INET6] if family == 0 else [family]
-        for fam in families:
-            ip = resolve_hostname(host, fam)
-            if ip:
-                return socket.getaddrinfo(ip, port, family, type, proto)
-        
-        return socket.getaddrinfo(host, port, family, type, proto)
-    
-    finally:
-        with _resolution_lock:
-            _ongoing_resolutions.discard(host)
-
-# Apply the patch
-socket.getaddrinfo = patched_getaddrinfo
-VSlog("[INIT] DNS resolver ready (no external dependencies)")
+# Save the original socket.getaddrinfo
+original_getaddrinfo = socket.getaddrinfo
 
 def insert_update_service_addon():
     """
@@ -4113,8 +3944,105 @@ def add_codeblock_after_block(file_path, block_header, codeblock, insert_after_l
     except Exception as e:
         VSlog(f"Error while modifying file '{file_path}': {str(e)}")
 
+try:
+    import dns.resolver
+    DNS_MODULE_AVAILABLE = True
+except ImportError:
+    DNS_MODULE_AVAILABLE = False
+
+class PatchedDNSContext:
+    """Context manager to override DNS resolution for a specific hostname."""
+    def __init__(self, hostname, ip):
+        self.hostname = hostname
+        self.ip = ip
+        self.original_getaddrinfo = socket.getaddrinfo
+
+    def __enter__(self):
+        def patched_getaddrinfo(host, port, family=0, type=0, proto=0, flags=0):
+            if host == self.hostname:
+                host = self.ip
+            return self.original_getaddrinfo(host, port, family, type, proto, flags)
+        socket.getaddrinfo = patched_getaddrinfo
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        socket.getaddrinfo = self.original_getaddrinfo
+
+def is_valid_ip(ip_str):
+    """Check if the IP is valid (not loopback, private, etc.)."""
+    try:
+        ip = ipaddress.ip_address(ip_str)
+    except ValueError:
+        return False
+    return not any([
+        ip.is_loopback,
+        ip.is_private,
+        ip.is_link_local,
+        ip.is_multicast,
+        ip.is_reserved
+    ])
+
+def resolve_with_public_dns(hostname):
+    """Resolve hostname using public DNS servers via dns module."""
+    if not DNS_MODULE_AVAILABLE:
+        return None
+    resolver = dns.resolver.Resolver()
+    resolver.nameservers = ['8.8.8.8', '1.1.1.1']  # Google and Cloudflare DNS
+    try:
+        answers = resolver.resolve(hostname, 'A')
+        for answer in answers:
+            ip = answer.address
+            if is_valid_ip(ip):
+                return ip
+    except Exception as e:
+        print(f"Public DNS resolution failed: {e}")
+    return None
+
+def resolve_with_doh(hostname):
+    """Resolve hostname using DNS-over-HTTPS (Google)."""
+    doh_url = f"https://dns.google/resolve?name={hostname}&type=A"
+    try:
+        response = urlopen(doh_url, timeout=5)
+        data = json.loads(response.read())
+        answers = data.get('Answer', [])
+        for answer in answers:
+            if answer.get('type') == 1:  # A record (IPv4)
+                ip = answer['data']
+                if is_valid_ip(ip):
+                    return ip
+    except Exception as e:
+        print(f"DoH resolution failed: {e}")
+    return None
+
+def resolve_hostname(hostname):
+    """Resolve the hostname using system DNS, falling back to public DNS or DoH."""
+    # System DNS resolution
+    system_ips = []
+    try:
+        addr_info = socket.getaddrinfo(
+            hostname, 80,  # Port 80 for HTTP (port doesn't affect resolution)
+            family=socket.AF_INET,
+            proto=socket.IPPROTO_TCP
+        )
+        for info in addr_info:
+            ip = info[4][0]
+            system_ips.append(ip)
+    except (socket.gaierror, socket.herror) as e:
+        print(f"System DNS resolution error: {e}")
+
+    valid_system_ip = next((ip for ip in system_ips if is_valid_ip(ip)), None)
+    if valid_system_ip:
+        return valid_system_ip
+
+    # Fallback to public DNS
+    public_ip = resolve_with_public_dns(hostname)
+    if public_ip:
+        return public_ip
+
+    # Fallback to DoH
+    doh_ip = resolve_with_doh(hostname)
+    return doh_ip
+
 def ping_server(server: str, timeout=20, retries=1, backoff_factor=2, verify_ssl=True):
-    """Check if a server is reachable using custom DNS resolution."""
     # Parse the server URL to extract hostname
     parsed = urlparse(server)
     if not parsed.scheme:
@@ -4126,6 +4054,10 @@ def ping_server(server: str, timeout=20, retries=1, backoff_factor=2, verify_ssl
         print("Invalid server format")
         return False
 
+    resolved_ip = resolve_hostname(hostname)
+    if not resolved_ip:
+        return False
+
     # Configure retry settings
     retry_strategy = Retry(
         total=retries,
@@ -4135,22 +4067,23 @@ def ping_server(server: str, timeout=20, retries=1, backoff_factor=2, verify_ssl
     )
     adapter = HTTPAdapter(max_retries=retry_strategy)
 
-    session = requests.Session()
-    session.mount("http://", adapter)
-    session.mount("https://", adapter)
-    try:
-        response = session.get(
-            server,
-            timeout=timeout,
-            verify=verify_ssl
-        )
-        return response.status_code < 500
-    except requests.exceptions.SSLError as e:
-        print(f"SSL verification failed: {e}")
-        return False
-    except requests.exceptions.RequestException as e:
-        print(f"Request failed: {e}")
-        return False
+    with PatchedDNSContext(hostname, resolved_ip):
+        session = requests.Session()
+        session.mount("http://", adapter)
+        session.mount("https://", adapter)
+        try:
+            response = session.get(
+                server,
+                timeout=timeout,
+                verify=verify_ssl
+            )
+            return response.status_code < 500
+        except requests.exceptions.SSLError as e:
+            print(f"SSL verification failed: {e}")
+            return False
+        except requests.exceptions.RequestException as e:
+            print(f"Request failed: {e}")
+            return False
 
 def cloudflare_protected(url):
     """Check if a URL is protected by Cloudflare."""
@@ -4169,37 +4102,81 @@ def cloudflare_protected(url):
         VSlog(f"Error while checking Cloudflare protection for {url}: {e}")
         return False
 
+# Conditional DNS module import
+try:
+    import dns.resolver
+    DNS_MODULE_AVAILABLE = True
+except ImportError:
+    DNS_MODULE_AVAILABLE = False
+
+def resolve_dns(domain, provider='system'):
+    """Universal DNS resolver with multiple fallback methods"""
+    try:
+        if provider == 'system':
+            return [socket.gethostbyname(domain)]
+            
+        if DNS_MODULE_AVAILABLE:
+            # Use DNS module if available
+            resolver = dns.resolver.Resolver()
+            resolver.timeout = 3
+            resolver.lifetime = 3
+            
+            if provider == 'google':
+                resolver.nameservers = ['8.8.8.8']
+            elif provider == 'cloudflare':
+                resolver.nameservers = ['1.1.1.1']
+                
+            answer = resolver.resolve(domain, 'A')
+            return [str(ip) for ip in answer]
+        else:
+            # Fallback to DNS-over-HTTPS
+            doh_endpoints = {
+                'google': 'https://dns.google/resolve?name={}&type=A',
+                'cloudflare': 'https://cloudflare-dns.com/dns-query?name={}&type=A'
+            }
+            
+            headers = {'Accept': 'application/dns-json'}
+            response = requests.get(
+                doh_endpoints[provider].format(domain),
+                headers=headers,
+                timeout=5
+            )
+            response.raise_for_status()
+            
+            data = response.json()
+            return [answer['data'] for answer in data.get('Answer', []) 
+                    if answer['type'] == 1]
+                    
+    except Exception as e:
+        VSlog(f"DNS Error ({provider}): {str(e)}")
+        return []
+
 def is_using_cloudflare(url):
-    """Comprehensive Cloudflare detection using system DNS"""
+    """Comprehensive Cloudflare detection with automatic fallbacks"""
     VSlog(f"Starting Cloudflare check for: {url}")
     
     try:
         parsed_url = urlparse(url)
         domain = parsed_url.netloc.split(':')[0]
+        
+        # Get DNS results from multiple sources
+        dns_providers = ['system', 'google', 'cloudflare']
         valid_ips = []
-
-        # System DNS resolution
-        try:
-            addr_info = socket.getaddrinfo(
-                domain, 80,
-                family=socket.AF_INET,
-                proto=socket.IPPROTO_TCP
-            )
-            for info in addr_info:
-                ip = info[4][0]
+        
+        for provider in dns_providers:
+            ips = resolve_dns(domain, provider)
+            for ip in ips:
                 if ip in ['127.0.0.1', '0.0.0.0', '::']:
-                    VSlog(f"Blocked IP detected: {ip}")
+                    VSlog(f"Blocked IP detected from {provider}: {ip}")
                 elif ip not in valid_ips:
                     valid_ips.append(ip)
-                    VSlog(f"Valid system DNS IP: {ip}")
-        except socket.gaierror as e:
-            VSlog(f"DNS resolution failed: {e}")
+                    VSlog(f"Valid IP from {provider}: {ip}")
 
         if not valid_ips:
-            VSlog("No valid IPs found via system DNS")
+            VSlog("All DNS resolutions failed or returned invalid IPs")
             return False
-
-        # Configure HTTP session
+            
+        # Configure HTTP session with Android optimizations
         session = requests.Session()
         retry = Retry(
             total=2,
@@ -4218,7 +4195,7 @@ def is_using_cloudflare(url):
                 
         session.mount('https://', AndroidAdapter(max_retries=retry))
         
-        # Connection attempts
+        # Attempt connections
         headers = {
             'User-Agent': 'Mozilla/5.0 (Linux; Android 14) AppleWebKit/537.36',
             'Accept-Encoding': 'gzip, deflate',
@@ -4243,11 +4220,11 @@ def is_using_cloudflare(url):
                     url,
                     headers=headers,
                     timeout=10,
-                    verify=True,  # Use system CA bundle
+                    verify=ssl_verify(),
                     allow_redirects=True
                 )
                 
-                # Cloudflare header detection
+                # Cloudflare header check
                 cf_headers = ['cf-ray', 'cf-cache-status', 'cf-request-id']
                 server_header = response.headers.get('server', '').lower()
                 
@@ -4272,12 +4249,20 @@ def is_using_cloudflare(url):
             except requests.RequestException as e:
                 VSlog(f"Connection error: {str(e)}")
 
-        VSlog("All connection attempts completed")
+        VSlog("All connection attempts failed")
         return False
         
     except Exception as e:
         VSlog(f"Critical error: {str(e)}")
         return False
+
+def ssl_verify():
+    """Smart certificate verification"""
+    try:
+        import certifi
+        return certifi.where()
+    except ImportError:
+        return True  # Use system CA store
 
 def set_wiflix_url(url):
     """Set a new URL for Wiflix in the sites.json file."""
