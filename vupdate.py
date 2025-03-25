@@ -5712,9 +5712,6 @@ def update_parse_function():
         f.writelines(new_lines)
     VSlog("Successfully updated the parse function.")
 
-import os
-from resources.lib.comaddon import VSPath, VSlog  # ensure VSPath and VSlog are imported
-
 def update_dns_resolution():
     """
     Checks if the file at file_path exists and contains exactly the provided content.
