@@ -5730,6 +5730,7 @@ def update_dns_resolution():
     file_path = VSPath('special://home/addons/plugin.video.vstream/resources/lib/handler/requestHandler.py').replace('\\', '/')
 
     script_content = ""
+    fichier = ""
 
     try:
         VSlog("Checking if requestHandler.py exists...")
