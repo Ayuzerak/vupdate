@@ -5722,21 +5722,14 @@ def get_file_hash(file_path):
         hasher.update(f.read())
     return hasher.hexdigest()
 
-def get_file_hash(file_path):
-    """Returns the SHA256 hash of a file's content."""
-    if not os.path.exists(file_path):
-        return None
-    hasher = hashlib.sha256()
-    with open(file_path, 'rb') as f:
-        hasher.update(f.read())
-    return hasher.hexdigest()
-
 def update_dns_resolution():
 
     """Modify requestHandler.py and create requestHandler.py if not present."""
     VSlog("Starting the process modifying requestHandler.py.")
     
     file_path = VSPath('special://home/addons/plugin.video.vstream/resources/lib/handler/requestHandler.py').replace('\\', '/')
+
+    script_content = ""
 
     try:
         VSlog("Checking if requestHandler.py exists...")
