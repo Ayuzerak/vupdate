@@ -3948,10 +3948,9 @@ def add_codeblock_after_block(file_path, block_header, codeblock, insert_after_l
 try:
     import dns.resolver
     DNS_MODULE_AVAILABLE = True
-    VSlog(f"DNS module available")
 except ImportError:
     DNS_MODULE_AVAILABLE = False
-    VSlog(f"DNS module unavailable")
+VSlog(f"DNS resolver module {'available' if DNS_MODULE_AVAILABLE else 'unavailable, using fallback'}")
 
 class PatchedDNSContext:
     """Context manager to override DNS resolution for a specific hostname."""
@@ -3959,13 +3958,12 @@ class PatchedDNSContext:
         self.hostname = hostname
         self.ip = ip
         self.original_getaddrinfo = socket.getaddrinfo
-        VSlog(f"DNS: Override prepared {hostname}->{ip}")
 
     def __enter__(self):
-        VSlog(f"DNS: Active override {self.hostname}->{self.ip}")
+        VSlog(f"DNS: Overriding {self.hostname} -> {self.ip}")
         def patched_getaddrinfo(host, port, family=0, type=0, proto=0, flags=0):
             if host == self.hostname:
-                VSlog(f"DNS: Redirect {host} to {self.ip}")
+                VSlog(f"DNS: Intercepted {host} -> {self.ip}")
                 host = self.ip
             return self.original_getaddrinfo(host, port, family, type, proto, flags)
         socket.getaddrinfo = patched_getaddrinfo
@@ -3990,26 +3988,25 @@ def is_valid_ip(ip_str):
         if reasons:
             VSlog(f"IP {ip_str} invalid: {', '.join(reasons)}")
             return False
-        VSlog(f"IP {ip_str} validated")
         return True
     except ValueError:
-        VSlog(f"IP {ip_str} malformed")
+        VSlog(f"Invalid IP format: {ip_str}")
         return False
 
 def resolve_hostname(hostname, providers=None, all_ips=False):
     """Resolve hostname using specified DNS providers."""
-    VSlog(f"DNS: Resolving {hostname} (all_ips={all_ips})")
+    VSlog(f"Resolving {hostname} (all_ips={all_ips})")
     providers = providers or ['system', 'public', 'doh']
-    
     valid_ips = []
+    
     for provider in providers:
         try:
             ips = []
             if provider == 'system':
                 addr_info = socket.getaddrinfo(hostname, 80, socket.AF_INET, socket.SOCK_STREAM)
                 ips = [info[4][0] for info in addr_info]
-                VSlog(f"DNS/{provider}: Resolved {len(ips)} IPs")
-
+                VSlog(f"SystemDNS: {hostname} → {ips}")
+                
             elif provider in ['public', 'google', 'cloudflare'] and DNS_MODULE_AVAILABLE:
                 resolver = dns.resolver.Resolver()
                 resolver.nameservers = (
@@ -4019,38 +4016,44 @@ def resolve_hostname(hostname, providers=None, all_ips=False):
                 )
                 answers = resolver.resolve(hostname, 'A')
                 ips = [str(r) for r in answers]
-                VSlog(f"DNS/{provider}: Found {len(ips)} records")
-
+                VSlog(f"{provider} DNS: {hostname} → {ips}")
+                
             elif provider == 'doh':
-                for doh_url in [
+                doh_endpoints = [
                     f'https://dns.google/resolve?name={hostname}&type=A',
                     f'https://cloudflare-dns.com/dns-query?name={hostname}&type=A'
-                ]:
+                ]
+                for url in doh_endpoints:
                     try:
-                        response = requests.get(doh_url, headers={'Accept': 'application/dns-json'}, timeout=5)
+                        response = requests.get(url, headers={'Accept': 'application/dns-json'}, timeout=5)
                         data = response.json()
                         ips = [a['data'] for a in data.get('Answer', []) if a.get('type') == 1]
                         if ips:
-                            VSlog(f"DNS/{provider}: Obtained {len(ips)} IPs from {doh_url.split('/')[2]}")
+                            VSlog(f"DoH: {hostname} → {ips} via {url.split('/')[2]}")
                             break
                     except Exception as e:
                         continue
 
             for ip in ips:
-                if ip not in valid_ips and is_valid_ip(ip):
+                if ip in valid_ips:
+                    continue
+                if is_valid_ip(ip):
                     valid_ips.append(ip)
                     if not all_ips:
-                        VSlog(f"DNS: First valid IP {ip} selected")
-                        return [ip]  # Early exit
+                        break
 
         except Exception as e:
-            VSlog(f"DNS/{provider} error: {str(e)[:50]}")
+            VSlog(f"{provider} resolution error: {str(e)}")
+            continue
 
-    VSlog(f"DNS: Final {len(valid_ips)} valid IPs for {hostname}")
+    VSlog(f"Final IPs for {hostname}: {valid_ips}")
     return valid_ips if all_ips else (valid_ips[0] if valid_ips else None)
 
 def create_http_session(retries=1, backoff_factor=1, android_optimized=False, verify_ssl=True):
     """Create configured HTTP session with retry logic."""
+    config = f"[retries={retries}, backoff={backoff_factor}, android={android_optimized}, verify={verify_ssl}]"
+    VSlog(f"Creating HTTP session {config}")
+    
     retry = Retry(
         total=retries,
         backoff_factor=backoff_factor,
@@ -4067,10 +4070,8 @@ def create_http_session(retries=1, backoff_factor=1, android_optimized=False, ve
                 ]
                 super().init_poolmanager(*args, **kwargs)
         adapter = AndroidAdapter(max_retries=retry)
-        VSlog(f"HTTP: Android session (retries={retries})")
     else:
         adapter = HTTPAdapter(max_retries=retry)
-        VSlog(f"HTTP: Standard session (retries={retries})")
 
     session = requests.Session()
     session.mount('http://', adapter)
@@ -4081,102 +4082,97 @@ def create_http_session(retries=1, backoff_factor=1, android_optimized=False, ve
 def ping_server(server: str, timeout=20, retries=1, backoff_factor=2, verify_ssl=True):
     """Check server availability with DNS override."""
     parsed = urlparse(server)
-    hostname = parsed.hostname or server.split('://')[-1].split('/')[0]
-    VSlog(f"Ping: Starting check for {hostname}")
+    if not parsed.scheme:
+        server = f"http://{server}"
+        parsed = urlparse(server)
+    
+    hostname = parsed.hostname
+    if not hostname:
+        return False
 
     resolved_ip = resolve_hostname(hostname)
     if not resolved_ip:
-        VSlog("Ping: No resolvable IPs")
         return False
 
-    session = create_http_session(retries, backoff_factor, verify_ssl=verify_ssl)
-    
+    session = create_http_session(
+        retries=retries,
+        backoff_factor=backoff_factor,
+        verify_ssl=verify_ssl
+    )
+
     with PatchedDNSContext(hostname, resolved_ip):
         try:
             response = session.get(server, timeout=timeout)
-            status_ok = response.status_code < 500
-            VSlog(f"Ping: {hostname} responded {response.status_code}")
-            return status_ok
+            return response.status_code < 500
+        except requests.exceptions.SSLError as e:
+            VSlog(f"SSL Error: {str(e)}")
         except Exception as e:
-            VSlog(f"Ping: Failed {hostname} - {str(e)[:50]}")
-            return False
+            VSlog(f"Ping failed: {str(e)}")
+    return False
 
 def is_using_cloudflare(url):
     """Comprehensive Cloudflare detection with DNS fallbacks."""
-    parsed_url = urlparse(url)
-    domain = parsed_url.netloc.split(':')[0]
-    VSlog(f"CF Check: Starting for {domain}")
+    try:
+        parsed_url = urlparse(url)
+        domain = parsed_url.netloc.split(':')[0]
+        valid_ips = resolve_hostname(domain, ['system', 'google', 'cloudflare'], all_ips=True)
 
-    valid_ips = resolve_hostname(domain, ['system', 'google', 'cloudflare'], all_ips=True)
-    if not valid_ips:
+        if not valid_ips:
+            return False
+
+        session = create_http_session(android_optimized=True)
+        headers = {'User-Agent': 'Mozilla/5.0 (Linux; Android 14) AppleWebKit/537.36'}
+
+        for ip in valid_ips:
+            with PatchedDNSContext(domain, ip):
+                try:
+                    # Connection check
+                    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+                        s.settimeout(3)
+                        s.connect((ip, 443))
+
+                    # Request/response check
+                    response = session.get(url, headers=headers, timeout=10)
+                    cf_headers = {'cf-ray', 'cf-cache-status', 'cf-request-id'}
+                    if cf_headers & response.headers.keys():
+                        return True
+                    if 'cloudflare' in response.headers.get('server', '').lower():
+                        return True
+
+                    # Certificate check
+                    if response.connection and response.connection.sock:
+                        cert = response.connection.sock.getpeercert()
+                        if any('cloudflare' in issuer[0][0][1].lower() 
+                               for issuer in cert.get('issuer', [])):
+                            return True
+
+                except requests.SSLError as e:
+                    if 'cloudflare' in str(e).lower():
+                        return True
+                except Exception as e:
+                    continue
+
         return False
-
-    session = create_http_session(android_optimized=True)
-    headers = {'User-Agent': 'Mozilla/5.0 (Linux; Android 14) AppleWebKit/537.36'}
-
-    for ip in valid_ips:
-        VSlog(f"CF Check: Trying {ip}")
-        with PatchedDNSContext(domain, ip):
-            try:
-                # SSL handshake check
-                with socket.create_connection((ip, 443), timeout=3):
-                    pass
-
-                response = session.get(url, headers=headers, timeout=10)
-                cf_indicators = {
-                    'headers': ['cf-ray', 'cf-cache-status', 'cf-request-id'],
-                    'server': 'cloudflare',
-                    'ssl_issuer': 'cloudflare'
-                }
-
-                # Header check
-                found = any(h in response.headers for h in cf_indicators['headers'])
-                if found:
-                    VSlog(f"CF Check: Detected via headers {list(found)[0]}")
-                    return True
-
-                # Server header check
-                if 'cloudflare' in response.headers.get('server', '').lower():
-                    VSlog("CF Check: Detected via server header")
-                    return True
-
-                # Certificate check
-                cert = response.connection.sock.getpeercert()
-                issuers = ' '.join([issuer[0][0][1].lower() for issuer in cert.get('issuer', [])])
-                if 'cloudflare' in issuers:
-                    VSlog("CF Check: Detected via SSL certificate")
-                    return True
-
-            except requests.SSLError as e:
-                if 'cloudflare' in str(e).lower():
-                    VSlog("CF Check: Detected via SSL error")
-                    return True
-            except Exception as e:
-                continue
-
-    VSlog("CF Check: No indicators found")
-    return False
+    except Exception as e:
+        VSlog(f"Cloudflare check error: {str(e)}")
+        return False
 
 def cloudflare_protected(url):
     """Check if a URL is protected by Cloudflare."""
     try:
         response = requests.get(url)
         if "Checking if the" in response.text:
-            VSlog("CF Quick: Challenge page detected")
             return True
         return False
-    except Exception as e:
-        VSlog(f"CF Quick: Failed - {str(e)[:50]}")
+    except requests.RequestException:
         return False
 
 def ssl_verify():
     """Smart certificate verification."""
     try:
         import certifi
-        VSlog("SSL: Using certifi bundle")
         return certifi.where()
     except ImportError:
-        VSlog("SSL: Using system CA store")
         return True
 
 def set_wiflix_url(url):
