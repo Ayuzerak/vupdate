@@ -5723,17 +5723,15 @@ def get_file_hash(file_path):
     return hasher.hexdigest()
 
 def update_dns_resolution():
-
-    """Modify requestHandler.py and create requestHandler.py if not present."""
-    VSlog("Starting the process modifying requestHandler.py.")
+    """Modify requestHandler.py or create it if not present."""
+    VSlog("Starting the process of modifying requestHandler.py.")
     
     file_path = VSPath('special://home/addons/plugin.video.vstream/resources/lib/handler/requestHandler.py').replace('\\', '/')
 
-    VSlog("Checking if requestHandler.py exists...")
-    if not os.path.exists(file_path):
-        VSlog("requestHandler.py not found. Creating file...")
-        with open(file_path, 'w', encoding='utf-8') as fichier:
-            script_content = """# -*- coding: utf-8 -*-
+    script_content = ""
+    fichier = open(file_path, 'w', encoding='utf-8')
+
+    script_content = """# -*- coding: utf-8 -*-
 # vStream https://github.com/Kodi-vStream/venom-xbmc-addons
 #
 from requests import post, Session, Request, RequestException, ConnectionError
@@ -6082,18 +6080,25 @@ def __randy_boundary(length=10):
     import string
     return ''.join(random.choice(string.ascii_letters + string.digits) for _ in range(length))"""
 
-            fichier.write(script_content)
-            VSlog(f"Created requestHandler.py with the required content at: {file_path}.")
-    else:
-        VSlog(f"requestHandler already exists at: {file_path}. Skipping file creation.")
-        intended_hash = hashlib.sha256(script_content.encode('utf-8')).hexdigest()
-        current_hash = get_file_hash(file_path)
-        if current_hash == intended_hash:
-            VSlog(f"requestHandler.py is already up to date. No modifications needed.")
+    try:
+        VSlog(f"Checking if requestHandler.py exists at {file_path}...")
+        if not os.path.exists(file_path):
+            VSlog("File not found. Creating...")
+            with open(file_path, 'w', encoding='utf-8') as f:
+                f.write(script_content)
+            VSlog(f"Created requestHandler.py at {file_path}.")
         else:
-            fichier.write(script_content)
-            VSlog(f"Modified requestHandler.py with the required content at: {file_path}.")
-
+            current_hash = get_file_hash(file_path)
+            if current_hash == intended_hash:
+                VSlog("requestHandler.py is already up to date. No modifications needed.")
+            else:
+                VSlog("requestHandler.py is outdated. Updating...")
+                with open(file_path, 'w', encoding='utf-8') as f:
+                    f.write(script_content)
+                VSlog(f"Updated requestHandler.py at {file_path}.")
+    except Exception as e:
+        VSlog(f"An error occurred: {str(e)}")
+        
 # def save_watched_recommendations_to_json():
 #     oDb = cDb()
 #     ADDON = addon()
