@@ -5739,7 +5739,7 @@ def update_dns_resolution():
             VSlog(f"File '{file_path}' already contains the desired content.")
 
 # The content to write:
-target_content = r"""# -*- coding: utf-8 -*-
+target_content = """# -*- coding: utf-8 -*-
 # vStream https://github.com/Kodi-vStream/venom-xbmc-addons
 #
 from requests import post, Session, Request, RequestException, ConnectionError
