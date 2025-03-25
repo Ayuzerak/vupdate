@@ -5712,6 +5712,148 @@ def update_parse_function():
         f.writelines(new_lines)
     VSlog("Successfully updated the parse function.")
 
+def update_dns_resolution():
+
+    file_path = VSPath("special://home/addons/plugin.video.vstream/resources/lib/handler/requestHandlerpy")
+    
+    # Define patterns and replacements
+    patterns = {
+        # Remove dns.resolver imports
+        r'import\s+dns\.resolver\s*\n': '',
+        
+        # Replace new_getaddrinfo implementation
+        r'(def new_getaddrinfo\(self, \*args\):.*?return self\.save_getaddrinfo\(\*args\))':
+        '''def new_getaddrinfo(self, *args):
+        try:
+            host = args[0]
+            port = args[1]
+
+            if "//" in host:
+                host = host.split("//")[1]
+            host = host.split("/")[0]
+
+            nameservers = [
+                '80.67.169.12', '2001:910:800::12',
+                '80.67.169.40', '2001:910:800::40',
+                '1.1.1.1', '2606:4700:4700::1111'
+            ]
+
+            def encode_dns_name(domain):
+                encoded = b''
+                parts = domain.encode('utf-8').split(b'.')
+                for part in parts:
+                    encoded += struct.pack('B', len(part)) + part
+                return encoded + b'\\x00'
+
+            def dns_query(ns, query_host):
+                try:
+                    family = socket.AF_INET
+                    try:
+                        socket.inet_pton(socket.AF_INET, ns)
+                    except socket.error:
+                        socket.inet_pton(socket.AF_INET6, ns)
+                        family = socket.AF_INET6
+
+                    query_id = random.randint(0, 65535)
+                    header = struct.pack('!HHHHHH', query_id, 0x0100, 1, 0, 0, 0)
+                    encoded_name = encode_dns_name(query_host)
+                    question = encoded_name + struct.pack('!HH', 1, 1)
+                    packet = header + question
+
+                    sock = socket.socket(family, socket.SOCK_DGRAM)
+                    sock.settimeout(2)
+                    try:
+                        sock.sendto(packet, (ns, 53))
+                        data, _ = sock.recvfrom(1024)
+                    finally:
+                        sock.close()
+
+                    if len(data) < 12:
+                        return []
+                    response_id = struct.unpack('!H', data[:2])[0]
+                    if response_id != query_id:
+                        return []
+                    ancount = struct.unpack('!H', data[6:8])[0]
+                    if ancount == 0:
+                        return []
+
+                    pos = 12
+                    while pos < len(data) and data[pos] != 0:
+                        pos += data[pos] + 1
+                    pos += 5
+
+                    answers = []
+                    for _ in range(ancount):
+                        if data[pos] == 0xc0:
+                            pos += 2
+                        else:
+                            while pos < len(data) and data[pos] != 0:
+                                pos += data[pos] + 1
+                            pos += 1
+
+                        if pos + 10 > len(data):
+                            break
+                        qtype, qclass, _, rdlength = struct.unpack('!HHIH', data[pos:pos+10])
+                        pos += 10
+                        if qtype != 1 or rdlength != 4:
+                            pos += rdlength
+                            continue
+                        ip = socket.inet_ntoa(data[pos:pos+4])
+                        answers.append(ip)
+                        pos += rdlength
+                    return answers
+                except Exception as e:
+                    return []
+
+            for ns in nameservers:
+                answers = dns_query(ns, host)
+                if answers:
+                    host_found = answers[0]
+                    VSlog(f"Resolved {host} to {host_found} via {ns}")
+                    return [(socket.AF_INET, socket.SOCK_STREAM, 0, '', (host_found, port))]
+
+            return self.save_getaddrinfo(*args)
+        except Exception as e:
+            VSlog(f"new_getaddrinfo ERROR: {e}")
+            return self.save_getaddrinfo(*args)''',
+    }
+
+    # Read file content
+    try:
+        with open(file_path, 'r', encoding='utf-8') as f:
+            content = f.read()
+    except FileNotFoundError:
+        VSlog(f"Error: File {file_path} not found")
+        return
+
+    modified = False
+
+    # Apply replacements
+    for pattern, replacement in patterns.items():
+        # Use DOTALL flag to match across newlines
+        regex = re.compile(pattern, re.DOTALL)
+        if regex.search(content):
+            content = regex.sub(replacement, content)
+            modified = True
+
+    # Add required imports if they're missing
+    required_imports = ['import struct', 'import random']
+    for imp in required_imports:
+        if imp not in content:
+            content = f"{imp}\n{content}"
+            modified = True
+
+    # Write back changes if any modifications were made
+    if modified:
+        try:
+            with open(file_path, 'w', encoding='utf-8') as f:
+                f.write(content)
+            VSlog("Successfully updated DNS resolution implementation")
+        except Exception as e:
+            VSlog(f"Error writing file: {str(e)}")
+    else:
+        VSlog("No changes needed - custom DNS implementation already exists")
+
 # def save_watched_recommendations_to_json():
 #     oDb = cDb()
 #     ADDON = addon()
@@ -5787,6 +5929,7 @@ class cUpdate:
         try:
             # Execute the function to apply changes
             update_parse_function()
+            update_dns_resolution()
             
             # Update URLs for sites
             VSlog("Updating site URLs.")
