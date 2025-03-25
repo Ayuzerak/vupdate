@@ -4275,6 +4275,24 @@ def ssl_verify():
         VSlog("Falling back to system CA store")
         return True
 
+def set_wiflix_url(url):
+    """Set a new URL for Wiflix in the sites.json file."""
+    VSlog(f"Setting new Wiflix URL to {url}.")
+    sites_json = VSPath('special://home/addons/plugin.video.vstream/resources/sites.json').replace('\\','/')
+    try:
+        with open(sites_json, 'r') as fichier:
+            data = json.load(fichier)
+        if 'wiflix' in data['sites']:
+            data['sites']['wiflix']['url'] = url
+            data['sites']['wiflix']['cloudflare'] = "False" if not is_using_cloudflare(url) else "True"
+            with open(sites_json, 'w') as fichier:
+                json.dump(data, fichier, indent=4)
+            VSlog(f"Wiflix URL updated successfully in {sites_json}.")
+        else:
+            VSlog("Wiflix entry not found in sites.json.")
+    except Exception as e:
+        VSlog(f"Error while updating Wiflix URL: {e}")
+
 def get_wiflix_url():
     """Retrieve the Wiflix URL from its website."""
     VSlog("Retrieving Wiflix URL from its website.")
