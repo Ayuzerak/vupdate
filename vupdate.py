@@ -6071,7 +6071,7 @@ def MPencode(fields):
                 mimetype = mimetypes.guess_type(value.name)[0] or 'application/octet-stream'
                 form_data.append(f'--{random_boundary}\\r\\nContent-Disposition: form-data; name="{key}"; filename="{value.name}"\\r\\nContent-Type: {mimetype}\\r\\n\\r\\n{value.read()}\\r\\n')
         else:
-            form_data.append(f'--{random_boundary}\r\nContent-Disposition: form-data; name="{key}"\\r\\n\\r\\n{value}\\r\\n')
+            form_data.append(f'--{random_boundary}\\r\\nContent-Disposition: form-data; name="{key}"\\r\\n\\r\\n{value}\\r\\n')
     form_data.append(f'--{random_boundary}--\\r\\n')
     return content_type, ''.join(form_data)
 
