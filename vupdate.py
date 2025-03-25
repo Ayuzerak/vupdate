@@ -5720,23 +5720,6 @@ def update_dns_resolution():
     Logs messages using VSlog to indicate whether the file was created, updated, or already had the content.
     """
     file_path = VSPath("special://home/addons/plugin.video.vstream/resources/lib/requestHandler.py")
-    
-    if not os.path.exists(file_path):
-        # File doesn't exist; create it with the provided content.
-        with open(file_path, "w", encoding="utf-8") as f:
-            f.write(target_content)
-        VSlog(f"File '{file_path}' created with the provided content.")
-    else:
-        # File exists; check its content.
-        with open(file_path, "r", encoding="utf-8") as f:
-            current_content = f.read()
-        if current_content != target_content:
-            # Content differs; update the file.
-            with open(file_path, "w", encoding="utf-8") as f:
-                f.write(target_content)
-            VSlog(f"File '{file_path}' updated with the new content.")
-        else:
-            VSlog(f"File '{file_path}' already contains the desired content.")
 
 # The content to write:
 target_content = """# -*- coding: utf-8 -*-
@@ -6089,6 +6072,22 @@ def __randy_boundary(length=10):
     return ''.join(random.choice(string.ascii_letters + string.digits) for _ in range(length))
     """
 
+    if not os.path.exists(file_path):
+        # File doesn't exist; create it with the provided content.
+        with open(file_path, "w", encoding="utf-8") as f:
+            f.write(target_content)
+        VSlog(f"File '{file_path}' created with the provided content.")
+    else:
+        # File exists; check its content.
+        with open(file_path, "r", encoding="utf-8") as f:
+            current_content = f.read()
+        if current_content != target_content:
+            # Content differs; update the file.
+            with open(file_path, "w", encoding="utf-8") as f:
+                f.write(target_content)
+            VSlog(f"File '{file_path}' updated with the new content.")
+        else:
+            VSlog(f"File '{file_path}' already contains the desired content.")
 
 # def save_watched_recommendations_to_json():
 #     oDb = cDb()
