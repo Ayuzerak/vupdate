@@ -11,6 +11,7 @@ import shutil
 import os
 import traceback
 import json
+import hashlib
 import io
 import requests
 import re
@@ -5712,16 +5713,28 @@ def update_parse_function():
         f.writelines(new_lines)
     VSlog("Successfully updated the parse function.")
 
-def update_dns_resolution():
-    """
-    Checks if the file at file_path exists and contains exactly the provided content.
-    If the file doesn't exist or the content differs, it writes the given content to the file.
-    
-    Logs messages using VSlog to indicate whether the file was created, updated, or already had the content.
-    """
-    file_path = VSPath("special://home/addons/plugin.video.vstream/resources/lib/requestHandler.py")
+def get_file_hash(file_path):
+    """Returns the SHA256 hash of a file's content."""
+    if not os.path.exists(file_path):
+        return None
+    hasher = hashlib.sha256()
+    with open(file_path, 'rb') as f:
+        hasher.update(f.read())
+    return hasher.hexdigest()
 
-    content = """# -*- coding: utf-8 -*-
+def update_dns_resolution():
+
+    """Modify requestHandler.py and create requestHandler.py if not present."""
+    VSlog("Starting the process modifying requestHandler.py.")
+    
+    file_path = VSPath('special://home/addons/plugin.video.vstream/resources/lib/requestHandler.py').replace('\\', '/')
+
+    try:
+        VSlog("Checking if requestHandler.py exists...")
+        if not os.path.exists(file_path):
+            VSlog("requestHandler.py not found. Creating file...")
+            with open(file_path, 'w', encoding='utf-8') as fichier:
+                script_content = """# -*- coding: utf-8 -*-
 # vStream https://github.com/Kodi-vStream/venom-xbmc-addons
 #
 from requests import post, Session, Request, RequestException, ConnectionError
@@ -5914,7 +5927,7 @@ class cRequestHandler:
                     self.__enableDNS = True
                     return self.__callRequest(jsonDecode)
                 else:
-                    dialog().VSerror('%s (%s)' % (addon().VSlang(30470), urlHostName(self.__sUrl))
+                    dialog().VSerror('%s (%s)' % (addon().VSlang(30470), urlHostName(self.__sUrl)))
             else:
                 return ''
 
@@ -6068,23 +6081,22 @@ def MPencode(fields):
 
 def __randy_boundary(length=10):
     import string
-    return ''.join(random.choice(string.ascii_letters + string.digits) for _ in range(length))
-"""
+    return ''.join(random.choice(string.ascii_letters + string.digits) for _ in range(length))"""
 
-    # Check if file exists
-    if os.path.exists(file_path):
-        with open(file_path, "r", encoding="utf-8") as file:
-            existing_content = file.read()
-        # If content already exists, do nothing
-        if content.strip() == existing_content.strip():
-            VSlog(f"File {file_path} already contains the desired content. No changes made.")
-            return
-    
-    # If file doesn't exist or content is different, write to file
-    with open(file_path, "w", encoding="utf-8") as file:
-        file.write(content)
-    VSlog(f"File {file_path} has been created or updated.")
+                fichier.write(script_content)
+                VSlog(f"Created requestHandler.py with the required content at: {file_path}.")
+        else:
+            VSlog(f"requestHandler already exists at: {file_path}. Skipping file creation.")
+            intended_hash = hashlib.sha256(script_content.encode('utf-8')).hexdigest()
+            current_hash = get_file_hash(file_path)
+            if current_hash == intended_hash:
+                VSlog(f"requestHandler.py is already up to date. No modifications needed.")
+            else:
+                fichier.write(script_content)
+                VSlog(f"Modified requestHandler.py with the required content at: {file_path}.")
 
+    except Exception as e:
+        VSlog(f"An error occurred: {str(e)}")
 
 # def save_watched_recommendations_to_json():
 #     oDb = cDb()
