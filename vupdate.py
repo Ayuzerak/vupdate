@@ -5712,18 +5712,271 @@ def update_parse_function():
         f.writelines(new_lines)
     VSlog("Successfully updated the parse function.")
 
-def update_dns_resolution():
+import os
+from resources.lib.comaddon import VSPath, VSlog  # ensure VSPath and VSlog are imported
 
-    file_path = VSPath("special://home/addons/plugin.video.vstream/resources/lib/handler/requestHandler.py")
+def update_dns_resolution():
+    """
+    Checks if the file at file_path exists and contains exactly the provided content.
+    If the file doesn't exist or the content differs, it writes the given content to the file.
     
-    # Define patterns and replacements
-    patterns = {
-        # Remove dns.resolver imports
-        r'import\s+dns\.resolver\s*\n': '',
-        
-        # Replace new_getaddrinfo implementation
-        r'(def new_getaddrinfo\(self, \*args\):.*?return self\.save_getaddrinfo\(\*args\))':
-        '''def new_getaddrinfo(self, *args):
+    Logs messages using VSlog to indicate whether the file was created, updated, or already had the content.
+    """
+    file_path = VSPath("special://home/addons/plugin.video.vstream/resources/lib/requestHandler.py")
+    
+    if not os.path.exists(file_path):
+        # File doesn't exist; create it with the provided content.
+        with open(file_path, "w", encoding="utf-8") as f:
+            f.write(target_content)
+        VSlog(f"File '{file_path}' created with the provided content.")
+    else:
+        # File exists; check its content.
+        with open(file_path, "r", encoding="utf-8") as f:
+            current_content = f.read()
+        if current_content != target_content:
+            # Content differs; update the file.
+            with open(file_path, "w", encoding="utf-8") as f:
+                f.write(target_content)
+            VSlog(f"File '{file_path}' updated with the new content.")
+        else:
+            VSlog(f"File '{file_path}' already contains the desired content.")
+
+# The content to write:
+target_content = r"""# -*- coding: utf-8 -*- 
+# vStream https://github.com/Kodi-vStream/venom-xbmc-addons
+#
+from requests import post, Session, Request, RequestException, ConnectionError
+from resources.lib.comaddon import addon, dialog, VSlog, VSPath, isMatrix
+from resources.lib.util import urlHostName
+
+import requests.packages.urllib3.util.connection as urllib3_cn
+import socket
+import struct
+import random
+
+
+class cRequestHandler:
+    REQUEST_TYPE_GET = 0
+    REQUEST_TYPE_POST = 1
+    REQUEST_TYPE_PUT = 2
+    REQUEST_TYPE_DELETE = 3
+
+    def __init__(self, sUrl):
+        self.__sUrl = sUrl
+        self.__sRealUrl = ''
+        self.__cType = 0
+        self.__aParamaters = {}
+        self.__aParamatersLine = ''
+        self.__aHeaderEntries = {}
+        self.__Cookie = {}
+        self.removeBreakLines(True)
+        self.removeNewLines(True)
+        self.__setDefaultHeader()
+        self.__timeout = 20
+        self.__bRemoveNewLines = False
+        self.__bRemoveBreakLines = False
+        self.__sResponseHeader = ''
+        self.BUG_SSL = False
+        self.__enableDNS = False
+        self.s = Session()
+        self.redirects = True
+        self.verify = True
+        self.json = {}
+        self.forceIPV4 = False
+        self.oResponse = None
+
+    def statusCode(self):
+        return self.oResponse.status_code
+
+    def disableIPV6(self):
+        self.forceIPV4 = True
+
+    def allowed_gai_family(self):
+        family = socket.AF_INET
+        if urllib3_cn.HAS_IPV6:
+            family = socket.AF_INET
+        return family
+
+    def disableSSL(self):
+        self.verify = False
+
+    def disableRedirect(self):
+        self.redirects = False
+
+    def removeNewLines(self, bRemoveNewLines):
+        self.__bRemoveNewLines = bRemoveNewLines
+
+    def removeBreakLines(self, bRemoveBreakLines):
+        self.__bRemoveBreakLines = bRemoveBreakLines
+
+    def setRequestType(self, cType):
+        self.__cType = cType
+
+    def setTimeout(self, valeur):
+        self.__timeout = valeur
+
+    def addCookieEntry(self, sHeaderKey, sHeaderValue):
+        aHeader = {sHeaderKey: sHeaderValue}
+        self.__Cookie.update(aHeader)
+
+    def addJSONEntry(self, sHeaderKey, sHeaderValue):
+        aHeader = {sHeaderKey: sHeaderValue}
+        self.json.update(aHeader)
+
+    def addHeaderEntry(self, sHeaderKey, sHeaderValue):
+        for sublist in list(self.__aHeaderEntries):
+            if sHeaderKey in sublist:
+                self.__aHeaderEntries.pop(sublist)
+            if sHeaderKey == "Content-Length":
+                sHeaderValue = str(sHeaderValue)
+        aHeader = {sHeaderKey: sHeaderValue}
+        self.__aHeaderEntries.update(aHeader)
+
+    def addParameters(self, sParameterKey, mParameterValue):
+        self.__aParamaters[sParameterKey] = mParameterValue
+
+    def addParametersLine(self, mParameterValue):
+        self.__aParamatersLine = mParameterValue
+
+    def addMultipartFiled(self, fields):
+        mpartdata = MPencode(fields)
+        self.__aParamatersLine = mpartdata[1]
+        self.addHeaderEntry('Content-Type', mpartdata[0])
+        self.addHeaderEntry('Content-Length', len(mpartdata[1]))
+
+    def getResponseHeader(self):
+        return self.__sResponseHeader
+
+    def getRealUrl(self):
+        return self.__sRealUrl
+
+    def request(self, jsonDecode=False):
+        return self.__callRequest(jsonDecode)
+
+    def GetCookies(self):
+        if not self.__sResponseHeader:
+            return ''
+        if 'Set-Cookie' in self.__sResponseHeader:
+            import re
+            c = self.__sResponseHeader.get('set-cookie')
+            c2 = re.findall('(?:^|,) *([^;,]+?)=([^;,]+?);', c)
+            if c2:
+                cookies = ''
+                for cook in c2:
+                    cookies = cookies + cook[0] + '=' + cook[1] + ';'
+                return cookies[:-1]
+        return ''
+
+    def __setDefaultHeader(self):
+        self.addHeaderEntry('User-Agent', 'Mozilla/5.0 (Windows NT 6.1; WOW64; rv:50.0) Gecko/20100101 Firefox/50.0')
+        self.addHeaderEntry('Accept-Language', 'fr,fr-FR;q=0.8,en-US;q=0.5,en;q=0.3')
+        self.addHeaderEntry('Accept-Charset', 'ISO-8859-1,utf-8;q=0.7,*;q=0.7')
+
+    def __callRequest(self, jsonDecode=False):
+        if self.__enableDNS:
+            self.save_getaddrinfo = socket.getaddrinfo
+            socket.getaddrinfo = self.new_getaddrinfo
+
+        if self.__aParamatersLine:
+            sParameters = self.__aParamatersLine
+        else:
+            sParameters = self.__aParamaters
+
+        if self.__cType == cRequestHandler.REQUEST_TYPE_GET and len(sParameters) > 0:
+            self.__sUrl += '?' + str(sParameters) if '?' not in self.__sUrl else '&' + str(sParameters)
+            sParameters = ''
+
+        sContent = ''
+
+        if self.BUG_SSL:
+            self.verify = False
+
+        method = ["GET", "POST", "PUT", "DELETE"][self.__cType]
+
+        if self.forceIPV4:
+            urllib3_cn.allowed_gai_family = self.allowed_gai_family
+
+        try:
+            _request = Request(method, self.__sUrl, headers=self.__aHeaderEntries)
+            if method == 'POST':
+                _request.data = sParameters
+            if self.__Cookie:
+                _request.cookies = self.__Cookie
+            if self.json:
+                _request.json = self.json
+
+            prepped = _request.prepare()
+            self.s.headers.update(self.__aHeaderEntries)
+
+            self.oResponse = self.s.send(prepped, timeout=self.__timeout, allow_redirects=self.redirects, verify=self.verify)
+            self.__sResponseHeader = self.oResponse.headers
+            self.__sRealUrl = self.oResponse.url
+
+            if jsonDecode:
+                sContent = self.oResponse.json()
+            else:
+                sContent = self.oResponse.content
+                if isMatrix() and 'youtube' not in self.oResponse.url:
+                    try:
+                        sContent = sContent.decode()
+                    except:
+                        try:
+                            sContent = sContent.decode('unicode-escape')
+                        except:
+                            pass
+
+        except ConnectionError as e:
+            if 'CERTIFICATE_VERIFY_FAILED' in str(e) and not self.BUG_SSL:
+                self.BUG_SSL = True
+                return self.__callRequest(jsonDecode)
+            elif self.__enableDNS == False and ('getaddrinfo failed' in str(e) or 'Failed to establish a new connection' in str(e)):
+                import xbmcvfs
+                if xbmcvfs.exists('special://home/addons/script.module.dnspython/'):
+                    self.__enableDNS = True
+                    return self.__callRequest(jsonDecode)
+                else:
+                    dialog().VSerror('%s (%s)' % (addon().VSlang(30470), urlHostName(self.__sUrl)))
+            else:
+                return ''
+
+        except RequestException as e:
+            if 'CERTIFICATE_VERIFY_FAILED' in str(e) and not self.BUG_SSL:
+                self.BUG_SSL = True
+                return self.__callRequest(jsonDecode)
+            else:
+                dialog().VSerror("%s (%s),%s" % (addon().VSlang(30205), e, self.__sUrl))
+
+        if self.oResponse and self.oResponse.status_code in [503, 403] and "Forbidden" not in sContent:
+            CLOUDPROXY_ENDPOINT = 'http://' + addon().getSetting('ipaddress') + ':8191/v1'
+            try:
+                json_response = post(CLOUDPROXY_ENDPOINT, headers=self.__aHeaderEntries, json={
+                    'cmd': 'request.%s' % method.lower(),
+                    'url': self.__sUrl
+                })
+                if json_response:
+                    response = json_response.json()
+                    if 'solution' in response:
+                        self.__sRealUrl = response['solution']['url']
+                        sContent = response['solution']['response']
+            except:
+                pass
+
+        if self.oResponse and self.oResponse.status_code not in [200, 204, 302]:
+            dialog().VSerror("%s (%d),%s" % (addon().VSlang(30205), self.oResponse.status_code, self.__sUrl))
+
+        if sContent:
+            if self.__bRemoveNewLines:
+                sContent = sContent.replace("\n", "").replace("\r\t", "")
+            if self.__bRemoveBreakLines:
+                sContent = sContent.replace("&nbsp;", "")
+
+        if self.__enableDNS:
+            socket.getaddrinfo = self.save_getaddrinfo
+            self.__enableDNS = False
+
+        return sContent
+
+    def new_getaddrinfo(self, *args):
         try:
             host = args[0]
             port = args[1]
@@ -5815,44 +6068,30 @@ def update_dns_resolution():
             return self.save_getaddrinfo(*args)
         except Exception as e:
             VSlog(f"new_getaddrinfo ERROR: {e}")
-            return self.save_getaddrinfo(*args)''',
-    }
+            return self.save_getaddrinfo(*args)
 
-    # Read file content
-    try:
-        with open(file_path, 'r', encoding='utf-8') as f:
-            content = f.read()
-    except FileNotFoundError:
-        VSlog(f"Error: File {file_path} not found")
-        return
 
-    modified = False
+def MPencode(fields):
+    import mimetypes
+    random_boundary = __randy_boundary()
+    content_type = f"multipart/form-data, boundary={random_boundary}"
+    form_data = []
+    for key, value in fields.items():
+        if hasattr(value, 'read'):
+            with value:
+                mimetype = mimetypes.guess_type(value.name)[0] or 'application/octet-stream'
+                form_data.append(f'--{random_boundary}\r\nContent-Disposition: form-data; name="{key}"; filename="{value.name}"\r\nContent-Type: {mimetype}\r\n\r\n{value.read()}\r\n')
+        else:
+            form_data.append(f'--{random_boundary}\r\nContent-Disposition: form-data; name="{key}"\r\n\r\n{value}\r\n')
+    form_data.append(f'--{random_boundary}--\r\n')
+    return content_type, ''.join(form_data)
 
-    # Apply replacements
-    for pattern, replacement in patterns.items():
-        # Use DOTALL flag to match across newlines
-        regex = re.compile(pattern, re.DOTALL)
-        if regex.search(content):
-            content = regex.sub(replacement, content)
-            modified = True
 
-    # Add required imports if they're missing
-    required_imports = ['import struct', 'import random']
-    for imp in required_imports:
-        if imp not in content:
-            content = f"{imp}\n{content}"
-            modified = True
+def __randy_boundary(length=10):
+    import string
+    return ''.join(random.choice(string.ascii_letters + string.digits) for _ in range(length))
+    """
 
-    # Write back changes if any modifications were made
-    if modified:
-        try:
-            with open(file_path, 'w', encoding='utf-8') as f:
-                f.write(content)
-            VSlog("Successfully updated DNS resolution implementation")
-        except Exception as e:
-            VSlog(f"Error writing file: {str(e)}")
-    else:
-        VSlog("No changes needed - custom DNS implementation already exists")
 
 # def save_watched_recommendations_to_json():
 #     oDb = cDb()
