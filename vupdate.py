@@ -5714,7 +5714,7 @@ def update_parse_function():
 
 def update_dns_resolution():
 
-    file_path = VSPath("special://home/addons/plugin.video.vstream/resources/lib/handler/requestHandlerpy")
+    file_path = VSPath("special://home/addons/plugin.video.vstream/resources/lib/handler/requestHandler.py")
     
     # Define patterns and replacements
     patterns = {
