@@ -5913,17 +5913,17 @@ def update_streamonsport_module():
     updated_live = replace_function(content, 'showLive', new_code_live)
 
     # 3. Update SPORT_TV entry
-    sport_tv_entry = "    ('29-chaines-tv-france-en-streaming.html', 'showChannels'),\n"
+    sport_tv_entry = "('29-chaines-tv-france-en-streaming.html', 'showChannels')"
     sport_tv_found = any(sport_tv_entry.strip() in line.strip() for line in content)
     
     if not sport_tv_found:
         sport_tv_block = False
         for i, line in enumerate(content):
-            if line.strip().startswith('SPORT_TV = ('):
+            if line.strip().startswith('SPORT_TV ='):
                 sport_tv_block = True
-            elif sport_tv_block and line.strip().endswith(')'):
+            elif sport_tv_block:
                 # Insert before closing parenthesis
-                content.insert(i, sport_tv_entry)
+                line.replace(line , 'SPORT_TV = ' + sport_tv_entry)
                 updated = True
                 VSlog('Added SPORT_TV entry')
                 break
