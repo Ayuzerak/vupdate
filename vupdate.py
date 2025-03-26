@@ -5730,7 +5730,41 @@ def create_recommendation_files_to_watch():
     )
 
 def update_streamonsport_module():
-    # Définir les nouvelles fonctions comme des chaînes multilignes sans nouvelles lignes initiales/finales
+    # Define new functions as multiline strings
+    new_code_channels = """def showChannels(sSearch=''):
+    oGui = cGui()
+    oInputParameterHandler = cInputParameterHandler()
+    sUrl = oInputParameterHandler.getValue('siteUrl')
+    urlMain = GetUrlMain()
+
+    sUrl = urlMain + sUrl
+        
+    oRequestHandler = cRequestHandler(sUrl)
+    sHtmlContent = oRequestHandler.request()
+    sPattern = '<a class="game-name"[^>]+href="([^"]+)"[^>]*><span>([^<]+)</span></a>.*?<time class="DISDATE"[^>]+data-timestamp="([^"]+)".*?·\\s*([^<]+)<'
+    oParser = cParser()
+    aResult = oParser.parse(sHtmlContent, sPattern)
+    if (not aResult[0]):
+        oGui.addText(SITE_IDENTIFIER)
+    else:
+        oOutputParameterHandler = cOutputParameterHandler()
+        for aEntry in aResult[1]:
+            sUrl2 = aEntry[0]
+            sTitle = aEntry[1].replace(' streaming gratuit', '').strip()
+
+            # bChaine = True
+            sTitle = sTitle.upper()
+            sDisplayTitle = sTitle
+
+            sThumb = f'{urlMain}theme2/avif/logo.avif'
+
+            oOutputParameterHandler.addParameter('siteUrl', sUrl2)
+            oOutputParameterHandler.addParameter('sMovieTitle', sTitle)
+            oOutputParameterHandler.addParameter('sDesc', sDisplayTitle)
+            oOutputParameterHandler.addParameter('sThumb', sThumb)
+            oGui.addLink(SITE_IDENTIFIER, 'showLive', sDisplayTitle, sThumb, sDisplayTitle, oOutputParameterHandler)
+    oGui.setEndOfDirectory()"""
+
     new_code_movies = """def showMovies(sSearch=''):
     oGui = cGui()
     oInputParameterHandler = cInputParameterHandler()
@@ -5815,12 +5849,24 @@ def update_streamonsport_module():
 
     oGui.setEndOfDirectory()"""
 
-    # Chemin du fichier à modifier
+    # File path handling
     file_path = VSPath('special://home/addons/plugin.video.vstream/resources/sites/streamonsport.py').replace('\\', '/')
     
-    # Lire le contenu actuel
+    # Read current content
     with open(file_path, 'r', encoding='utf-8') as f:
         content = f.readlines()
+
+    updated = False
+
+    # 1. Add showChannels function
+    channel_exists = any(line.strip().startswith('def showChannels(') for line in content)
+    if not channel_exists:
+        show_movies_index = next((i for i, line in enumerate(content) if line.strip().startswith('def showMovies(')), -1)
+        if show_movies_index != -1:
+            new_lines = [line + '\n' for line in new_code_channels.split('\n')]
+            content[show_movies_index:show_movies_index] = new_lines
+            updated = True
+            VSlog('Added showChannels function')
 
     # Fonction utilitaire pour remplacer une fonction si nécessaire
     def replace_function(content, func_name, new_code):
@@ -5863,18 +5909,38 @@ def update_streamonsport_module():
             return True
         return False
 
-    # Effectuer les remplacements seulement si nécessaires
     updated_movies = replace_function(content, 'showMovies', new_code_movies)
     updated_live = replace_function(content, 'showLive', new_code_live)
 
-    # Écrire le nouveau contenu seulement si des modifications ont été faites
-    if updated_movies or updated_live:
+    # 3. Update SPORT_TV entry
+    sport_tv_entry = "    ('29-chaines-tv-france-en-streaming.html', 'showChannels'),\n"
+    sport_tv_found = any(sport_tv_entry.strip() in line.strip() for line in content)
+    
+    if not sport_tv_found:
+        sport_tv_block = False
+        for i, line in enumerate(content):
+            if line.strip().startswith('SPORT_TV = ('):
+                sport_tv_block = True
+            elif sport_tv_block and line.strip().endswith(')'):
+                # Insert before closing parenthesis
+                content.insert(i, sport_tv_entry)
+                updated = True
+                VSlog('Added SPORT_TV entry')
+                break
+            elif sport_tv_block and line.strip():
+                # Check if entry already exists in different format
+                if '29-chaines-tv-france-en-streaming.html' in line and 'showChannels' in line:
+                    sport_tv_found = True
+                    break
+
+    # Write changes if needed
+    if updated or updated_movies or updated_live:
         with open(file_path, 'w', encoding='utf-8') as f:
             f.writelines(content)
-        VSlog('Streamonsport.py : Mise à jour effectuée avec succès!')
+        VSlog('Streamonsport.py successfully updated')
     else:
-        VSlog('Streamonsport.py : Aucune mise à jour nécessaire.')
-
+        VSlog('No updates needed for streamonsport.py')
+        
 def update_parse_function():
     file_path = VSPath("special://home/addons/plugin.video.vstream/resources/lib/parser.py")
     
