@@ -4291,7 +4291,7 @@ def get_frenchstream_url():
                     VSlog(f"Redirection detected: {url} -> {effective_url}")
                 return effective_url
             else:
-                VSlog(f"Content validation failed for {url}: keyword 'film' not found")
+                VSlog(f"Content validation failed for {url}: keyword not found in content")
                 return None
         except Exception as e:
             VSlog(f"Content validation failed for {url}: {str(e)}")
