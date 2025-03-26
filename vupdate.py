@@ -5912,47 +5912,22 @@ def update_streamonsport_module():
     updated_movies = replace_function(content, 'showMovies', new_code_movies)
     updated_live = replace_function(content, 'showLive', new_code_live)
 
-    # 3. Update SPORT_TV entry
-    sport_tv_entry = "('29-chaines-tv-france-en-streaming.html', 'showChannels')"
+    # . Update SPORT_TV entry
+    sport_tv_value = "('29-chaines-tv-france-en-streaming.html', 'showChannels')"
     sport_tv_found = any(sport_tv_entry.strip() in line.strip() for line in content)
     
-    # 3. Update SPORT_TV entry
-    sport_tv_value = "('29-chaines-tv-france-en-streaming.html', 'showChannels')"
     target_line = f'SPORT_TV = {sport_tv_value}'
-    sport_tv_found = False
-
-    # Check for exact match first
-    for i, line in enumerate(content):
-        if line.strip() == target_line:
-            sport_tv_found = True
-            break
 
     if not sport_tv_found:
         # Look for existing SPORT_TV declaration
         for i, line in enumerate(content):
-            if line.strip().startswith('SPORT_TV ='):
+            if line.strip().startswith('SPORT_TV= '):
                 # Replace entire existing declaration
                 content[i] = target_line + '\n'
                 updated = True
                 VSlog('SPORT_TV declaration updated')
                 sport_tv_found = True
                 break
-    
-        # If not found, add new declaration after URL_MAIN
-        if not sport_tv_found:
-            url_main_index = -1
-            for i, line in enumerate(content):
-                if line.strip().startswith('URL_MAIN ='):
-                    url_main_index = i
-                    break
-        
-            if url_main_index != -1:
-                content.insert(url_main_index + 1, '\n' + target_line + '\n')
-            else:
-                content.append('\n' + target_line + '\n')
-        
-            updated = True
-            VSlog('SPORT_TV declaration added')
 
     # Write changes if needed
     if updated or updated_movies or updated_live:
