@@ -2583,7 +2583,7 @@ def modify_files():
     for path in file_paths:
         file_path = VSPath(path).replace('\\', '/')
         VSlog(f"Processing file: {file_path}")
-        rewrite_file_to_avoid_regex_infinite_loops(file_path)
+        #rewrite_file_to_avoid_regex_infinite_loops(file_path)
         modify_showEpisodes(file_path)
 
     player_file_path = VSPath('special://home/addons/plugin.video.vstream/resources/lib/player.py').replace('\\', '/')
