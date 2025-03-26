@@ -4221,27 +4221,52 @@ def get_wiflix_url():
         VSlog(f"Error while retrieving Wiflix URL: {e}")
         return None
         
+import requests
+import re
+
 def get_frenchstream_url():
-    """Retrieve the FrenchStream URL from its website."""
-    VSlog("Retrieving FrenchStream URL from its website.")
+    """
+    Retrieve the first URL with class 'url-display' from https://FSmirror38.lol/ that,
+    after following redirects, contains the word 'film' in its HTML content.
+    Returns the final URL after redirection.
+    """
     try:
-        response = requests.get("https://fstream.one/")
-        content = response.text
-        target_position_string = "https://"
-        target_position = content.find(target_position_string)
-        if target_position == -1:
-            VSlog(f"Target position '{target_position_string}' not found in the response.")
+        # Request the main page
+        response = requests.get("https://FSmirror38.lol/")
+        response.raise_for_status()
+        html_content = response.text
+        
+        # Regex to match <a> tags with class "url-display" and extract the href value
+        # This regex looks for an <a> tag that has class="url-display" somewhere in the tag.
+        pattern = r'<a\s+[^>]*class=["\']url-display["\'][^>]*href=["\'](https?://[^"\']+)["\']'
+        urls = re.findall(pattern, html_content)
+        
+        if not urls:
+            VSlog("No anchor tags with class 'url-display' found.")
             return None
-        content_before_target = content[target_position:]
-        web_addresses = re.findall('href="(https?://[\\w.-]+(?:\\.[\\w\\.-]+)+(?:/[\\w\\.-]*)*)', content_before_target)
-        if web_addresses:
-            url = web_addresses[0].replace("http", "https").replace("httpss", "https") + "/"
-            VSlog(f"FrenchStream URL found: {url}")
-            return url
-        VSlog("No web addresses found after 'Stream est :'.")
+        
+        # Iterate over each found URL
+        for url in urls:
+            # Ensure URL uses https
+            url = url.replace("http://", "https://")
+            try:
+                # Follow redirects to get final landing page
+                redirect_response = requests.get(url, allow_redirects=True)
+                redirect_response.raise_for_status()
+                # Check if the final HTML contains the word 'film' (case-insensitive)
+                if "film" in redirect_response.text.lower():
+                    final_url = redirect_response.url
+                    VSlog(f"FrenchStream URL found: {final_url}")
+                    return final_url
+            except requests.RequestException as inner_err:
+                VSlog(f"Error retrieving {url}: {inner_err}")
+                continue
+        
+        VSlog("No matching URL containing 'film' found after redirects.")
         return None
+        
     except requests.RequestException as e:
-        VSlog(f"Error while retrieving FrenchStream URL: {e}")
+        print(f"Error retrieving the page: {e}")
         return None
 
 def set_frenchstream_url(url):
