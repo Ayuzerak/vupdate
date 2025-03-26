@@ -5858,6 +5858,21 @@ def update_streamonsport_module():
 
     updated = False
 
+    # Check if datetime import is present
+    datetime_import = 'from datetime import datetime'
+    datetime_import_found = any(datetime_import in line.strip() for line in content)
+    if not datetime_import_found:
+        # Find the appropriate place to insert the import
+        insert_pos = 0
+        for i, line in enumerate(content):
+            if line.strip().startswith(('import ', 'from ')):
+                insert_pos = i + 1
+            else:
+                break
+        content.insert(insert_pos, datetime_import + '\n')
+        updated = True
+        VSlog('Added datetime import')
+
     # 1. Add showChannels function
     channel_exists = any(line.strip().startswith('def showChannels(') for line in content)
     if not channel_exists:
@@ -5912,22 +5927,29 @@ def update_streamonsport_module():
     updated_movies = replace_function(content, 'showMovies', new_code_movies)
     updated_live = replace_function(content, 'showLive', new_code_live)
 
-    # . Update SPORT_TV entry
+    # 2. Update SPORT_TV entry
     sport_tv_value = "('29-chaines-tv-france-en-streaming.html', 'showChannels')"
-    sport_tv_found = any(sport_tv_entry.strip() in line.strip() for line in content)
-    
-    target_line = f'SPORT_TV = {sport_tv_value}'
+    target_line = f'SPORT_TV = {sport_tv_value}\n'
+    sport_tv_found = any(sport_tv_value.strip() in line.strip() for line in content)
 
     if not sport_tv_found:
         # Look for existing SPORT_TV declaration
         for i, line in enumerate(content):
-            if line.strip().startswith('SPORT_TV= '):
+            stripped_line = line.strip()
+            if stripped_line.startswith('SPORT_TV') and '=' in stripped_line:
                 # Replace entire existing declaration
-                content[i] = target_line + '\n'
+                content[i] = target_line
                 updated = True
                 VSlog('SPORT_TV declaration updated')
                 sport_tv_found = True
                 break
+        # If still not found, add new entry
+        if not sport_tv_found:
+            # Find where to insert SPORT_TV (usually after other similar declarations)
+            insert_index = next((i for i, line in enumerate(content) if line.strip().startswith('SPORT_')), len(content))
+            content.insert(insert_index, target_line)
+            updated = True
+            VSlog('Added SPORT_TV declaration')
 
     # Write changes if needed
     if updated or updated_movies or updated_live:
