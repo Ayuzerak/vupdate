@@ -4220,54 +4220,161 @@ def get_wiflix_url():
     except requests.RequestException as e:
         VSlog(f"Error while retrieving Wiflix URL: {e}")
         return None
-        
-import requests
-import re
 
 def get_frenchstream_url():
     """
-    Retrieve the first URL with class 'url-display' from https://FSmirror38.lol/ that,
-    after following redirects, contains the word 'film' in its HTML content.
-    Returns the final URL after redirection.
+    Retrieve FrenchStream URL from various sources.
+    The process is:
+      Candidate 0: Try to load the URL from a JSON file.
+      Candidate 1: Try the URL saved in the configuration file.
+      Candidate 2: Try a bypass URL.
+      Candidate 3: Extract URL from an external source using regex on anchor tags with class "url-display".
+      Candidate 4: Fall back to a default URL.
+    The URL is validated by ensuring that, after following redirects, its HTML contains the word 'film'.
     """
-    try:
-        # Request the main page
-        response = requests.get("https://FSmirror38.lol/")
-        response.raise_for_status()
-        html_content = response.text
-        
-        # Regex to match <a> tags with class "url-display" and extract the href value
-        # This regex looks for an <a> tag that has class="url-display" somewhere in the tag.
-        pattern = r'<a\s+[^>]*class=["\']url-display["\'][^>]*href=["\'](https?://[^"\']+)["\']'
-        urls = re.findall(pattern, html_content)
-        
-        if not urls:
-            VSlog("No anchor tags with class 'url-display' found.")
+    VSlog("Starting FrenchStream URL retrieval process")
+    
+    CONFIG_FILE = VSPath('special://home/addons/service.vstreamupdate/site_config.ini').replace('\\', '/')
+    DEFAULT_URL = "https://fsmirror38.lol/"  # Fallback URL
+    BYPASS_URL = "https://french-stream.pink"  # Use an appropriate bypass URL if available
+
+    def save_valid_url(url):
+        try:
+            config = configparser.ConfigParser()
+            if os.path.exists(CONFIG_FILE):
+                config.read(CONFIG_FILE)
+            if "frenchstream" not in config:
+                config["frenchstream"] = {}
+            config["frenchstream"]["current_url"] = url
+            with open(CONFIG_FILE, "w") as configfile:
+                config.write(configfile)
+            VSlog(f"URL saved successfully: {url}")
+        except Exception as e:
+            VSlog(f"Cannot save valid URL: {str(e)}")
+
+    def load_and_validate_url():
+        """Attempt to load a URL from the config file and validate it.
+        Returns the effective URL if valid, otherwise None.
+        """
+        VSlog("Attempting to load URL from config file...")
+        try:
+            config = configparser.ConfigParser()
+            if os.path.exists(CONFIG_FILE):
+                config.read(CONFIG_FILE)
+                if "frenchstream" in config and "current_url" in config["frenchstream"]:
+                    saved_url = config["frenchstream"]["current_url"]
+                    effective_url = validate_url_content(saved_url)
+                    if effective_url:
+                        return effective_url
+        except Exception as e:
+            VSlog(f"URL load error: {str(e)}")
+        return None
+
+    def validate_url_content(url):
+        """
+        Checks if the URL's content (after following redirects) contains the keyword 'film'.
+        Returns the final URL if valid, or None otherwise.
+        """
+        try:
+            headers = {
+                "User-Agent": (
+                    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                    "AppleWebKit/537.36 (KHTML, like Gecko) "
+                    "Chrome/91.0.4472.124 Safari/537.36"
+                )
+            }
+            response = requests.get(url, headers=headers, timeout=15, allow_redirects=True)
+            response.raise_for_status()
+            effective_url = response.url  # Final URL after redirection
+            if "Animation" in response.text.lower():
+                if effective_url != url:
+                    VSlog(f"Redirection detected: {url} -> {effective_url}")
+                return effective_url
+            else:
+                VSlog(f"Content validation failed for {url}: keyword 'film' not found")
+                return None
+        except Exception as e:
+            VSlog(f"Content validation failed for {url}: {str(e)}")
             return None
-        
-        # Iterate over each found URL
-        for url in urls:
-            # Ensure URL uses https
-            url = url.replace("http://", "https://")
-            try:
-                # Follow redirects to get final landing page
-                redirect_response = requests.get(url, allow_redirects=True)
-                redirect_response.raise_for_status()
-                # Check if the final HTML contains the word 'film' (case-insensitive)
-                if "film" in redirect_response.text.lower():
-                    final_url = redirect_response.url
-                    VSlog(f"FrenchStream URL found: {final_url}")
-                    return final_url
-            except requests.RequestException as inner_err:
-                VSlog(f"Error retrieving {url}: {inner_err}")
-                continue
-        
-        VSlog("No matching URL containing 'film' found after redirects.")
-        return None
-        
-    except requests.RequestException as e:
-        print(f"Error retrieving the page: {e}")
-        return None
+
+    current_valid_url = None
+
+    # Candidate 0: Try the URL saved in the JSON file.
+    sites_json = VSPath('special://home/addons/plugin.video.vstream/resources/sites.json').replace('\\', '/')
+    try:
+        with open(sites_json, 'r') as f:
+            data = json.load(f)
+        if 'frenchstream' in data['sites']:
+            candidate_url = data['sites']['frenchstream']['url']
+            if candidate_url:
+                VSlog(f"Found FrenchStream URL in JSON: {candidate_url}")
+                effective_url = validate_url_content(candidate_url)
+                if effective_url:
+                    save_valid_url(effective_url)
+                    current_valid_url = effective_url
+    except Exception as e:
+        VSlog(f"Error retrieving FrenchStream URL from JSON: {e}")
+
+    # Candidate 1: Try the URL saved in the config file.
+    if not current_valid_url:
+        effective_url = load_and_validate_url()
+        if effective_url:
+            VSlog(f"Config file URL is valid: {effective_url}")
+            save_valid_url(effective_url)
+            current_valid_url = effective_url
+
+    # Candidate 2: Try the bypass URL.
+    if not current_valid_url:
+        effective_url = validate_url_content(BYPASS_URL)
+        if effective_url:
+            VSlog(f"Bypass URL is valid: {effective_url}")
+            save_valid_url(effective_url)
+            current_valid_url = effective_url
+
+    # Candidate 3: Extract URL from external source.
+    if not current_valid_url:
+        try:
+            headers = {
+                "User-Agent": (
+                    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                    "AppleWebKit/537.36 (KHTML, like Gecko) "
+                    "Chrome/91.0.4472.124 Safari/537.36"
+                )
+            }
+            response = requests.get("https://FSmirror38.lol/", headers=headers, timeout=10)
+            response.raise_for_status()
+            content = response.text
+
+            # Regex to find anchor tags with class "url-display" and extract the href attribute.
+            pattern = r'<a\s+[^>]*class=["\']url-display["\'][^>]*href=["\'](https?://[^"\']+)["\']'
+            urls = re.findall(pattern, content)
+            if urls:
+                for url in urls:
+                    candidate_url = url.replace("http://", "https://").rstrip('/') + '/'
+                    VSlog(f"Found candidate URL from external source: {candidate_url}")
+                    effective_url = validate_url_content(candidate_url)
+                    if effective_url:
+                        VSlog(f"External candidate URL is valid: {effective_url}")
+                        save_valid_url(effective_url)
+                        current_valid_url = effective_url
+                        break
+            else:
+                VSlog("No anchor tags with class 'url-display' found on the external source.")
+        except Exception as e:
+            VSlog(f"Error retrieving URL from external source: {str(e)}")
+
+    # Candidate 4: Fallback to default URL.
+    if not current_valid_url:
+        effective_url = validate_url_content(DEFAULT_URL)
+        if effective_url:
+            VSlog(f"Default URL is valid: {effective_url}")
+            save_valid_url(effective_url)
+            current_valid_url = effective_url
+        else:
+            current_valid_url = DEFAULT_URL
+            VSlog("Default URL failed content validation, returning as fallback")
+
+    return current_valid_url
 
 def set_frenchstream_url(url):
     """Set a new URL for FrenchStream in the sites.json file."""
