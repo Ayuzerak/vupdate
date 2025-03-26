@@ -4221,6 +4221,135 @@ def get_wiflix_url():
         VSlog(f"Error while retrieving Wiflix URL: {e}")
         return None
 
+def get_wiflix_url():
+    """Retrieve Wiflix URL with content validation from multiple sources."""
+    VSlog("Starting Wiflix URL retrieval process")
+    
+    CONFIG_FILE = VSPath('special://home/addons/service.vstreamupdate/site_config.ini').replace('\\', '/')
+    default_url = "https://wiflix-max.top/"  # Update with appropriate default URL
+    bypass_url = "https://wiflix-max.top/"  # Define a bypass URL if available
+    
+    def save_valid_url(url):
+        """Save validated URL to configuration file."""
+        try:
+            config = configparser.ConfigParser()
+            if os.path.exists(CONFIG_FILE):
+                config.read(CONFIG_FILE)
+            if "wiflix" not in config:
+                config["wiflix"] = {}
+            config["wiflix"]["current_url"] = url
+            with open(CONFIG_FILE, "w") as configfile:
+                config.write(configfile)
+            VSlog(f"Wiflix URL saved: {url}")
+        except Exception as e:
+            VSlog(f"Error saving URL: {str(e)}")
+    
+    def load_and_validate_url():
+        """Load and validate URL from config file."""
+        try:
+            config = configparser.ConfigParser()
+            if os.path.exists(CONFIG_FILE):
+                config.read(CONFIG_FILE)
+                if "wiflix" in config and "current_url" in config["wiflix"]:
+                    saved_url = config["wiflix"]["current_url"]
+                    effective_url = validate_url_content(saved_url)
+                    if effective_url:
+                        return effective_url
+        except Exception as e:
+            VSlog(f"Config load error: {str(e)}")
+        return None
+    
+    def validate_url_content(url):
+        """Validate if URL content contains 'wiflix' after redirects."""
+        try:
+            headers = {
+                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36"
+            }
+            response = requests.get(url, headers=headers, timeout=15, allow_redirects=True)
+            response.raise_for_status()
+            effective_url = response.url
+            if 'ajout' in response.text.lower():
+                VSlog(f"Validated URL: {effective_url}")
+                return effective_url
+            else:
+                VSlog(f"Content check failed for {effective_url}")
+        except Exception as e:
+            VSlog(f"Validation failed for {url}: {str(e)}")
+        return None
+    
+    current_valid_url = None
+    
+    # Candidate 0: Check sites.json for pre-saved URL
+    if not current_valid_url:
+        sites_json = VSPath('special://home/addons/plugin.video.vstream/resources/sites.json').replace('\\', '/')
+        try:
+            with open(sites_json, 'r') as f:
+                data = json.load(f)
+                wiflix_data = data.get('sites', {}).get('wiflix', {})
+                # Check for direct URL entry first
+                if 'url' in wiflix_data:
+                    saved_url = wiflix_data['url']
+                    effective_url = validate_url_content(saved_url)
+                    if effective_url:
+                        current_valid_url = effective_url
+                        save_valid_url(current_valid_url)
+                        return current_valid_url
+        except Exception as e:
+            VSlog(f"Error reading sites.json: {str(e)}")
+    
+    # Candidate 1: Check config file
+    if not current_valid_url:
+        effective_url = load_and_validate_url()
+        if effective_url:
+            current_valid_url = effective_url
+            return current_valid_url
+    
+    # Candidate 2: Extract from site_info URL
+    if not current_valid_url:
+        try:
+            sites_json = VSPath('special://home/addons/plugin.video.vstream/resources/sites.json').replace('\\', '/')
+            with open(sites_json, 'r') as f:
+                data = json.load(f)
+                site_info_url = data.get('sites', {}).get('wiflix', {}).get('site_info')
+                if not site_info_url:
+                    raise ValueError("No site_info URL found in sites.json")
+                
+                VSlog(f"Fetching site_info URL: {site_info_url}")
+                response = requests.get(site_info_url, timeout=10)
+                response.raise_for_status()
+                html_content = response.text
+                
+                # Search for redirect URL pattern
+                match = re.search(r"window\.location\.href=['\"](.*?)['\"]", html_content)
+                if match:
+                    extracted_url = match.group(1)
+                    # Normalize URL
+                    extracted_url = extracted_url.replace("httpss", "https").replace("http", "https").rstrip('/') + '/'
+                    VSlog(f"Extracted candidate URL: {extracted_url}")
+                    
+                    # Validate extracted URL
+                    effective_url = validate_url_content(extracted_url)
+                    if effective_url:
+                        current_valid_url = effective_url
+                        save_valid_url(current_valid_url)
+                        return current_valid_url
+                else:
+                    VSlog("No redirect URL found in site_info content")
+        except Exception as e:
+            VSlog(f"Error processing site_info: {str(e)}")
+    
+    # Candidate 3: Default URL
+    if not current_valid_url:
+        effective_url = validate_url_content(default_url)
+        if effective_url:
+            current_valid_url = effective_url
+            save_valid_url(current_valid_url)
+        else:
+            current_valid_url = default_url
+            VSlog("Using default URL as fallback")
+    
+    return current_valid_url
+
 def get_frenchstream_url():
     """
     Retrieve FrenchStream URL from various sources.
