@@ -4352,7 +4352,7 @@ def get_wiflix_url():
 
 def get_frenchstream_url():
     """
-    Retrieve FrenchStream URL from various sources.
+    Retrieve french_stream_lol URL from various sources.
     The process is:
       Candidate 0: Try to load the URL from a JSON file.
       Candidate 1: Try the URL saved in the configuration file.
@@ -4373,8 +4373,8 @@ def get_frenchstream_url():
             if os.path.exists(CONFIG_FILE):
                 config.read(CONFIG_FILE)
             if "frenchstream" not in config:
-                config["frenchstream"] = {}
-            config["frenchstream"]["current_url"] = url
+                config["french_stream_lol"] = {}
+            config["french_stream_lol"]["current_url"] = url
             with open(CONFIG_FILE, "w") as configfile:
                 config.write(configfile)
             VSlog(f"URL saved successfully: {url}")
@@ -4390,8 +4390,8 @@ def get_frenchstream_url():
             config = configparser.ConfigParser()
             if os.path.exists(CONFIG_FILE):
                 config.read(CONFIG_FILE)
-                if "frenchstream" in config and "current_url" in config["frenchstream"]:
-                    saved_url = config["frenchstream"]["current_url"]
+                if "french_stream_lol" in config and "current_url" in config["french_stream_lol"]:
+                    saved_url = config["french_stream_lol"]["current_url"]
                     effective_url = validate_url_content(saved_url)
                     if effective_url:
                         return effective_url
@@ -4433,8 +4433,8 @@ def get_frenchstream_url():
     try:
         with open(sites_json, 'r') as f:
             data = json.load(f)
-        if 'frenchstream' in data['sites']:
-            candidate_url = data['sites']['frenchstream']['url']
+        if 'french_stream_lol' in data['sites']:
+            candidate_url = data['sites']['french_stream_lol']['url']
             if candidate_url:
                 VSlog(f"Found FrenchStream URL in JSON: {candidate_url}")
                 effective_url = validate_url_content(candidate_url)
@@ -4475,7 +4475,7 @@ def get_frenchstream_url():
             content = response.text
 
             # Regex to find anchor tags with class "url-display" and extract the href attribute.
-            pattern = r'<a\s+[^>]*class=["\']url-display["\'][^>]*href=["\'](https?://[^"\']+)["\']'
+            pattern = r'<a\s+(?=[^>]*class=["\']url-display["\'])(?=[^>]*href=["\'](https?://[^"\']+)["\'])[^>]+>'
             urls = re.findall(pattern, content)
             if urls:
                 for url in urls:
