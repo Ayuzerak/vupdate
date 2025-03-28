@@ -6085,8 +6085,6 @@ from resources.lib.util import urlHostName
 
 import requests.packages.urllib3.util.connection as urllib3_cn
 import socket
-import struct
-import random
 
 
 class cRequestHandler:
@@ -6096,6 +6094,7 @@ class cRequestHandler:
     REQUEST_TYPE_DELETE = 3
 
     def __init__(self, sUrl):
+        self._dns_cache = {}
         self.__sUrl = sUrl
         self.__sRealUrl = ''
         self.__cType = 0
@@ -6122,18 +6121,24 @@ class cRequestHandler:
     def statusCode(self):
         return self.oResponse.status_code
 
+    # Utile pour certains hebergeurs qui ne marche pas en ipv6.
     def disableIPV6(self):
         self.forceIPV4 = True
 
     def allowed_gai_family(self):
+        """
+         https://github.com/shazow/urllib3/blob/master/urllib3/util/connection.py
+        """
         family = socket.AF_INET
         if urllib3_cn.HAS_IPV6:
-            family = socket.AF_INET
+            family = socket.AF_INET  # force ipv6 only if it is available
         return family
 
+    # Desactive le ssl
     def disableSSL(self):
         self.verify = False
 
+    # Empeche les redirections
     def disableRedirect(self):
         self.redirects = False
 
@@ -6143,62 +6148,83 @@ class cRequestHandler:
     def removeBreakLines(self, bRemoveBreakLines):
         self.__bRemoveBreakLines = bRemoveBreakLines
 
+    # Defini le type de requete
+    # 0 : pour un requete GET
+    # 1 : pour une requete POST
     def setRequestType(self, cType):
         self.__cType = cType
 
+    # Permets de definir un timeout
     def setTimeout(self, valeur):
         self.__timeout = valeur
 
+    # Ajouter un cookie dans le headers de la requete
     def addCookieEntry(self, sHeaderKey, sHeaderValue):
         aHeader = {sHeaderKey: sHeaderValue}
         self.__Cookie.update(aHeader)
 
+    # Ajouter des parametre JSON
     def addJSONEntry(self, sHeaderKey, sHeaderValue):
         aHeader = {sHeaderKey: sHeaderValue}
         self.json.update(aHeader)
 
+    # Ajouter un elements dans le headers de la requete
     def addHeaderEntry(self, sHeaderKey, sHeaderValue):
         for sublist in list(self.__aHeaderEntries):
             if sHeaderKey in sublist:
                 self.__aHeaderEntries.pop(sublist)
+
             if sHeaderKey == "Content-Length":
                 sHeaderValue = str(sHeaderValue)
+
         aHeader = {sHeaderKey: sHeaderValue}
         self.__aHeaderEntries.update(aHeader)
 
+    # Ajout un parametre dans la requete
     def addParameters(self, sParameterKey, mParameterValue):
         self.__aParamaters[sParameterKey] = mParameterValue
 
+    # Ajoute une ligne de parametre
     def addParametersLine(self, mParameterValue):
         self.__aParamatersLine = mParameterValue
 
+    # egg addMultipartFiled({'sess_id': sId, 'upload_type': 'url', 'srv_tmp_url': sTmp})
     def addMultipartFiled(self, fields):
         mpartdata = MPencode(fields)
         self.__aParamatersLine = mpartdata[1]
         self.addHeaderEntry('Content-Type', mpartdata[0])
         self.addHeaderEntry('Content-Length', len(mpartdata[1]))
 
+    # Je sais plus si elle gere les doublons
     def getResponseHeader(self):
         return self.__sResponseHeader
 
+    # url after redirects
     def getRealUrl(self):
         return self.__sRealUrl
 
     def request(self, jsonDecode=False):
+        # Supprimee car deconne si url contient ' ' et '+' en meme temps
+        # self.__sUrl = self.__sUrl.replace(' ', '+')
         return self.__callRequest(jsonDecode)
 
+    # Recupere les cookies de la requete
     def GetCookies(self):
         if not self.__sResponseHeader:
             return ''
+
         if 'Set-Cookie' in self.__sResponseHeader:
             import re
+
             c = self.__sResponseHeader.get('set-cookie')
+
             c2 = re.findall('(?:^|,) *([^;,]+?)=([^;,]+?);', c)
             if c2:
                 cookies = ''
                 for cook in c2:
                     cookies = cookies + cook[0] + '=' + cook[1] + ';'
-                return cookies[:-1]
+                cookies = cookies[:-1]
+                return cookies
         return ''
 
     def __setDefaultHeader(self):
@@ -6216,26 +6242,40 @@ class cRequestHandler:
         else:
             sParameters = self.__aParamaters
 
-        if self.__cType == cRequestHandler.REQUEST_TYPE_GET and len(sParameters) > 0:
-            self.__sUrl += '?' + str(sParameters) if '?' not in self.__sUrl else '&' + str(sParameters)
-            sParameters = ''
+        if (self.__cType == cRequestHandler.REQUEST_TYPE_GET):
+            if (len(sParameters) > 0):
+                if (self.__sUrl.find('?') == -1):
+                    self.__sUrl = self.__sUrl + '?' + str(sParameters)
+                    sParameters = ''
+                else:
+                    self.__sUrl = self.__sUrl + '&' + str(sParameters)
+                    sParameters = ''
 
         sContent = ''
 
-        if self.BUG_SSL:
+        if self.BUG_SSL == True:
             self.verify = False
 
-        method = ["GET", "POST", "PUT", "DELETE"][self.__cType]
+        if self.__cType == cRequestHandler.REQUEST_TYPE_GET:
+            method = "GET"
+        elif self.__cType == cRequestHandler.REQUEST_TYPE_POST:
+            method = "POST"
+        elif self.__cType == cRequestHandler.REQUEST_TYPE_PUT:
+            method = "PUT"
+        elif self.__cType == cRequestHandler.REQUEST_TYPE_DELETE:
+            method = "DELETE"
 
         if self.forceIPV4:
             urllib3_cn.allowed_gai_family = self.allowed_gai_family
 
         try:
             _request = Request(method, self.__sUrl, headers=self.__aHeaderEntries)
-            if method == 'POST':
+            if method in ['POST']:
                 _request.data = sParameters
+
             if self.__Cookie:
                 _request.cookies = self.__Cookie
+
             if self.json:
                 _request.json = self.json
 
@@ -6246,62 +6286,97 @@ class cRequestHandler:
             self.__sResponseHeader = self.oResponse.headers
             self.__sRealUrl = self.oResponse.url
 
-            if jsonDecode:
+            if jsonDecode == True:
                 sContent = self.oResponse.json()
             else:
                 sContent = self.oResponse.content
+                # Necessaire pour Python 3
                 if isMatrix() and 'youtube' not in self.oResponse.url:
                     try:
                         sContent = sContent.decode()
                     except:
+                        # Decodage minimum obligatoire.
                         try:
                             sContent = sContent.decode('unicode-escape')
                         except:
                             pass
 
         except ConnectionError as e:
-            if 'CERTIFICATE_VERIFY_FAILED' in str(e) and not self.BUG_SSL:
+            # Erreur SSL
+            if 'CERTIFICATE_VERIFY_FAILED' in str(e) and self.BUG_SSL == False:
                 self.BUG_SSL = True
                 return self.__callRequest(jsonDecode)
+            # Retry with DNS only if addon is present
             elif self.__enableDNS == False and ('getaddrinfo failed' in str(e) or 'Failed to establish a new connection' in str(e)):
+                # Retry with DNS only if addon is present
                 import xbmcvfs
                 if xbmcvfs.exists('special://home/addons/script.module.dnspython/'):
                     self.__enableDNS = True
                     return self.__callRequest(jsonDecode)
                 else:
-                    dialog().VSerror('%s (%s)' % (addon().VSlang(30470), urlHostName(self.__sUrl)))
+                    error_msg = '%s (%s)' % (addon().VSlang(30470), urlHostName(self.__sUrl))
+                    dialog().VSerror(error_msg)
+                    sContent = ''
             else:
-                return ''
+                sContent = ''
+                return sContent
 
         except RequestException as e:
-            if 'CERTIFICATE_VERIFY_FAILED' in str(e) and not self.BUG_SSL:
+            if 'CERTIFICATE_VERIFY_FAILED' in str(e) and self.BUG_SSL == False:
                 self.BUG_SSL = True
                 return self.__callRequest(jsonDecode)
+            elif self.__enableDNS == False and 'getaddrinfo failed' in str(e):
+                # Retry with DNS only if addon is present
+                import xbmcvfs
+                if xbmcvfs.exists('special://home/addons/script.module.dnspython/'):
+                    self.__enableDNS = True
+                    return self.__callRequest(jsonDecode)
+                else:
+                    error_msg = '%s (%s)' % (addon().VSlang(30470), urlHostName(self.__sUrl))
             else:
-                dialog().VSerror("%s (%s),%s" % (addon().VSlang(30205), e, self.__sUrl))
+                error_msg = "%s (%s),%s" % (addon().VSlang(30205), e, self.__sUrl)
 
-        if self.oResponse and self.oResponse.status_code in [503, 403] and "Forbidden" not in sContent:
-            CLOUDPROXY_ENDPOINT = 'http://' + addon().getSetting('ipaddress') + ':8191/v1'
-            try:
-                json_response = post(CLOUDPROXY_ENDPOINT, headers=self.__aHeaderEntries, json={
-                    'cmd': 'request.%s' % method.lower(),
-                    'url': self.__sUrl
-                })
-                if json_response:
-                    response = json_response.json()
-                    if 'solution' in response:
-                        self.__sRealUrl = response['solution']['url']
-                        sContent = response['solution']['response']
-            except:
-                pass
+            dialog().VSerror(error_msg)
+            sContent = ''
 
-        if self.oResponse and self.oResponse.status_code not in [200, 204, 302]:
-            dialog().VSerror("%s (%d),%s" % (addon().VSlang(30205), self.oResponse.status_code, self.__sUrl))
+        if self.oResponse is not None:
+            if self.oResponse.status_code in [503, 403]:
+                if "Forbidden" not in sContent:
+                    
+                    # Tenter par FlareSolverr
+                    
+                    CLOUDPROXY_ENDPOINT = 'http://' + addon().getSetting('ipaddress') + ':8191/v1'
+
+                    json_response = False
+                    try:
+                        # On fait une requete.
+                        json_response = post(CLOUDPROXY_ENDPOINT, headers=self.__aHeaderEntries, json={
+                            'cmd': 'request.%s' % method.lower(),
+                            'url': self.__sUrl
+                        })
+                    except:
+                        dialog().VSerror("%s (%s)" % ("Page protegee par Cloudflare, essayez FlareSolverr", urlHostName(self.__sUrl)))
+
+                    if json_response:
+                        response = json_response.json()
+                        if 'solution' in response:
+                            if self.__sUrl != response['solution']['url']:
+                                self.__sRealUrl = response['solution']['url']
+    
+                            sContent = response['solution']['response']
+
+            if self.oResponse is not None and not sContent:
+                # Ignorer ces codes retours
+                ignoreStatus = [200, 204, 302]
+                if self.oResponse.status_code not in ignoreStatus:
+                    dialog().VSerror("%s (%d),%s" % (addon().VSlang(30205), self.oResponse.status_code, self.__sUrl))
 
         if sContent:
-            if self.__bRemoveNewLines:
-                sContent = sContent.replace("\\n", "").replace("\\r\\t", "")
-            if self.__bRemoveBreakLines:
+            if (self.__bRemoveNewLines == True):
+                sContent = sContent.replace("\n", "")
+                sContent = sContent.replace("\r\t", "")
+
+            if (self.__bRemoveBreakLines == True):
                 sContent = sContent.replace("&nbsp;", "")
 
         if self.__enableDNS:
@@ -6312,118 +6387,183 @@ class cRequestHandler:
 
     def new_getaddrinfo(self, *args):
         try:
+            import dns.resolver
+            import time
+            import random
+
             host = args[0]
             port = args[1]
 
-            if "//" in host:
-                host = host.split("//")[1]
-            host = host.split("/")[0]
+            # Check DNS cache first
+            current_time = time.time()
+            cache_key = (host, self.forceIPV4)
+            if cache_key in self._dns_cache:
+                cached_data = self._dns_cache[cache_key]
+                if current_time - cached_data['timestamp'] < 300:  # 5-minute cache
+                    VSlog(f"Using cached DNS result for {host}: {cached_data['ips']}")
+                    return self._format_getaddrinfo_results(cached_data['ips'], port)
+                else:
+                    del self._dns_cache[cache_key]
 
-            nameservers = [
-                '80.67.169.12', '2001:910:800::12',
-                '80.67.169.40', '2001:910:800::40',
-                '1.1.1.1', '2606:4700:4700::1111'
+            # Extensive list of global DNS resolvers (IPv4 and IPv6)
+            ipv4_nameservers = [
+                # Cloudflare
+                '1.1.1.1', '1.0.0.1',
+                # Google
+                '8.8.8.8', '8.8.4.4',
+                # OpenDNS
+                '208.67.222.222', '208.67.220.220',
+                # Quad9
+                '9.9.9.9', '149.112.112.112',
+                # CleanBrowsing
+                '185.228.168.9', '185.228.169.9',
+                # Verisign
+                '64.6.64.6', '64.6.65.6',
+                # Alternate DNS
+                '76.76.19.19', '76.223.122.150',
+                # AdGuard DNS
+                '94.140.14.14', '94.140.15.15',
+                # UncensoredDNS
+                '91.239.100.100', '89.233.43.71'
             ]
 
-            def encode_dns_name(domain):
-                encoded = b''
-                parts = domain.encode('utf-8').split(b'.')
-                for part in parts:
-                    encoded += struct.pack('B', len(part)) + part
-                return encoded + b'\\x00'
+            ipv6_nameservers = [
+                # Cloudflare
+                '2606:4700:4700::1111', '2606:4700:4700::1001',
+                # Google
+                '2001:4860:4860::8888', '2001:4860:4860::8844',
+                # OpenDNS
+                '2620:119:35::35', '2620:119:53::53',
+                # Quad9
+                '2620:fe::fe', '2620:fe::9',
+                # CleanBrowsing
+                '2a0d:2a00:1::', '2a0d:2a00:2::',
+                # Verisign
+                '2620:74:1b::1:1', '2620:74:1c::2:2',
+                # Alternate DNS
+                '2a09::', '2a0a::',
+                # AdGuard DNS
+                '2a10:50c0::ad1:ff', '2a10:50c0::ad2:ff',
+                # UncensoredDNS
+                '2001:67c:28a4::', '2a01:3a0:53:53::'
+            ]
 
-            def dns_query(ns, query_host):
+            # Combine and shuffle all resolvers
+            all_nameservers = ipv4_nameservers + ipv6_nameservers
+            random.shuffle(all_nameservers)
+
+            # Configure DNS resolver
+            resolver = dns.resolver.Resolver(configure=False)
+            resolver.nameservers = all_nameservers
+            resolver.timeout = 2.5
+            resolver.lifetime = 5.0  # Total timeout for all attempts
+
+            ips = []
+            record_types = ['A']
+            if not self.forceIPV4 and urllib3_cn.HAS_IPV6:
+                record_types.append('AAAA')
+
+            for rtype in record_types:
                 try:
-                    family = socket.AF_INET
-                    try:
-                        socket.inet_pton(socket.AF_INET, ns)
-                    except socket.error:
-                        socket.inet_pton(socket.AF_INET6, ns)
-                        family = socket.AF_INET6
-
-                    query_id = random.randint(0, 65535)
-                    header = struct.pack('!HHHHHH', query_id, 0x0100, 1, 0, 0, 0)
-                    encoded_name = encode_dns_name(query_host)
-                    question = encoded_name + struct.pack('!HH', 1, 1)
-                    packet = header + question
-
-                    sock = socket.socket(family, socket.SOCK_DGRAM)
-                    sock.settimeout(2)
-                    try:
-                        sock.sendto(packet, (ns, 53))
-                        data, _ = sock.recvfrom(1024)
-                    finally:
-                        sock.close()
-
-                    if len(data) < 12:
-                        return []
-                    response_id = struct.unpack('!H', data[:2])[0]
-                    if response_id != query_id:
-                        return []
-                    ancount = struct.unpack('!H', data[6:8])[0]
-                    if ancount == 0:
-                        return []
-
-                    pos = 12
-                    while pos < len(data) and data[pos] != 0:
-                        pos += data[pos] + 1
-                    pos += 5
-
-                    answers = []
-                    for _ in range(ancount):
-                        if data[pos] == 0xc0:
-                            pos += 2
-                        else:
-                            while pos < len(data) and data[pos] != 0:
-                                pos += data[pos] + 1
-                            pos += 1
-
-                        if pos + 10 > len(data):
+                    answer = resolver.resolve(host, rtype, raise_on_no_answer=False)
+                    if answer.rrset:
+                        ips.extend([str(r) for r in answer])
+                        # Prioritize first 3 results for each record type
+                        if len(ips) > 6:
                             break
-                        qtype, qclass, _, rdlength = struct.unpack('!HHIH', data[pos:pos+10])
-                        pos += 10
-                        if qtype != 1 or rdlength != 4:
-                            pos += rdlength
-                            continue
-                        ip = socket.inet_ntoa(data[pos:pos+4])
-                        answers.append(ip)
-                        pos += rdlength
-                    return answers
                 except Exception as e:
-                    return []
+                    VSlog(f"{rtype} record query error: {e}")
 
-            for ns in nameservers:
-                answers = dns_query(ns, host)
-                if answers:
-                    host_found = answers[0]
-                    VSlog(f"Resolved {host} to {host_found} via {ns}")
-                    return [(socket.AF_INET, socket.SOCK_STREAM, 0, '', (host_found, port))]
+            if not ips:
+                raise dns.resolver.NoAnswer(f"No DNS records found for {host}")
 
-            return self.save_getaddrinfo(*args)
+            # Update cache with new results
+            self._dns_cache[cache_key] = {
+                'ips': ips,
+                'timestamp': time.time()
+            }
+
+            VSlog(f"Resolved {host} to {len(ips)} IPs ({', '.join(ips[:3])}...)")
+            return self._format_getaddrinfo_results(ips, port)
+
+        except dns.resolver.NoAnswer:
+            VSlog(f"No DNS answer for {host}")
+        except dns.resolver.NXDOMAIN:
+            VSlog(f"Host {host} does not exist")
+        except dns.resolver.Timeout:
+            VSlog(f"DNS query for {host} timed out after {resolver.lifetime}s")
         except Exception as e:
-            VSlog(f"new_getaddrinfo ERROR: {e}")
-            return self.save_getaddrinfo(*args)
+            VSlog(f"DNS resolution error: {str(e)}")
+        
+        # Fallback to original getaddrinfo if DNS resolution fails
+        return self.save_getaddrinfo(*args)
+
+    def _format_getaddrinfo_results(self, ips, port):
+        results = []
+        for ip in ips:
+            if ':' in ip:
+                family = socket.AF_INET6
+                sockaddr = (ip, port, 0, 0)
+            else:
+                family = socket.AF_INET
+                sockaddr = (ip, port)
+            results.append((family, socket.SOCK_STREAM, 0, '', sockaddr))
+        return results
 
 
+# ******************************************************************************
+# from https://github.com/eliellis/mpart.py
+# ******************************************************************************
 def MPencode(fields):
     import mimetypes
     random_boundary = __randy_boundary()
-    content_type = f"multipart/form-data, boundary={random_boundary}"
+    content_type = "multipart/form-data, boundary=%s" % random_boundary
+
     form_data = []
-    for key, value in fields.items():
-        if hasattr(value, 'read'):
-            with value:
-                mimetype = mimetypes.guess_type(value.name)[0] or 'application/octet-stream'
-                form_data.append(f'--{random_boundary}\\r\\nContent-Disposition: form-data; name="{key}"; filename="{value.name}"\\r\\nContent-Type: {mimetype}\\r\\n\\r\\n{value.read()}\\r\\n')
-        else:
-            form_data.append(f'--{random_boundary}\\r\\nContent-Disposition: form-data; name="{key}"\\r\\n\\r\\n{value}\\r\\n')
-    form_data.append(f'--{random_boundary}--\\r\\n')
+
+    if fields:
+        try:
+            data = fields.iteritems()
+        except:
+            data = fields.items()
+
+        for (key, value) in data:
+            if not hasattr(value, 'read'):
+                itemstr = '--%s\r\nContent-Disposition: form-data; name="%s"\r\n\r\n%s\r\n' % (random_boundary, key, value)
+                form_data.append(itemstr)
+            elif hasattr(value, 'read'):
+                with value:
+                    file_mimetype = mimetypes.guess_type(value.name)[0] if mimetypes.guess_type(value.name)[0] else 'application/octet-stream'
+                    itemstr = '--%s\r\nContent-Disposition: form-data; name="%s"; filename="%s"\r\nContent-Type: %s\r\n\r\n%s\r\n' % (random_boundary, key, value.name, file_mimetype, value.read())
+                form_data.append(itemstr)
+            else:
+                raise Exception(value, 'Field is neither a file handle or any other decodable type.')
+    else:
+        pass
+
+    form_data.append('--%s--\r\n' % random_boundary)
+
     return content_type, ''.join(form_data)
 
 
-def __randy_boundary(length=10):
+def __randy_boundary(length=10, reshuffle=False):
     import string
-    return ''.join(random.choice(string.ascii_letters + string.digits) for _ in range(length))"""
+    import random
+
+    if isMatrix():
+        character_string = string.ascii_letters + string.digits
+    else:
+        character_string = string.letters + string.digits
+
+    boundary_string = []
+    for i in range(0, length):
+        rand_index = random.randint(0, len(character_string) - 1)
+        boundary_string.append(character_string[rand_index])
+    if reshuffle:
+        random.shuffle(boundary_string)
+    else:
+        pass
+    return ''.join(boundary_string)"""
 
     intended_hash = hashlib.sha256(script_content.encode('utf-8')).hexdigest()
 
