@@ -6126,9 +6126,9 @@ class cRequestHandler:
         self.forceIPV4 = True
 
     def allowed_gai_family(self):
-        """
+        \"""
          https://github.com/shazow/urllib3/blob/master/urllib3/util/connection.py
-        """
+        \"""
         family = socket.AF_INET
         if urllib3_cn.HAS_IPV6:
             family = socket.AF_INET  # force ipv6 only if it is available
