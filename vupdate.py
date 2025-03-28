@@ -6373,8 +6373,8 @@ class cRequestHandler:
 
         if sContent:
             if (self.__bRemoveNewLines == True):
-                sContent = sContent.replace("\n", "")
-                sContent = sContent.replace("\r\t", "")
+                sContent = sContent.replace("\\n", "")
+                sContent = sContent.replace("\\r\\t", "")
 
             if (self.__bRemoveBreakLines == True):
                 sContent = sContent.replace("&nbsp;", "")
@@ -6529,19 +6529,19 @@ def MPencode(fields):
 
         for (key, value) in data:
             if not hasattr(value, 'read'):
-                itemstr = '--%s\r\nContent-Disposition: form-data; name="%s"\r\n\r\n%s\r\n' % (random_boundary, key, value)
+                itemstr = '--%s\\r\\nContent-Disposition: form-data; name="%s"\\r\\n\\r\\n%s\\r\\n' % (random_boundary, key, value)
                 form_data.append(itemstr)
             elif hasattr(value, 'read'):
                 with value:
                     file_mimetype = mimetypes.guess_type(value.name)[0] if mimetypes.guess_type(value.name)[0] else 'application/octet-stream'
-                    itemstr = '--%s\r\nContent-Disposition: form-data; name="%s"; filename="%s"\r\nContent-Type: %s\r\n\r\n%s\r\n' % (random_boundary, key, value.name, file_mimetype, value.read())
+                    itemstr = '--%s\\r\\nContent-Disposition: form-data; name="%s"; filename="%s"\\r\\nContent-Type: %s\\r\\n\\r\\n%s\\r\\n' % (random_boundary, key, value.name, file_mimetype, value.read())
                 form_data.append(itemstr)
             else:
                 raise Exception(value, 'Field is neither a file handle or any other decodable type.')
     else:
         pass
 
-    form_data.append('--%s--\r\n' % random_boundary)
+    form_data.append('--%s--\\r\\n' % random_boundary)
 
     return content_type, ''.join(form_data)
 
