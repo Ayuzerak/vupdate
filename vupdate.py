@@ -6241,7 +6241,7 @@ def getHosterIframe(url, referer):
         sPattern = 'function %s\(\) +{\\n + return\(\[([^\]]+)' % func
         aResult = re.findall(sPattern, sHtmlContent)
         if aResult:
-            sHosterUrl = aResult[0].replace('"', '').replace(',', '').replace('\\', '').replace('////', '//')
+            sHosterUrl = aResult[0].replace('"', '').replace(',', '').replace('\\\', '').replace('////', '//')
             return True, sHosterUrl + '|referer=' + referer
 
     sPattern = ';var.+?src=["\\']([^"\\']+)["\\']'
