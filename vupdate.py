@@ -6020,7 +6020,7 @@ def Hoster_Telerium(url, referer):
     urlrederict = oRequestHandler.getRealUrl()
     urlmain = 'https://' + urlrederict.split('/')[2]
 
-    sPattern = r'var\s+cid[^\'"]+[\'"]{1}([0-9]+)'
+    sPattern = r'var\s+cid[^\\'"]+[\\'"]{1}([0-9]+)'
     aResult = re.findall(sPattern, sHtmlContent)
 
     if aResult:
@@ -6140,7 +6140,7 @@ def Hoster_ShareCast(url, referer):
     oRequestHandler.addHeaderEntry('Referer', referer)
     sHtmlContent = oRequestHandler.request()
 
-    sPattern = "new Player\(.+?player\",\"([^\"]+)\",{'([^\']+)"
+    sPattern = "new Player\(.+?player\\",\\"([^\\"]+)\\",{'([^\\']+)"
     aResult = re.findall(sPattern, sHtmlContent)
 
     if aResult:
@@ -6244,14 +6244,14 @@ def getHosterIframe(url, referer):
             sHosterUrl = aResult[0].replace('"', '').replace(',', '').replace('\\', '').replace('////', '//')
             return True, sHosterUrl + '|referer=' + referer
 
-    sPattern = ';var.+?src=["\']([^"\']+)["\']'
+    sPattern = ';var.+?src=["\\']([^"\\']+)["\\']'
     aResult = re.findall(sPattern, sHtmlContent)
     if aResult:
         sHosterUrl = aResult[0]
         if '.m3u8' in sHosterUrl:
             return True, sHosterUrl + '|Referer=' + referer
 
-    sPattern = '[^/]source.+?["\'](https.+?)["\']'
+    sPattern = '[^/]source.+?["\\'](https.+?)["\\']'
     aResult = re.findall(sPattern, sHtmlContent)
     if aResult:
         for sHosterUrl in aResult:
