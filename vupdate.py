@@ -5108,22 +5108,20 @@ def get_streamonsport_url():
     VSlog("Starting Streamonsport URL retrieval process")
     
     CONFIG_FILE = VSPath('special://home/addons/service.vstreamupdate/site_config.ini').replace('\\', '/')
-
     default_url = 'https://stream-onsport.ru/'
+    sites_json = VSPath('special://home/addons/plugin.video.vstream/resources/sites.json').replace('\\', '/')
 
     def save_valid_url(url):
         try:
             config = configparser.ConfigParser()
-            config["elitegol"] = {"current_url": url}
+            config["streamonsport"] = {"current_url": url}  # Fixed section name
             with open(CONFIG_FILE, "w") as configfile:
                 config.write(configfile)
         except Exception as e:
             VSlog(f"Cannot save valid url: {str(e)}")
     
     def load_and_validate_url():
-
         VSlog("load_and_validate_url()")
-
         try:
             config = configparser.ConfigParser()
             if os.path.exists(CONFIG_FILE):
@@ -5132,10 +5130,6 @@ def get_streamonsport_url():
                     saved_url = config["streamonsport"]["current_url"]
                     if validate_url_content(saved_url):
                         return saved_url
-                else:
-                    return default_url
-        except FileNotFoundError:
-            VSlog("No saved URL file found")
             return default_url
         except Exception as e:
             VSlog(f"URL load error: {str(e)}")
@@ -5144,6 +5138,8 @@ def get_streamonsport_url():
     def validate_url_content(url):
         try:
             response = requests.get(url, timeout=15)
+            if response.status_code != 200:
+                return False
             response_lowered = response.text.lower()
             return "matchs" in response_lowered and "direct" in response_lowered
         except Exception as e:
@@ -5153,101 +5149,120 @@ def get_streamonsport_url():
     current_valid_url = None
     
     try:
-        #Zero source : sites.json file
+        # Zero source: sites.json file
         if not current_valid_url:
             try:
-                """Fecthing a new URL for Streamonsport from the sites.json file."""
-                sites_json = VSPath('special://home/addons/plugin.video.vstream/resources/sites.json').replace('\\', '/')
-                        
-                # Load the JSON file
                 with open(sites_json, 'r') as fichier:
                     data = json.load(fichier)
-        
-                # Get the Url
-                if 'streamonsport' in data['sites']:
-                    processed_url = data['sites']['streamonsport']['url']
-                if validate_url_content(processed_url):
-                    current_valid_url = processed_url
-                    VSlog(f"Streamonsport URL found (sites.json file): {current_valid_url}")
+                if 'streamonsport' in data.get('sites', {}):
+                    processed_url = data['sites']['streamonsport'].get('url', '')
+                    if processed_url and validate_url_content(processed_url):
+                        current_valid_url = processed_url
+                        VSlog(f"Streamonsport URL found (sites.json): {current_valid_url}")
             except Exception as e:
                 VSlog(f"sites.json processing error: {str(e)}")
 
-        #0.1 source : sites.json file site_info
+        # 0.1 source: site_info from sites.json
         if not current_valid_url:
             try:
                 with open(sites_json, 'r') as fichier:
                     data = json.load(fichier)
-                if 'streamonsport' in data['sites']:
-                    if 'site_info' in data['sites']['streamonsport']:
-                        site_info_new_address = data['sites']['streamonsport']['site_info']
-
-                        response = requests.get(site_info_new_address)
-                        html_content = response.text
-
-                        # Rechercher l'URL dans l'attribut href
-                        match = re.search(r"<a href='(.*?)'", html_content)
-
-                        # Extraire et afficher l'URL si elle existe
-                        if match:
-                            processed_url = match.group(1).replace("http", "https").replace("httpss", "https") + "/"
+                site_info = data.get('sites', {}).get('streamonsport', {}).get('site_info')
+                if site_info:
+                    response = requests.get(site_info, timeout=15)
+                    html_content = response.text
+                    # Look for both single and double quotes in href
+                    match = re.search(r'href=["\'](https?://[^"\']+)["\']', html_content)
+                    if match:
+                        processed_url = match.group(1).replace("http:", "https:").rstrip('/') + '/'
                         if validate_url_content(processed_url):
                             current_valid_url = processed_url
                             VSlog(f"Streamonsport URL found (site_info): {current_valid_url}")
             except Exception as e:
-                VSlog(f"Error while retrieving Streamonsport URL from source_info: {e}")
-                    
+                VSlog(f"Error retrieving from site_info: {e}")
+
         # First source: fulldeals.fr
         if not current_valid_url:
             try:
                 response = requests.get("https://fulldeals.fr/streamonsport/", timeout=10)
                 content = response.text
                 target_pos = content.find("<strong>la vraie adresse")
-            
                 if target_pos != -1:
                     section = content[target_pos:]
                     urls = re.findall(r'href="(https?://[^"]+)"', section)
-                if urls:
-                    raw_url = urls[0]
-                    processed_url = raw_url.replace("http", "https").replace("httpss", "https").rstrip('/') + '/'
-                    VSlog(f"Found fulldeals URL candidate: {processed_url}")
-                    if validate_url_content(processed_url):
-                        current_valid_url = processed_url
+                    if urls:
+                        raw_url = urls[0]
+                        processed_url = raw_url.replace("http:", "https:").rstrip('/') + '/'
+                        VSlog(f"fulldeals URL candidate: {processed_url}")
+                        if validate_url_content(processed_url):
+                            current_valid_url = processed_url
             except Exception as e:
-                VSlog(f"fulldeals processing error: {str(e)}")
-        
-        # Second source: lefoot.ru (only if first failed)
+                VSlog(f"fulldeals error: {str(e)}")
+
+        # Second source: lefoot.ru
         if not current_valid_url:
             try:
                 response = requests.get("https://lefoot.ru/", timeout=10)
-                content = response.text
-                urls = re.findall(r'href="(https?://[^"]+)"', content)
+                urls = re.findall(r'href="(https?://[^"]+)"', response.text)
                 if urls:
-                    raw_url = urls[0]
-                    processed_url = raw_url.replace("http", "https").replace("httpss", "https").rstrip('/') + '/'
-                    VSlog(f"Found lefoot URL candidate: {processed_url}")
+                    processed_url = urls[0].replace("http:", "https:").rstrip('/') + '/'
+                    VSlog(f"lefoot URL candidate: {processed_url}")
                     if validate_url_content(processed_url):
                         current_valid_url = processed_url
             except Exception as e:
-                VSlog(f"lefoot processing error: {str(e)}")
-        
-        # Save and return if found new valid URL
+                VSlog(f"lefoot error: {str(e)}")
+				
+		# Third source: vpnclub.fr
+		if not current_valid_url:
+			try:
+				response = requests.get("https://www.vpnclub.fr/streamonsport-bloque-nouvelle-adresse/", timeout=15)
+				if response.status_code == 200:
+					content = response.text
+					# Pattern to match the specific HTML structure
+					pattern = re.compile(
+						r'<p>.*?adresse de Streamonsport est :.*?<strong>(.*?)</strong>.*?</p>',
+						re.IGNORECASE | re.DOTALL
+					)
+					
+					match = pattern.search(content)
+					if match:
+						raw_domain = match.group(1).strip()
+						# Convert to proper URL format
+						processed_url = f"https://{raw_domain}/".replace('///', '//')
+						VSlog(f"VPNClub URL candidate: {processed_url}")
+						
+						# Validate and force HTTPS
+						if validate_url_content(processed_url):
+							current_valid_url = processed_url
+						else:
+							# Try with www prefix if validation fails
+							www_url = processed_url.replace('://', '://www.')
+							if validate_url_content(www_url):
+								current_valid_url = www_url
+					else:
+						VSlog("Streamonsport address paragraph not found in VPNClub content")
+				else:
+					VSlog(f"VPNClub returned status code: {response.status_code}")
+			except Exception as e:
+				VSlog(f"VPNClub processing error: {str(e)}")
+
+        # Save and return valid URL
         if current_valid_url:
             save_valid_url(current_valid_url)
             return current_valid_url
         
-        # Fallback to saved URL
+        # Fallback to saved or default URL
         saved_url = load_and_validate_url()
         if saved_url:
             VSlog("Using validated fallback URL")
             return saved_url
         
-        VSlog("No valid URLs found in current check or saved file")
-        return None
+        VSlog("No valid URLs found")
+        return default_url
 
     except Exception as e:
         VSlog(f"Critical error: {str(e)}")
-        default_url = load_and_validate_url()
-        return default_url if default_url else None
+        return load_and_validate_url() or default_url
     
 def set_streamonsport_url(url):
     """Set a new URL for Streamonsport in the sites.json file."""
