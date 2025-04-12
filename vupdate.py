@@ -5770,10 +5770,12 @@ SITE_DESC = 'Site pour regarder du sport en direct'
 SPORT_SPORTS = ('/', 'load')
 TV_TV = ('/', 'load')
 SPORT_TV = ('31-foot-rugby-tennis-basket-f1-moto-hand-en-streaming-direct.html', 'showMovies')
+# CHAINE_CINE = ('2370162-chaines-tv-streaming-tf1-france-2-canal-plus.html', 'showMovies')
 SPORT_LIVE = ('/', 'showMovies')
 SPORT_GENRES = ('/', 'showGenres')
 
 URL_MAIN = siteManager().getUrlMain(SITE_IDENTIFIER)
+# URL_MAIN = ''
 
 
 def GetUrlMain():
@@ -5792,13 +5794,20 @@ def GetUrlMain():
 
 def load():
     oGui = cGui()
+
     oOutputParameterHandler = cOutputParameterHandler()
 
     oOutputParameterHandler.addParameter('siteUrl', SPORT_LIVE[0])
     oGui.addDir(SITE_IDENTIFIER, SPORT_LIVE[1], 'Sports (En direct)', 'replay.png', oOutputParameterHandler)
 
+    # oOutputParameterHandler.addParameter('siteUrl', SPORT_GENRES[0])
+    # oGui.addDir(SITE_IDENTIFIER, SPORT_GENRES[1], 'Sports (Genres)', 'genres.png', oOutputParameterHandler)
+
     oOutputParameterHandler.addParameter('siteUrl', SPORT_TV[0])
     oGui.addDir(SITE_IDENTIFIER, SPORT_TV[1], 'Chaines TV Sports', 'sport.png', oOutputParameterHandler)
+
+    # oOutputParameterHandler.addParameter('siteUrl', CHAINE_CINE[0])
+    # oGui.addDir(SITE_IDENTIFIER, CHAINE_CINE[1], 'Chaines TV Ciné', 'tv.png', oOutputParameterHandler)
 
     oGui.setEndOfDirectory()
 
@@ -5830,6 +5839,7 @@ def showMovies(sSearch=''):
     oRequestHandler = cRequestHandler(sUrl)
     sHtmlContent = oRequestHandler.request()
 
+    # THUMB ref title desc1 desc2
     sPattern = '<img class=".+?src="([^"]+)".+?href="([^"]+).+?<span>([^<]+)<.+?data-time="(?:([^<]+)|)".+?>([^<]+)'
 
     oParser = cParser()
@@ -5846,6 +5856,8 @@ def showMovies(sSearch=''):
             sDate = aEntry[3]
             sDesc1 = aEntry[4]
 
+            # bChaine = False
+            # if sUrl != CHAINE_CINE[0] and sUrl != SPORT_TV[0]:
             if sUrl != SPORT_TV[0]:
                 sDisplayTitle = sTitle
                 if sDesc1 and 'chaîne' not in sDesc1 and 'chaine' not in sDesc1:
@@ -5859,6 +5871,7 @@ def showMovies(sSearch=''):
                         pass
                     sDisplayTitle = sDate + ' - ' + sDisplayTitle
             else:
+                # bChaine = True
                 sTitle = sTitle.upper()
                 sDisplayTitle = sTitle
 
@@ -5891,6 +5904,7 @@ def showLive():
     sHtmlContent = oRequestHandler.request()
     oParser = cParser()
 
+    # liens visibles
     sPattern = r"btn btn-(success|warning) *btn-sm.+?src='([^\']*).+?img src=\".+?lang\/([^\"]*)\.gif.+?this\.src='.+?lang\/([^\']*)\.gif"
     aResult = oParser.parse(sHtmlContent, sPattern)
 
@@ -5911,6 +5925,19 @@ def showLive():
                 oOutputParameterHandler.addParameter('siterefer', sUrl)
                 oGui.addLink(SITE_IDENTIFIER, 'showLink', sDisplayTitle, sThumb, sDesc, oOutputParameterHandler)
 
+    # # 1 seul liens tv telerium
+    # sPattern = 'iframe id="video" src.+?id=([^"]+)'
+    # aResult = oParser.parse(sHtmlContent, sPattern)
+    # if aResult[0] is True:
+    #     sUrl2 = GetUrlMain() + 'go/' + aResult[1][0]
+    #     sDisplayTitle = sMovieTitle
+    #     oOutputParameterHandler = cOutputParameterHandler()
+    #     oOutputParameterHandler.addParameter('siteUrl', sUrl2)
+    #     oOutputParameterHandler.addParameter('sMovieTitle', sMovieTitle)
+    #     oOutputParameterHandler.addParameter('sThumb', sThumb)
+    #     oOutputParameterHandler.addParameter('siterefer', sUrl)
+    #     oGui.addLink(SITE_IDENTIFIER, 'showLink', sDisplayTitle, sThumb, sDesc, oOutputParameterHandler)
+
     oGui.setEndOfDirectory()
 
 
@@ -5924,13 +5951,14 @@ def showLink():
     siterefer = oInputParameterHandler.getValue('siterefer')
     sHosterUrl = ''
 
-    if 'yahoo' in sUrl:
+    if 'yahoo' in sUrl:  # redirection
         urlMain = GetUrlMain()
         sUrl = urlMain + sUrl
 
     if 'allfoot' in sUrl or 'streamonsport' in sUrl:
         oRequestHandler = cRequestHandler(sUrl)
         oRequestHandler.addHeaderEntry('User-Agent', UA)
+        # oRequestHandler.addHeaderEntry('Referer', siterefer) # a verifier
         sHtmlContent = oRequestHandler.request()
 
         siterefer = sUrl
@@ -5974,6 +6002,7 @@ def showLink():
         if bvalid:
             sHosterUrl = shosterurl
 
+    # a verifier
     if 'laylow' in sUrl:
         bvalid, shosterurl = Hoster_Laylow(sUrl, siterefer)
         if bvalid:
@@ -6018,9 +6047,9 @@ def Hoster_Telerium(url, referer):
     sHtmlContent = oRequestHandler.request()
 
     urlrederict = oRequestHandler.getRealUrl()
-    urlmain = 'https://' + urlrederict.split('/')[2]
+    urlmain = 'https://' + urlrederict.split('/')[2]  # ex https://telerium.club
 
-    sPattern = r'var\s+cid[^\\'"]+[\\'"]{1}([0-9]+)'
+    sPattern = r'var\s+cid[^\'"]+[\'"]{1}([0-9]+)'
     aResult = re.findall(sPattern, sHtmlContent)
 
     if aResult:
@@ -6038,7 +6067,7 @@ def Hoster_Telerium(url, referer):
             pass
 
         sHosterUrl = 'https:' + m3url + realtoken
-        sHosterUrl += '|User-Agent=' + UA + '&Referer=' + Quote(urlrederict)
+        sHosterUrl += '|User-Agent=' + UA + '&Referer=' + Quote(urlrederict)  # + '&Sec-F'
 
         return True, sHosterUrl
 
@@ -6083,6 +6112,7 @@ def Hoster_Andrhino(url, referer):
         url2 = base64.b64decode(aResult[0])
         return True, url2.strip() + '|User-Agent=' + UA + '&Referer=' + Quote(url)
 
+    # fichier vu mais ne sait plus dans quel cas
     sPattern = r"source:\s'(https.+?m3u8)"
     aResult = re.findall(sPattern, sHtmlContent)
 
@@ -6111,7 +6141,7 @@ def Hoster_Wigistream(url, referer):
         if aResult:
             return True, aResult[0] + '|User-Agent=' + UA + '&Referer=' + Quote(url)
 
-    sPattern = '<iframe.+?src="([^"]+)'
+    sPattern = '<iframe.+?src="([^"]+)'  # iframe imbriqué
     aResult = re.findall(sPattern, sHtmlContent)
     if aResult:
         return Hoster_Wigistream(aResult[0], url)
@@ -6140,7 +6170,7 @@ def Hoster_ShareCast(url, referer):
     oRequestHandler.addHeaderEntry('Referer', referer)
     sHtmlContent = oRequestHandler.request()
 
-    sPattern = "new Player\(.+?player\\",\\"([^\\"]+)\\",{'([^\\']+)"
+    sPattern = "new Player\(.+?player\",\"([^\"]+)\",{'([^\']+)"
     aResult = re.findall(sPattern, sHtmlContent)
 
     if aResult:
@@ -6152,6 +6182,7 @@ def Hoster_ShareCast(url, referer):
 
 
 def getRealTokenJson(link, referer):
+
     realResp = ''
     oRequestHandler = cRequestHandler(link)
     oRequestHandler.addHeaderEntry('User-Agent', UA)
@@ -6170,6 +6201,11 @@ def getRealTokenJson(link, referer):
         oRequestHandler = cRequestHandler(link)
         oRequestHandler.addHeaderEntry('User-Agent', UA)
         oRequestHandler.addHeaderEntry('Accept', 'application/json')
+        oRequestHandler.addHeaderEntry('Accept-Language', 'pl,en-US;q=0.7,en;q=0.3')
+        oRequestHandler.addHeaderEntry('X-Requested-With', 'XMLHttpRequest')
+        oRequestHandler.addHeaderEntry('Referer', referer)
+        oRequestHandler.addCookieEntry('elVolumen', '100')
+        oRequestHandler.addCookieEntry('__ga', '100')
         realResp = oRequestHandler.request()
 
     return json.loads(realResp)
@@ -6182,7 +6218,9 @@ def getTimer():
     return (datenow - epoch).total_seconds() // 1
 
 
+# Traitement générique
 def getHosterIframe(url, referer):
+
     if 'youtube.com' in url:
         return False, False
 
@@ -6193,7 +6231,6 @@ def getHosterIframe(url, referer):
     if referer:
         oRequestHandler.addHeaderEntry('Referer', referer)
     sHtmlContent = str(oRequestHandler.request())
-    
     if not sHtmlContent or sHtmlContent == 'False':
         return False, False
 
@@ -6210,6 +6247,7 @@ def getHosterIframe(url, referer):
     sPattern = '.atob\("(.+?)"'
     aResult = re.findall(sPattern, sHtmlContent)
     if aResult:
+        import base64
         for code in aResult:
             try:
                 if isMatrix():
@@ -6218,7 +6256,7 @@ def getHosterIframe(url, referer):
                     code = base64.b64decode(code)
                 if '.m3u' in code:
                     return True, code + '|Referer=' + referer
-            except Exception:
+            except Exception as e:
                 pass
 
     sPattern = '<iframe.+?src=["\\']([^"\\']+)["\\']'
@@ -6228,8 +6266,9 @@ def getHosterIframe(url, referer):
             if url.startswith("./"):
                 url = url[1:]
             if not url.startswith("http"):
-                url = '//' + referer.split('/')[2] + url
-            url = "https:" + url
+                if not url.startswith("//"):
+                    url = '//'+referer.split('/')[2] + url  # ajout du nom de domaine
+                url = "https:" + url
             b, url = getHosterIframe(url, referer)
             if b:
                 return True, url
@@ -6238,7 +6277,7 @@ def getHosterIframe(url, referer):
     aResult = re.findall(sPattern, sHtmlContent)
     if aResult:
         func = aResult[0]
-        sPattern = 'function %s\(\) +{\\n + return\(\[([^\]]+)' % func
+        sPattern = 'function %s\(\) +{\n + return\(\[([^\]]+)' % func
         aResult = re.findall(sPattern, sHtmlContent)
         if aResult:
             sHosterUrl = aResult[0].replace('"', '').replace(',', '').replace('\\\\', '').replace('////', '//')
@@ -6249,9 +6288,10 @@ def getHosterIframe(url, referer):
     if aResult:
         sHosterUrl = aResult[0]
         if '.m3u8' in sHosterUrl:
+#            return True, sHosterUrl #+ '|User-Agent=' + UA + '&Referer=' + referer
             return True, sHosterUrl + '|Referer=' + referer
 
-    sPattern = "onload=\\"ThePlayerJS\('.+?','([^\\']+)"
+    sPattern = "onload=\"ThePlayerJS\('.+?','([^\\']+)"
     aResult = re.findall(sPattern, sHtmlContent)
     if aResult:
         url = 'https://sharecast.ws/player/' + aResult[0]
@@ -6287,7 +6327,9 @@ def getHosterIframe(url, referer):
         sHosterUrl = 'https://%s/hls/%s/live.m3u8' % (aResult[0][1], aResult[0][0])
         return True, sHosterUrl + '|referer=' + referer
 
-    return False, False"""
+
+    return False, False
+"""
 
     file_path = VSPath("special://home/addons/plugin.video.vstream/resources/sites/streamonsport.py")
     
