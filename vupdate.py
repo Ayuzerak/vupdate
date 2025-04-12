@@ -6316,7 +6316,7 @@ def update_sites_json():
     }
 
     # Get Kodi addon path
-    file_path = VSPath("special://home/addons/plugin.video.vstream/resources/sites.json")
+    json_path = VSPath("special://home/addons/plugin.video.vstream/resources/sites.json")
 
     try:
         # Create file if it doesn't exist
