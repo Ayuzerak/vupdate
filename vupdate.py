@@ -6049,7 +6049,7 @@ def Hoster_Telerium(url, referer):
     urlrederict = oRequestHandler.getRealUrl()
     urlmain = 'https://' + urlrederict.split('/')[2]  # ex https://telerium.club
 
-    sPattern = r'var\s+cid[^\'"]+[\'"]{1}([0-9]+)'
+    sPattern = r'var\s+cid[^\\'"]+[\\'"]{1}([0-9]+)'
     aResult = re.findall(sPattern, sHtmlContent)
 
     if aResult:
