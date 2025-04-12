@@ -6256,9 +6256,16 @@ def getHosterIframe(url, referer):
     if aResult:
         for sHosterUrl in aResult:
             if '.m3u8' in sHosterUrl:
+                if 'fls/cdn/' in sHosterUrl:
+                    sHosterUrl = sHosterUrl.replace('/playlist.', '/tracks-v1a1/mono.')
+                else:
+                    oRequestHandler = cRequestHandler(sHosterUrl)
+                    oRequestHandler.request()
+                    sHosterUrl = oRequestHandler.getRealUrl()
+                    # sHosterUrl = sHosterUrl.replace('index', 'mono')
                 return True, sHosterUrl + '|referer=' + referer
 
-    sPattern = 'file: *["\'](https.+?\.m3u8)["\']'
+    sPattern = 'file: *["\\'](https.+?\.m3u8)["\\']'
     aResult = re.findall(sPattern, sHtmlContent)
     if aResult:
         oRequestHandler = cRequestHandler(aResult[0])
