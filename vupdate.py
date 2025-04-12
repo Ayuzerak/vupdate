@@ -6170,7 +6170,7 @@ def Hoster_ShareCast(url, referer):
     oRequestHandler.addHeaderEntry('Referer', referer)
     sHtmlContent = oRequestHandler.request()
 
-    sPattern = "new Player\(.+?player\",\"([^\"]+)\",{'([^\']+)"
+    sPattern = "new Player\(.+?player\\",\\"([^\\"]+)\",{'([^\\']+)"
     aResult = re.findall(sPattern, sHtmlContent)
 
     if aResult:
@@ -6277,7 +6277,7 @@ def getHosterIframe(url, referer):
     aResult = re.findall(sPattern, sHtmlContent)
     if aResult:
         func = aResult[0]
-        sPattern = 'function %s\(\) +{\n + return\(\[([^\]]+)' % func
+        sPattern = 'function %s\(\) +{\\n + return\(\[([^\]]+)' % func
         aResult = re.findall(sPattern, sHtmlContent)
         if aResult:
             sHosterUrl = aResult[0].replace('"', '').replace(',', '').replace('\\\\', '').replace('////', '//')
@@ -6291,7 +6291,7 @@ def getHosterIframe(url, referer):
 #            return True, sHosterUrl #+ '|User-Agent=' + UA + '&Referer=' + referer
             return True, sHosterUrl + '|Referer=' + referer
 
-    sPattern = "onload=\"ThePlayerJS\('.+?','([^\\']+)"
+    sPattern = "onload=\\"ThePlayerJS\('.+?','([^\\']+)"
     aResult = re.findall(sPattern, sHtmlContent)
     if aResult:
         url = 'https://sharecast.ws/player/' + aResult[0]
