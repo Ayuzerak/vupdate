@@ -6316,8 +6316,7 @@ def update_sites_json():
     }
 
     # Get Kodi addon path
-    base_dir = os.path.join(os.path.expanduser('~'), '.kodi', 'addons')
-    json_path = os.path.join(base_dir, 'plugin.video.vstream', 'resources', 'sites.json')
+    file_path = VSPath("special://home/addons/plugin.video.vstream/resources/sites.json")
 
     try:
         # Create file if it doesn't exist
