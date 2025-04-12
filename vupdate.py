@@ -6322,27 +6322,34 @@ def update_sites_json():
         if not os.path.exists(json_path):
             os.makedirs(os.path.dirname(json_path), exist_ok=True)
             with open(json_path, 'w', encoding='utf-8') as f:
-                json.dump(new_entry, f, indent=4)
+                json.dump({"sites": new_entry}, f, indent=4)
             return True
 
         with open(json_path, 'r+', encoding='utf-8') as f:
             try:
                 data = json.load(f)
+                # Ensure proper structure
+                if "sites" not in data:
+                    data = {"sites": data}
             except json.JSONDecodeError:
-                data = {}
+                data = {"sites": {}}
 
-            if "streamonsport" not in data:
-                # Preserve existing entries while adding new one
-                updated_data = {**data, **new_entry}
+            # Add new entry only if it doesn't exist
+            if "streamonsport" not in data["sites"]:
+                data["sites"].update(new_entry)
                 
-                # Write back sorted keys for better readability
+                # Sort sites alphabetically while preserving structure
+                sorted_sites = dict(sorted(data["sites"].items(), key=lambda item: item[0].lower()))
+                data["sites"] = sorted_sites
+                
+                # Write back with proper formatting
                 f.seek(0)
-                json.dump(updated_data, f, indent=4, sort_keys=True)
+                json.dump(data, f, indent=4, ensure_ascii=False)
                 f.truncate()
                 return True
 
     except Exception as e:
-        VSlog(f"Error updating sites.json: {str(e)}")
+        print(f"Error updating sites.json: {str(e)}")
         return False
         
 def update_streamonsport_module():
