@@ -6251,6 +6251,14 @@ def getHosterIframe(url, referer):
         if '.m3u8' in sHosterUrl:
             return True, sHosterUrl + '|Referer=' + referer
 
+    sPattern = "onload=\\"ThePlayerJS\('.+?','([^\\']+)"
+    aResult = re.findall(sPattern, sHtmlContent)
+    if aResult:
+        url = 'https://sharecast.ws/player/' + aResult[0]
+        b, url = Hoster_ShareCast(url, referer)
+        if b:
+            return True, url
+
     sPattern = '[^/]source.+?["\\'](https.+?)["\\']'
     aResult = re.findall(sPattern, sHtmlContent)
     if aResult:
