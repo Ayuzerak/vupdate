@@ -6328,9 +6328,6 @@ def update_sites_json():
         with open(json_path, 'r+', encoding='utf-8') as f:
             try:
                 data = json.load(f)
-                # Clean potential trailing comma issues
-                if isinstance(data, list):  # Handle accidental array format
-                    data = {k: v for item in data for k, v in item.items()}
             except json.JSONDecodeError:
                 data = {}
 
@@ -6345,7 +6342,7 @@ def update_sites_json():
                 return True
 
     except Exception as e:
-        print(f"Error updating sites.json: {str(e)}")
+        VSlog(f"Error updating sites.json: {str(e)}")
         return False
         
 def update_streamonsport_module():
