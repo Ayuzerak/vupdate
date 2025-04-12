@@ -6221,7 +6221,7 @@ def getHosterIframe(url, referer):
             except Exception:
                 pass
 
-    sPattern = '<iframe.+?src=["\']([^"\']+)["\']'
+    sPattern = '<iframe.+?src=["\\']([^"\\']+)["\\']'
     aResult = re.findall(sPattern, sHtmlContent)
     if aResult:
         for url in aResult:
