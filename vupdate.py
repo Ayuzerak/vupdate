@@ -5212,39 +5212,39 @@ def get_streamonsport_url():
             except Exception as e:
                 VSlog(f"lefoot error: {str(e)}")
 				
-		# Third source: vpnclub.fr
-		if not current_valid_url:
-			try:
-				response = requests.get("https://www.vpnclub.fr/streamonsport-bloque-nouvelle-adresse/", timeout=15)
-				if response.status_code == 200:
-					content = response.text
-					# Pattern to match the specific HTML structure
-					pattern = re.compile(
-						r'<p>.*?adresse de Streamonsport est :.*?<strong>(.*?)</strong>.*?</p>',
-						re.IGNORECASE | re.DOTALL
-					)
+	# Third source: vpnclub.fr
+	if not current_valid_url:
+		try:
+			response = requests.get("https://www.vpnclub.fr/streamonsport-bloque-nouvelle-adresse/", timeout=15)
+			if response.status_code == 200:
+				content = response.text
+				# Pattern to match the specific HTML structure
+				pattern = re.compile(
+					r'<p>.*?adresse de Streamonsport est :.*?<strong>(.*?)</strong>.*?</p>',
+					re.IGNORECASE | re.DOTALL
+				)
 					
-					match = pattern.search(content)
-					if match:
-						raw_domain = match.group(1).strip()
-						# Convert to proper URL format
-						processed_url = f"https://{raw_domain}/".replace('///', '//')
-						VSlog(f"VPNClub URL candidate: {processed_url}")
+				match = pattern.search(content)
+				if match:
+					raw_domain = match.group(1).strip()
+					# Convert to proper URL format
+					processed_url = f"https://{raw_domain}/".replace('///', '//')
+					VSlog(f"VPNClub URL candidate: {processed_url}")
 						
-						# Validate and force HTTPS
-						if validate_url_content(processed_url):
-							current_valid_url = processed_url
-						else:
-							# Try with www prefix if validation fails
-							www_url = processed_url.replace('://', '://www.')
-							if validate_url_content(www_url):
-								current_valid_url = www_url
+					# Validate and force HTTPS
+					if validate_url_content(processed_url):
+						current_valid_url = processed_url
 					else:
-						VSlog("Streamonsport address paragraph not found in VPNClub content")
+						# Try with www prefix if validation fails
+						www_url = processed_url.replace('://', '://www.')
+						if validate_url_content(www_url):
+							current_valid_url = www_url
 				else:
-					VSlog(f"VPNClub returned status code: {response.status_code}")
-			except Exception as e:
-				VSlog(f"VPNClub processing error: {str(e)}")
+					VSlog("Streamonsport address paragraph not found in VPNClub content")
+			else:
+				VSlog(f"VPNClub returned status code: {response.status_code}")
+		except Exception as e:
+			VSlog(f"VPNClub processing error: {str(e)}")
 
         # Save and return valid URL
         if current_valid_url:
