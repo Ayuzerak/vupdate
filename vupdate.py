@@ -6301,9 +6301,9 @@ def getHosterIframe(url, referer):
 
     # Now update sites.json
     if update_sites_json():
-        VSlog("Successfully updated sites.json")
+        VSlog("Successfully updated sites.json with adding of streamonsport entry")
     else:
-        VSlog("No changes made to sites.json")
+        VSlog("No changes made to sites.json for streamonsport entry")
 
 def update_sites_json():
     # Define the entry to add
