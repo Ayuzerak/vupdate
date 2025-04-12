@@ -6258,6 +6258,20 @@ def getHosterIframe(url, referer):
             if '.m3u8' in sHosterUrl:
                 return True, sHosterUrl + '|referer=' + referer
 
+    sPattern = 'file: *["\'](https.+?\.m3u8)["\']'
+    aResult = re.findall(sPattern, sHtmlContent)
+    if aResult:
+        oRequestHandler = cRequestHandler(aResult[0])
+        oRequestHandler.request()
+        sHosterUrl = oRequestHandler.getRealUrl()
+        return True, sHosterUrl + '|referer=' + referer
+
+    sPattern = 'new Player\("100%","100%","player","(.+?)".+?"([^"]+)":0.33}'
+    aResult = re.findall(sPattern, sHtmlContent)
+    if aResult:
+        sHosterUrl = 'https://%s/hls/%s/live.m3u8' % (aResult[0][1], aResult[0][0])
+        return True, sHosterUrl + '|referer=' + referer
+
     return False, False"""
 
     file_path = VSPath("special://home/addons/plugin.video.vstream/resources/sites/streamonsport.py")
