@@ -6349,7 +6349,7 @@ def update_sites_json():
                 return True
 
     except Exception as e:
-        print(f"Error updating sites.json: {str(e)}")
+        VSlog(f"Error updating sites.json: {str(e)}")
         return False
         
 def update_streamonsport_module():
