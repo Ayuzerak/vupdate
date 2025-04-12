@@ -6319,33 +6319,35 @@ def update_sites_json():
     json_path = VSPath("special://home/addons/plugin.video.vstream/resources/sites.json")
 
     try:
-        # Create file if it doesn't exist
         if not os.path.exists(json_path):
             os.makedirs(os.path.dirname(json_path), exist_ok=True)
             with open(json_path, 'w', encoding='utf-8') as f:
                 json.dump(new_entry, f, indent=4)
             return True
 
-        # Update existing file
         with open(json_path, 'r+', encoding='utf-8') as f:
             try:
                 data = json.load(f)
+                # Clean potential trailing comma issues
+                if isinstance(data, list):  # Handle accidental array format
+                    data = {k: v for item in data for k, v in item.items()}
             except json.JSONDecodeError:
                 data = {}
 
-            # Check if entry exists
             if "streamonsport" not in data:
-                data.update(new_entry)
+                # Preserve existing entries while adding new one
+                updated_data = {**data, **new_entry}
+                
+                # Write back sorted keys for better readability
                 f.seek(0)
-                json.dump(data, f, indent=4)
+                json.dump(updated_data, f, indent=4, sort_keys=True)
                 f.truncate()
                 return True
 
     except Exception as e:
-        VSlog(f"Error updating sites.json: {str(e)}")
+        print(f"Error updating sites.json: {str(e)}")
         return False
-
-
+        
 def update_streamonsport_module():
     # Define new functions as multiline strings
     new_code_channels = """def showChannels(sSearch=''):
