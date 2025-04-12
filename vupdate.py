@@ -6170,7 +6170,7 @@ def Hoster_ShareCast(url, referer):
     oRequestHandler.addHeaderEntry('Referer', referer)
     sHtmlContent = oRequestHandler.request()
 
-    sPattern = "new Player\(.+?player\\",\\"([^\\"]+)\",{'([^\\']+)"
+    sPattern = "new Player\(.+?player\\",\\"([^\\"]+)\\",{'([^\\']+)"
     aResult = re.findall(sPattern, sHtmlContent)
 
     if aResult:
