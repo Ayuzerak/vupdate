@@ -6706,23 +6706,23 @@ def update_streamonsport_module():
         VSlog('No updates needed for streamonsport.py')
 
 def update_livetv_module():
-    """Update livetv.py with proper regex escaping and required features"""
-    file_path = VSPath("special://home/addons/plugin.video.vstream/resources/sites/livetv.py")
-    VSlog(f"[Livetv update] Starting update process for {file_path}")
+    """Update livetv.py with proper regex handling and status indicators"""
+    file_path = VSPath("special://home/addons/plugin.video.vstream/resources/lib/livetv.py")
+    VSlog(f"[Livetv Update] Starting update for {file_path}")
     
     try:
         with open(file_path, 'r', encoding='utf-8') as f:
             content = f.read()
     except Exception as e:
-        VSlog(f"[Livetv update Error] File read failed: {str(e)}", 4)
+        VSlog(f"[Livetv Error] File read failed: {str(e)}", 4)
         return False
 
     updated = False
-    changes = []
+    backup_path = file_path + '.bak'
 
     # 1. Add isLinkOnline function if missing
-    if not re.search(r'def\s+isLinkOnline\(.*?\):', content):
-        VSlog("[Livetv update] Adding isLinkOnline function")
+    if not re.search(r'def\s+isLinkOnline\(', content):
+        VSlog("[Livetv Update] Adding isLinkOnline function")
         is_link_online = """
 def isLinkOnline(url):
     try:
@@ -6738,12 +6738,10 @@ def isLinkOnline(url):
             content,
             flags=re.DOTALL
         )
-        changes.append("Added isLinkOnline function")
         updated = True
 
     # 2. Update showMovies3 with corrected regex
-    show_movies3_pattern = r'(def\s+showMovies3\s*\(.*?\)\s*:.*?oGui\.setEndOfDirectory\(\s*\))'
-    new_show_movies3 = """
+    new_show_movies3 = r"""
 def showMovies3():  # affiche les videos disponible du live
     oGui = cGui()
     oInputParameterHandler = cInputParameterHandler()
@@ -6784,36 +6782,36 @@ def showMovies3():  # affiche les videos disponible du live
     oGui.setEndOfDirectory()
 """.strip()
 
-    if not re.search(r'sStatus\s*=\s*\[COLOR lime\]\[Online\]', content):
-        VSlog("[Livetv update] Updating showMovies3 function")
+    if not re.search(r're\.sub\(r\'http://cdn\\\.livetv\\d+\\\.me/\'', content):
+        VSlog("[Livetv Update] Updating showMovies3 function")
         content = re.sub(
-            show_movies3_pattern,
+            r'(def\s+showMovies3\s*\(.*?\)\s*:.*?oGui\.setEndOfDirectory\(\s*\))',
             new_show_movies3,
             content,
             flags=re.DOTALL
         )
-        changes.append("Updated showMovies3 with status indicators")
         updated = True
 
     if updated:
         try:
             # Create backup
-            backup_path = file_path + '.bak'
             with open(backup_path, 'w', encoding='utf-8') as f:
                 f.write(content)
-            VSlog(f"[Livetv update] Backup created at {backup_path}")
-            
+            VSlog(f"[Livetv Update] Backup created at {backup_path}")
+
             # Write updates
             with open(file_path, 'w', encoding='utf-8') as f:
                 f.write(content)
             
-            VSlog(f"[Livetv update] Update successful. Changes made: {', '.join(changes)}")
+            VSlog("[Livetv Update] Successfully updated with:")
+            VSlog("- Online/Offline status indicators")
+            VSlog("- Fixed CDN URL regex pattern")
             return True
         except Exception as e:
-            VSlog(f"[Livetv update Error] Write failed: {str(e)}", 4)
+            VSlog(f"[Livetv Error] Write failed: {str(e)}", 4)
             return False
     else:
-        VSlog("[Livetv update] No updates required")
+        VSlog("[Livetv Update] File already up-to-date")
         return True
         
 def update_parse_function():
