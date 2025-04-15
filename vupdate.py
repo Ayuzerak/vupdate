@@ -5238,7 +5238,25 @@ def get_streamonsport_url():
                     VSlog(f"VPNClub status: {response.status_code}")
             except Exception as e:
                 VSlog(f"VPNClub error: {str(e)}")
-
+                
+        # Quator source
+        if not current_valid_url:
+            try:
+                response = requests.get("https://linktr.ee/streamonsport", timeout=10)
+                html = response.text
+        
+                # Find all URLs in link buttons using regex pattern
+                pattern = r'data-linktype="CLASSIC"[^>]*>\s*<a\s+href="(https?://[^"]+)"'
+                matches = re.findall(pattern, html)
+        
+                if matches:
+                    processed_url = matches[-1]  # Return last match
+                    if validate_url_content(processed_url):
+                        current_valid_url = processed_url
+                        VSlog(f"linktr.ee/streamonsport URL Candidate: {processed_url}")
+            except Exception as e:
+                VSlog(f"linktr.ee Error: {str(e)}")
+    
         # Save and return valid URL
         if current_valid_url:
             save_valid_url(current_valid_url)
