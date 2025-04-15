@@ -6808,7 +6808,7 @@ def showMovies3():  # affiche les videos disponible du live
             VSlog("- Fixed CDN URL regex pattern")
             return True
         except Exception as e:
-            VSlog(f"[Livetv Error] Write failed: {str(e)}", 4)
+            VSlog(f"[Livetv Error] Write failed: {str(e)}")
             return False
     else:
         VSlog("[Livetv Update] File already up-to-date")
