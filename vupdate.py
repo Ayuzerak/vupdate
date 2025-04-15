@@ -7331,6 +7331,61 @@ def __randy_boundary(length=10, reshuffle=False):
                 VSlog(f"Updated requestHandler.py at {file_path}.")
     except Exception as e:
         VSlog(f"An error occurred: {str(e)}")
+
+def update_livetv_file():
+    file_path = VSPath('special://home/addons/plugin.video.vstream/resources/sites/livetv.py').replace('\\', '/')
+    
+    # Read the file content
+    with open(file_path, 'r', encoding='utf-8') as f:
+        content = f.read()
+
+    # Add isLinkOnline function if not present
+    if 'def isLinkOnline(url):' not in content:
+        insert_point = content.find('def getHosterIframe(url, referer):')
+        if insert_point != -1:
+            new_function = '''
+
+def isLinkOnline(url):
+    try:
+        sHosterUrl = getHosterIframe(url, url)
+        return sHosterUrl is not False
+    except:
+        return False
+'''
+            content = content[:insert_point] + new_function + content[insert_point:]
+
+    # Modify showMovies3 function
+    showmovies3_pattern = re.compile(
+        r'(def showMovies3\(\):.*?)(\n\s+oGui\.setEndOfDirectory\(\))', 
+        re.DOTALL
+    )
+    
+    replacement = '''
+    # Check link status
+            bOnline = isLinkOnline(sUrl4)
+            sStatus = '[COLOR lime][Online][/COLOR]' if bOnline else '[COLOR red][Offline][/COLOR]'
+            sDisplayTitle = f'{sBaseTitle} {sStatus}'
+
+            # Set parameters
+            oOutputParameterHandler.addParameter('siteUrl', sUrl4)
+            oOutputParameterHandler.addParameter('sMovieTitle2', sBaseTitle)
+            oOutputParameterHandler.addParameter('sThumb', '')
+            
+            # Add directory entry
+            oGui.addDir(SITE_IDENTIFIER, 'showHosters', sDisplayTitle, 'sport.png', oOutputParameterHandler)'''
+
+    if not re.search(r'bOnline = isLinkOnline', content):
+        content = showmovies3_pattern.sub(
+            lambda m: m.group(1).replace(
+                'oGui.addDir(SITE_IDENTIFIER, \'showHosters\', sTitle, \'sport.png\', oOutputParameterHandler)',
+                replacement
+            ) + m.group(2),
+            content
+        )
+
+    # Write the modified content back to the file
+    with open(file_path, 'w', encoding='utf-8') as f:
+        f.write(content)
         
 # def save_watched_recommendations_to_json():
 #     oDb = cDb()
@@ -7427,6 +7482,7 @@ class cUpdate:
             activate_site("channelstream", "False")
             # Exécuter la mise à jour
             update_streamonsport_module()
+            update_livetv_file()
             activate_site("streamonsport", "True")
 
 
