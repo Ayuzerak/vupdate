@@ -7333,6 +7333,7 @@ def __randy_boundary(length=10, reshuffle=False):
         VSlog(f"An error occurred: {str(e)}")
 
 def update_livetv_file():
+
     file_path = VSPath('special://home/addons/plugin.video.vstream/resources/sites/livetv.py').replace('\\', '/')
     
     # Read the file content
@@ -7341,29 +7342,54 @@ def update_livetv_file():
 
     # Add isLinkOnline function if not present
     if 'def isLinkOnline(url):' not in content:
-        insert_point = content.find('def getHosterIframe(url, referer):')
-        if insert_point != -1:
-            new_function = '''
-
-def isLinkOnline(url):
+        content = content.replace(
+            'def getHosterIframe(url, referer):',
+            '''def isLinkOnline(url):
     try:
         sHosterUrl = getHosterIframe(url, url)
         return sHosterUrl is not False
     except:
         return False
-'''
-            content = content[:insert_point] + new_function + content[insert_point:]
 
-    # Modify showMovies3 function
-    showmovies3_pattern = re.compile(
-        r'(def showMovies3\(\):.*?)(\n\s+oGui\.setEndOfDirectory\(\))', 
-        re.DOTALL
+def getHosterIframe(url, referer):'''
+        )
+
+    # Pattern to find the original showMovies3 function
+    pattern = re.compile(
+        r'def showMovies3\(\):.*?^\s+oGui\.setEndOfDirectory\(\)', 
+        re.DOTALL | re.MULTILINE
     )
-    
-    replacement = '''
+
+    # Replacement with the new implementation
+    replacement = '''def showMovies3():  # affiche les videos disponible du live
+    oGui = cGui()
+    oInputParameterHandler = cInputParameterHandler()
+    sUrl3 = oInputParameterHandler.getValue('siteUrl3')
+    sMovieTitle2 = oInputParameterHandler.getValue('sMovieTitle2')
+
+    oRequestHandler = cRequestHandler(sUrl3)
+    sHtmlContent = oRequestHandler.request()
+
+    sPattern = '<td width=16><img title="(.*?)".+?<a title=".+?" *href="(.+?)"'
+    oParser = cParser()
+    aResult = oParser.parse(sHtmlContent, sPattern)
+
+    if aResult[0]:
+        oOutputParameterHandler = cOutputParameterHandler()
+        for aEntry in aResult[1]:
+            sLang = aEntry[0].strip()
+            sUrl4 = aEntry[1].strip()
+
+            # Clean URL format
+            if not sUrl4.startswith("http"):
+                sUrl4 = "http:" + sUrl4
+            if 'cdn' in sUrl4:
+                sUrl4 = re.sub(r'http:\\/\\/cdn\\.livetv\\d+\\.me\\/', URL_MAIN, sUrl4)
+
             # Clean and format title
             sLang = sLang[:4].upper() if sLang else '??'
             sBaseTitle = f'{sMovieTitle2} ({sLang})'
+
             # Check link status
             bOnline = isLinkOnline(sUrl4)
             sStatus = '[COLOR lime][Online][/COLOR]' if bOnline else '[COLOR red][Offline][/COLOR]'
@@ -7375,16 +7401,13 @@ def isLinkOnline(url):
             oOutputParameterHandler.addParameter('sThumb', '')
             
             # Add directory entry
-            oGui.addDir(SITE_IDENTIFIER, 'showHosters', sDisplayTitle, 'sport.png', oOutputParameterHandler)'''
+            oGui.addDir(SITE_IDENTIFIER, 'showHosters', sDisplayTitle, 'sport.png', oOutputParameterHandler)
 
+    oGui.setEndOfDirectory()'''
+
+    # Replace only if not already modified
     if not re.search(r'bOnline = isLinkOnline', content):
-        content = showmovies3_pattern.sub(
-            lambda m: m.group(1).replace(
-                'oGui.addDir(SITE_IDENTIFIER, \'showHosters\', sTitle, \'sport.png\', oOutputParameterHandler)',
-                replacement
-            ) + m.group(2),
-            content
-        )
+        content = pattern.sub(replacement, content)
 
     # Write the modified content back to the file
     with open(file_path, 'w', encoding='utf-8') as f:
