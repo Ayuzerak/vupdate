@@ -6706,18 +6706,18 @@ def update_streamonsport_module():
         VSlog('No updates needed for streamonsport.py')
 
 def update_livetv_module():
-    """Update livetv.py with isLinkOnline function and new showMovies3 implementation"""
-    VSlog("Starting livetv.py update...")
+    """Update livetv.py with isLinkOnline function and corrected showMovies3 implementation"""
 
     file_path = VSPath('special://home/addons/plugin.video.vstream/resources/sites/livetv.py').replace('\\', '/')
+
+    VSlog(f"Starting update of {file_path}")
     
-    # Read the file content
     with open(file_path, 'r', encoding='utf-8') as f:
         content = f.read()
 
     updated = False
 
-    # Check/add isLinkOnline function
+    # Add isLinkOnline function if missing
     is_link_online_pattern = r'def\s+isLinkOnline\(url\):'
     if not re.search(is_link_online_pattern, content):
         VSlog("Adding isLinkOnline function")
@@ -6730,7 +6730,6 @@ def isLinkOnline(url):
         VSlog(f"Link check error: {str(e)}")
         return False
 """
-        # Insert before showMovies3
         content = re.sub(
             r'(def\s+showMovies3\(.*?\):)',
             new_is_link_online + r'\n\n\1',
@@ -6739,9 +6738,9 @@ def isLinkOnline(url):
         )
         updated = True
 
-    # Update showMovies3 function
+    # Update showMovies3 with corrected regex
     old_show_movies3_pattern = r'def showMovies3\(\):.*?oGui\.setEndOfDirectory\(\)'
-    new_show_movies3 = '''
+    new_show_movies3 = """
 def showMovies3():  # affiche les videos disponible du live
     oGui = cGui()
     oInputParameterHandler = cInputParameterHandler()
@@ -6764,30 +6763,26 @@ def showMovies3():  # affiche les videos disponible du live
             if not sUrl4.startswith("http"):
                 sUrl4 = "http:" + sUrl4
             if 'cdn' in sUrl4:
-                sUrl4 = re.sub(r'http:\\/\\/cdn\\.livetv\\d+\\.me\\/', URL_MAIN, sUrl4)
+                sUrl4 = re.sub(r'http://cdn\\.livetv\\d+\\.me/', URL_MAIN, sUrl4)
 
-            # Clean and format title
             sLang = sLang[:4].upper() if sLang else '??'
             sBaseTitle = f'{sMovieTitle2} ({sLang})'
 
-            # Check link status
             bOnline = isLinkOnline(sUrl4)
             sStatus = '[COLOR lime][Online][/COLOR]' if bOnline else '[COLOR red][Offline][/COLOR]'
             sDisplayTitle = f'{sBaseTitle} {sStatus}'
 
-            # Set parameters
             oOutputParameterHandler.addParameter('siteUrl', sUrl4)
             oOutputParameterHandler.addParameter('sMovieTitle2', sBaseTitle)
             oOutputParameterHandler.addParameter('sThumb', '')
             
-            # Add directory entry
             oGui.addDir(SITE_IDENTIFIER, 'showHosters', sDisplayTitle, 'sport.png', oOutputParameterHandler)
 
     oGui.setEndOfDirectory()
-'''.strip()
+""".strip()
 
     if not re.search(r'sStatus\s*=\s*\[COLOR lime\]\[Online\]', content):
-        VSlog("Updating showMovies3 function")
+        VSlog("Updating showMovies3 with status indicators")
         content = re.sub(
             old_show_movies3_pattern,
             new_show_movies3,
@@ -6801,13 +6796,14 @@ def showMovies3():  # affiche les videos disponible du live
         backup_path = file_path + '.bak'
         with open(backup_path, 'w', encoding='utf-8') as f:
             f.write(content)
+            VSlog(f"Created backup at {backup_path}")
         
-        # Write updated content
+        # Write updates
         with open(file_path, 'w', encoding='utf-8') as f:
             f.write(content)
-        VSlog("livetv.py updated successfully")
+        VSlog("Successfully updated livetv.py")
     else:
-        VSlog("No updates needed for livetv.py")
+        VSlog("No updates required")
 
     return updated
         
