@@ -7332,36 +7332,18 @@ def __randy_boundary(length=10, reshuffle=False):
     except Exception as e:
         VSlog(f"An error occurred: {str(e)}")
 
-def update_livetv_file():
-
-    file_path = VSPath('special://home/addons/plugin.video.vstream/resources/sites/livetv.py').replace('\\', '/')
-    
-    # Read the file content
-    with open(file_path, 'r', encoding='utf-8') as f:
-        content = f.read()
-
-    # Add isLinkOnline function if not present
-    if 'def isLinkOnline(url):' not in content:
-        content = content.replace(
-            'def getHosterIframe(url, referer):',
-            '''def isLinkOnline(url):
+def update_livetv_module():
+    # Define new functions as multiline strings
+    new_is_link_online = """def isLinkOnline(url):
     try:
         sHosterUrl = getHosterIframe(url, url)
         return sHosterUrl is not False
-    except:
+    except Exception as e:
+        VSlog(f'Link check error: {str(e)}')
         return False
+"""
 
-def getHosterIframe(url, referer):'''
-        )
-
-    # Pattern to find the original showMovies3 function
-    pattern = re.compile(
-        r'def showMovies3\(\):.*?^\s+oGui\.setEndOfDirectory\(\)', 
-        re.DOTALL | re.MULTILINE
-    )
-
-    # Replacement with the new implementation
-    replacement = '''def showMovies3():  # affiche les videos disponible du live
+    new_showmovies3 = """def showMovies3():  # affiche les videos disponible du live
     oGui = cGui()
     oInputParameterHandler = cInputParameterHandler()
     sUrl3 = oInputParameterHandler.getValue('siteUrl3')
@@ -7380,38 +7362,80 @@ def getHosterIframe(url, referer):'''
             sLang = aEntry[0].strip()
             sUrl4 = aEntry[1].strip()
 
-            # Clean URL format
+            # URL normalization
             if not sUrl4.startswith("http"):
                 sUrl4 = "http:" + sUrl4
             if 'cdn' in sUrl4:
-                sUrl4 = re.sub(r'http:\\/\\/cdn\\.livetv\\d+\\.me\\/', URL_MAIN, sUrl4)
+                sUrl4 = re.sub(r'http:\/\/cdn\.livetv\d+\.me\/', URL_MAIN, sUrl4)
 
-            # Clean and format title
-            sLang = sLang[:4].upper() if sLang else '??'
-            sBaseTitle = f'{sMovieTitle2} ({sLang})'
-
-            # Check link status
+            # Status check and title formatting
             bOnline = isLinkOnline(sUrl4)
             sStatus = '[COLOR lime][Online][/COLOR]' if bOnline else '[COLOR red][Offline][/COLOR]'
-            sDisplayTitle = f'{sBaseTitle} {sStatus}'
+            sLangShort = sLang[:4].upper() if sLang else '??'
+            sDisplayTitle = f'{sMovieTitle2} ({sLangShort}) {sStatus}'
 
-            # Set parameters
+            # Parameter setup
             oOutputParameterHandler.addParameter('siteUrl', sUrl4)
-            oOutputParameterHandler.addParameter('sMovieTitle2', sBaseTitle)
+            oOutputParameterHandler.addParameter('sMovieTitle2', sDisplayTitle)
             oOutputParameterHandler.addParameter('sThumb', '')
             
             # Add directory entry
             oGui.addDir(SITE_IDENTIFIER, 'showHosters', sDisplayTitle, 'sport.png', oOutputParameterHandler)
 
-    oGui.setEndOfDirectory()'''
+    oGui.setEndOfDirectory()
+"""
 
-    # Replace only if not already modified
-    if not re.search(r'bOnline = isLinkOnline', content):
-        content = pattern.sub(replacement, content)
+    # File path handling
+    file_path = VSPath('special://home/addons/plugin.video.vstream/resources/sites/livetv.py').replace('\\', '/')
+    
+    # Read current content
+    with open(file_path, 'r', encoding='utf-8') as f:
+        content = f.readlines()
 
-    # Write the modified content back to the file
-    with open(file_path, 'w', encoding='utf-8') as f:
-        f.write(content)
+    updated = False
+
+    # Add isLinkOnline function if missing
+    if not any(line.strip().startswith('def isLinkOnline(') for line in content):
+        # Find insertion point before getHosterIframe
+        insert_pos = next((i for i, line in enumerate(content) 
+                         if line.strip().startswith('def getHosterIframe(')), len(content))
+        if insert_pos > 0:
+            new_lines = [line + '\n' for line in new_is_link_online.split('\n')]
+            content[insert_pos:insert_pos] = new_lines
+            updated = True
+            VSlog('Added isLinkOnline function')
+
+    # Replace showMovies3 function
+    showmovies3_start = next((i for i, line in enumerate(content) 
+                            if line.strip().startswith('def showMovies3(')), -1)
+    showmovies3_end = None
+    
+    if showmovies3_start != -1:
+        # Find function end by indentation level
+        base_indent = len(content[showmovies3_start]) - len(content[showmovies3_start].lstrip())
+        for i in range(showmovies3_start+1, len(content)):
+            line = content[i]
+            if line.strip() and (len(line) - len(line.lstrip())) <= base_indent:
+                showmovies3_end = i
+                break
+        showmovies3_end = showmovies3_end or len(content)
+
+        # Check if already updated
+        existing_code = ''.join(content[showmovies3_start:showmovies3_end])
+        if 'isLinkOnline' not in existing_code:
+            # Replace with new implementation
+            new_code_lines = [line + '\n' for line in new_showmovies3.split('\n')]
+            content[showmovies3_start:showmovies3_end] = new_code_lines
+            updated = True
+            VSlog('Updated showMovies3 function')
+
+    # Write changes if needed
+    if updated:
+        with open(file_path, 'w', encoding='utf-8') as f:
+            f.writelines(content)
+        VSlog('livetv.py successfully updated')
+    else:
+        VSlog('No updates needed for livetv.py')
         
 # def save_watched_recommendations_to_json():
 #     oDb = cDb()
