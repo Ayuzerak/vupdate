@@ -4324,7 +4324,7 @@ def get_wiflix_url():
                 if match:
                     extracted_url = match.group(1)
                     # Normalize URL
-                    extracted_url = extracted_url.replace("http", "https").replace("httpss", "https").rstrip('/') + '/'
+                    extracted_url = extracted_url.replace("httpss", "https").replace("http", "https").rstrip('/') + '/'
                     VSlog(f"Extracted candidate URL: {extracted_url}")
                     
                     # Validate extracted URL
@@ -6704,118 +6704,6 @@ def update_streamonsport_module():
         VSlog('Streamonsport.py successfully updated')
     else:
         VSlog('No updates needed for streamonsport.py')
-
-def update_livetv_module():
-    """Update livetv.py with proper regex handling and status indicators"""
-    file_path = VSPath("special://home/addons/plugin.video.vstream/resources/sites/livetv.py")
-    VSlog(f"[Livetv Update] Starting update for: {file_path}")
-
-    try:
-        with open(file_path, 'r', encoding='utf-8') as f:
-            content = f.read()
-    except Exception as e:
-        VSlog(f"[Livetv Update] File read error: {str(e)}")
-        return False
-
-    updated = False
-    backup_path = file_path + '.bak'
-
-    # 1. Add isLinkOnline function if missing
-    if not re.search(r'def\s+isLinkOnline\(', content):
-        VSlog("[Livetv Update] Adding isLinkOnline function")
-        is_link_online = """
-def isLinkOnline(url):
-    try:
-        sHosterUrl = getHosterIframe(url, url)
-        return sHosterUrl is not False
-    except Exception as e:
-        VSlog(f"Link check error: {str(e)}")
-        return False
-"""
-        content = re.sub(
-            r'(def\s+showMovies3\s*\(.*?\)\s*:)',
-            is_link_online + r'\n\n\1',
-            content,
-            flags=re.DOTALL
-        )
-        updated = True
-
-    # 2. Update showMovies3 with corrected regex pattern
-    new_show_movies3 = r"""
-def showMovies3():  # affiche les videos disponible du live
-    oGui = cGui()
-    oInputParameterHandler = cInputParameterHandler()
-    sUrl3 = oInputParameterHandler.getValue('siteUrl3')
-    sMovieTitle2 = oInputParameterHandler.getValue('sMovieTitle2')
-
-    oRequestHandler = cRequestHandler(sUrl3)
-    sHtmlContent = oRequestHandler.request()
-
-    sPattern = '<td width=16><img title="(.*?)".+?<a title=".+?" *href="(.+?)"'
-    oParser = cParser()
-    aResult = oParser.parse(sHtmlContent, sPattern)
-
-    if aResult[0]:
-        oOutputParameterHandler = cOutputParameterHandler()
-        for aEntry in aResult[1]:
-            sLang = aEntry[0].strip()
-            sUrl4 = aEntry[1].strip()
-
-            if not sUrl4.startswith("http"):
-                sUrl4 = "http:" + sUrl4
-            if 'cdn' in sUrl4:
-                # Corrected regex pattern with proper escaping
-                sUrl4 = re.sub(r'http://cdn\.livetv\d+\.me/', URL_MAIN, sUrl4)
-
-            sLang = sLang[:4].upper() if sLang else '??'
-            sBaseTitle = f'{sMovieTitle2} ({sLang})'
-
-            bOnline = isLinkOnline(sUrl4)
-            sStatus = '[COLOR lime][Online][/COLOR]' if bOnline else '[COLOR red][Offline][/COLOR]'
-            sDisplayTitle = f'{sBaseTitle} {sStatus}'
-
-            oOutputParameterHandler.addParameter('siteUrl', sUrl4)
-            oOutputParameterHandler.addParameter('sMovieTitle2', sBaseTitle)
-            oOutputParameterHandler.addParameter('sThumb', '')
-            
-            oGui.addDir(SITE_IDENTIFIER, 'showHosters', sDisplayTitle, 'sport.png', oOutputParameterHandler)
-
-    oGui.setEndOfDirectory()
-""".strip()
-
-    if not re.search(r're\.sub\(r\'http://cdn\\.livetv\\d+\\.me/\'', content):
-        VSlog("[Livetv Update] Updating showMovies3 function")
-        content = re.sub(
-            r'(def\s+showMovies3\s*\(.*?\)\s*:.*?oGui\.setEndOfDirectory\(\s*\))',
-            new_show_movies3,
-            content,
-            flags=re.DOTALL
-        )
-        updated = True
-
-    if updated:
-        try:
-            # Create backup
-            with open(backup_path, 'w', encoding='utf-8') as f:
-                f.write(content)
-            VSlog(f"[Livetv Update] Backup created: {backup_path}")
-
-            # Write updates
-            with open(file_path, 'w', encoding='utf-8') as f:
-                f.write(content)
-            VSlog("[Livetv Update] Successfully updated:")
-            VSlog("- Added online/offline status indicators")
-            VSlog("- Fixed CDN URL regex pattern")
-            return True
-        except Exception as e:
-            VSlog(f"[Livetv Update] Write failed: {str(e)}")
-            if os.path.exists(backup_path):
-                VSlog("[Livetv Update] Restoring backup...")
-                os.replace(backup_path, file_path)
-            return False
-    else:
-        VSlog("[Livetv Update] File already up-to-date")
-        return True
         
 def update_parse_function():
     file_path = VSPath("special://home/addons/plugin.video.vstream/resources/lib/parser.py")
@@ -7539,7 +7427,6 @@ class cUpdate:
             activate_site("channelstream", "False")
             # Exécuter la mise à jour
             update_streamonsport_module()
-            update_livetv_module()
             activate_site("streamonsport", "True")
 
 
