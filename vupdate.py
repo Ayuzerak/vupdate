@@ -7361,7 +7361,10 @@ def isLinkOnline(url):
     )
     
     replacement = '''
-    # Check link status
+            # Clean and format title
+            sLang = sLang[:4].upper() if sLang else '??'
+            sBaseTitle = f'{sMovieTitle2} ({sLang})'
+            # Check link status
             bOnline = isLinkOnline(sUrl4)
             sStatus = '[COLOR lime][Online][/COLOR]' if bOnline else '[COLOR red][Offline][/COLOR]'
             sDisplayTitle = f'{sBaseTitle} {sStatus}'
