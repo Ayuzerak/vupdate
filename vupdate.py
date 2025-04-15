@@ -5940,6 +5940,80 @@ def showLive():
 
     oGui.setEndOfDirectory()
 
+def isLinkOnline(sUrl):
+
+    sHosterUrl = ''
+    siterefer = sUrl
+
+    if 'yahoo' in sUrl:  # redirection
+        urlMain = GetUrlMain()
+        sUrl = urlMain + sUrl
+
+    if 'allfoot' in sUrl or 'streamonsport' in sUrl:
+        oRequestHandler = cRequestHandler(sUrl)
+        oRequestHandler.addHeaderEntry('User-Agent', UA)
+        # oRequestHandler.addHeaderEntry('Referer', siterefer) # a verifier
+        sHtmlContent = oRequestHandler.request()
+
+        siterefer = sUrl
+        oParser = cParser()
+        if "pkcast123.me" in sHtmlContent:
+            sPattern = 'fid="([^"]+)"'
+            aResult = oParser.parse(sHtmlContent, sPattern)
+            sUrl = "https://www.pkcast123.me/footy.php?player=desktop&live=" + aResult[1][0] + "&vw=649&vh=460"
+        else:
+            sPattern = '<iframe.+?src="([^"]+)'
+            aResult = oParser.parse(sHtmlContent, sPattern)
+            if aResult[0]:
+                sUrl = aResult[1][0]
+
+    if 'hola.php' in sUrl:
+        urlMain = GetUrlMain()
+        sUrl = urlMain + sUrl
+
+    if 'pkcast123' in sUrl:
+        bvalid, shosterurl = Hoster_Pkcast(sUrl, siterefer)
+        if bvalid:
+            sHosterUrl = shosterurl
+
+    if "leet365.cc" in sUrl or 'casadelfutbol' in sUrl:
+        bvalid, shosterurl = Hoster_Leet365(sUrl, siterefer)
+        if bvalid:
+            sHosterUrl = shosterurl
+
+    if 'telerium' in sUrl:
+        bvalid, shosterurl = Hoster_Telerium(sUrl, siterefer)
+        if bvalid:
+            sHosterUrl = shosterurl
+
+    if 'andrhino' in sUrl:
+        bvalid, shosterurl = Hoster_Andrhino(sUrl, siterefer)
+        if bvalid:
+            sHosterUrl = shosterurl
+
+    if 'wigistream' in sUrl or 'cloudstream' in sUrl:
+        bvalid, shosterurl = Hoster_Wigistream(sUrl, siterefer)
+        if bvalid:
+            sHosterUrl = shosterurl
+
+    # a verifier
+    if 'laylow' in sUrl:
+        bvalid, shosterurl = Hoster_Laylow(sUrl, siterefer)
+        if bvalid:
+            sHosterUrl = shosterurl
+
+    if not sHosterUrl:
+        bvalid, shosterurl = getHosterIframe(sUrl, siterefer)
+        if bvalid:
+            sHosterUrl = shosterurl
+
+    if sHosterUrl:
+        sHosterUrl = sHosterUrl.strip()
+        oHoster = cHosterGui().checkHoster(sHosterUrl)
+        if oHoster:
+            return True
+        else:
+            return False
 
 def showLink():
     oGui = cGui()
@@ -6482,29 +6556,36 @@ def update_streamonsport_module():
     sThumb = oInputParameterHandler.getValue('sThumb')
     sDesc = oInputParameterHandler.getValue('sDesc')
     sMovieTitle = oInputParameterHandler.getValue('sMovieTitle')
-    urlMain = URL_MAIN
+    urlMain = GetUrlMain()
 
     oRequestHandler = cRequestHandler(sUrl)
     sHtmlContent = oRequestHandler.request()
 
-    sPattern = r'<span class="change-video[^"]*" data-embed="([^"]+)".*?<img[^>]*alt="([^"]+)"'
+    # Improved pattern to capture provider name
+    sPattern = r'<span class="change-video[^"]*" data-embed="([^"]+)".*?<img[^>]*alt="([^"]+)".*?>\s*(.*?)\s*</span>'
     oParser = cParser()
     aResult = oParser.parse(sHtmlContent, sPattern)
 
     if aResult[0]:
         oOutputParameterHandler = cOutputParameterHandler()
-        for i, (sPath, sLang) in enumerate(aResult[1], 1):
-            sLang = sLang.upper()
-            if len(sLang) > 2:
-                sLang = sLang[:2]
+        for idx, (sPath, sLang, sProvider) in enumerate(aResult[1], 1):
+            # Clean inputs
+            sLang = sLang.upper()[:2] if sLang else '??'
+            sProvider = sProvider.strip() or f'Lien {idx}'
             
+            # Build URL
             if sPath.startswith('/'):
-                sUrl2 = urlMain[:-1] + sPath if urlMain.endswith('/') else urlMain + sPath
+                sUrl2 = urlMain + sPath if not urlMain.endswith('/') else urlMain[:-1] + sPath
             else:
                 sUrl2 = sPath
 
-            sDisplayTitle = f'{sMovieTitle} - Lien {i} ({sLang})'
+            # Check link status
+            bOnline = isLinkOnline(sUrl2)
+            sStatus = '[COLOR lime][Online][/COLOR]' if bOnline else '[COLOR red][Offline][/COLOR]'
             
+            # Create display title
+            sDisplayTitle = f'Lien {idx} {sStatus} : {sDesc} - {sProvider} ({sLang})'
+
             oOutputParameterHandler.addParameter('siteUrl', sUrl2)
             oOutputParameterHandler.addParameter('sMovieTitle', sMovieTitle)
             oOutputParameterHandler.addParameter('sThumb', sThumb)
