@@ -7513,6 +7513,7 @@ class cUpdate:
 
             activate_site("channelstream", "False")
             # Exécuter la mise à jour
+            update_livetv_file()
             update_streamonsport_module()
             activate_site("streamonsport", "True")
 
