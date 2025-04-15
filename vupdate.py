@@ -6706,21 +6706,21 @@ def update_streamonsport_module():
         VSlog('No updates needed for streamonsport.py')
 
 def update_livetv_module():
-    """Update livetv.py with proper regex handling and status indicators"""
-    file_path = VSPath("special://home/addons/plugin.video.vstream/resources/lib/livetv.py")
-    VSlog(f"[Livetv Update] Starting update for {file_path}")
+    """Update livetv.py with proper parameters and logging"""
+    file_path = VSPath("special://home/addons/plugin.video.vstream/resources/sites/livetv.py")
+    VSlog(f"[Livetv Update] Starting update process for: {file_path}")
     
     try:
         with open(file_path, 'r', encoding='utf-8') as f:
             content = f.read()
     except Exception as e:
-        VSlog(f"[Livetv Error] File read failed: {str(e)}")
+        VSlog(f"[Livetv Update] File read error: {str(e)}")
         return False
 
     updated = False
-    backup_path = file_path + '.bak'
+    backup_created = False
 
-    # 1. Add isLinkOnline function if missing
+    # Add isLinkOnline function if missing
     if not re.search(r'def\s+isLinkOnline\(', content):
         VSlog("[Livetv Update] Adding isLinkOnline function")
         is_link_online = """
@@ -6740,7 +6740,7 @@ def isLinkOnline(url):
         )
         updated = True
 
-    # 2. Update showMovies3 with corrected regex
+    # Update showMovies3 with corrected regex
     new_show_movies3 = r"""
 def showMovies3():  # affiche les videos disponible du live
     oGui = cGui()
@@ -6782,7 +6782,7 @@ def showMovies3():  # affiche les videos disponible du live
     oGui.setEndOfDirectory()
 """.strip()
 
-    if not re.search(r're\.sub\(r\'http://cdn\\\.livetv\\d+\\\.me/\'', content):
+    if not re.search(r'sStatus\s*=\s*\[COLOR lime\]\[Online\]', content):
         VSlog("[Livetv Update] Updating showMovies3 function")
         content = re.sub(
             r'(def\s+showMovies3\s*\(.*?\)\s*:.*?oGui\.setEndOfDirectory\(\s*\))',
@@ -6795,20 +6795,24 @@ def showMovies3():  # affiche les videos disponible du live
     if updated:
         try:
             # Create backup
+            backup_path = file_path + '.bak'
             with open(backup_path, 'w', encoding='utf-8') as f:
                 f.write(content)
-            VSlog(f"[Livetv Update] Backup created at {backup_path}")
+            backup_created = True
+            VSlog(f"[Livetv Update] Created backup at: {backup_path}")
 
             # Write updates
             with open(file_path, 'w', encoding='utf-8') as f:
                 f.write(content)
-            
             VSlog("[Livetv Update] Successfully updated with:")
             VSlog("- Online/Offline status indicators")
-            VSlog("- Fixed CDN URL regex pattern")
+            VSlog("- Fixed CDN URL pattern")
             return True
         except Exception as e:
-            VSlog(f"[Livetv Error] Write failed: {str(e)}")
+            VSlog(f"[Livetv Update] Write failed: {str(e)}")
+            if backup_created:
+                VSlog("[Livetv Update] Restoring from backup...")
+                os.replace(backup_path, file_path)
             return False
     else:
         VSlog("[Livetv Update] File already up-to-date")
