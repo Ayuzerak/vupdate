@@ -5141,7 +5141,7 @@ def get_streamonsport_url():
             if response.status_code != 200:
                 return False
             response_lowered = response.text.lower()
-            return "matchs" in response_lowered and "direct" in response_lowered and "nba" in response_lowered and "dmca" in response_loweredand "vpn" in response_lowered
+            return "matchs" in response_lowered and "direct" in response_lowered and "nba" in response_lowered and "dmca" in response_lowered and "vpn" in response_lowered
         except Exception as e:
             VSlog(f"Content validation failed for {url}: {str(e)}")
             return False
