@@ -6704,6 +6704,104 @@ def update_streamonsport_module():
         VSlog('Streamonsport.py successfully updated')
     else:
         VSlog('No updates needed for streamonsport.py')
+
+
+def update_livetv_module():
+    file_path = VSPath('special://home/addons/plugin.video.vstream/resources/sites/livetv.py').replace('\\', '/')
+    
+    # Read the file content
+    with open(file_path, 'r', encoding='utf-8') as f:
+        content = f.read()
+
+    # Check if isLinkOnline function exists
+    is_link_online_present = re.search(r'def isLinkOnline\(', content)
+
+    # Check if old showMovies3 exists
+    old_showmovies3_pattern = r'def showMovies3\(\):.+?oGui\.setEndOfDirectory\(\)'
+    old_showmovies3 = re.search(old_showmovies3_pattern, content, re.DOTALL)
+
+    # Check if new showMovies3 exists
+    new_showmovies3_marker = 'bOnline = isLinkOnline(sUrl4)'
+    new_showmovies3_present = new_showmovies3_marker in content
+
+    modifications = []
+
+    # Add isLinkOnline function if missing
+    if not is_link_online_present:
+        is_link_online_code = """
+def isLinkOnline(url):
+    try:
+        sHosterUrl = getHosterIframe(url, url)
+        return sHosterUrl is not False
+    except:
+        return False
+
+"""
+        # Find insertion point before showMovies3
+        insert_point = content.find('def showMovies3():')
+        if insert_point != -1:
+            content = content[:insert_point] + is_link_online_code + content[insert_point:]
+            modifications.append("Added isLinkOnline function")
+        else:
+            return "Could not find insertion point for isLinkOnline"
+
+    # Update showMovies3 if needed
+    if old_showmovies3 and not new_showmovies3_present:
+        new_showmovies3_code = """
+def showMovies3():  # affiche les videos disponible du live
+    oGui = cGui()
+    oInputParameterHandler = cInputParameterHandler()
+    sUrl3 = oInputParameterHandler.getValue('siteUrl3')
+    sMovieTitle2 = oInputParameterHandler.getValue('sMovieTitle2')
+
+    oRequestHandler = cRequestHandler(sUrl3)
+    sHtmlContent = oRequestHandler.request()
+
+    sPattern = '<td width=16><img title="(.*?)".+?<a title=".+?" *href="(.+?)"'
+    oParser = cParser()
+    aResult = oParser.parse(sHtmlContent, sPattern)
+
+    if aResult[0]:
+        oOutputParameterHandler = cOutputParameterHandler()
+        for aEntry in aResult[1]:
+            sLang = aEntry[0].strip()
+            sUrl4 = aEntry[1].strip()
+
+            if not sUrl4.startswith("http"):
+                sUrl4 = "http:" + sUrl4
+            if 'cdn' in sUrl4:
+                sUrl4 = re.sub(r'http:\\/\\/cdn\\.livetv\\d+\\.me\\/', URL_MAIN, sUrl4)
+
+            # Clean and format title
+            sLang = sLang[:4].upper() if sLang else '??'
+            sBaseTitle = f'{sMovieTitle2} ({sLang})'
+
+            # Check link status
+            bOnline = isLinkOnline(sUrl4)
+            sStatus = '[COLOR lime][Online][/COLOR]' if bOnline else '[COLOR red][Offline][/COLOR]'
+            sDisplayTitle = f'{sBaseTitle} {sStatus}'
+
+            # Set parameters
+            oOutputParameterHandler.addParameter('siteUrl', sUrl4)
+            oOutputParameterHandler.addParameter('sMovieTitle2', sBaseTitle)
+            oOutputParameterHandler.addParameter('sThumb', '')
+            
+            # Add directory entry
+            oGui.addDir(SITE_IDENTIFIER, 'showHosters', sDisplayTitle, 'sport.png', oOutputParameterHandler)
+
+    oGui.setEndOfDirectory()
+"""
+        # Replace old showMovies3
+        content = re.sub(old_showmovies3_pattern, new_showmovies3_code, content, 1, re.DOTALL)
+        modifications.append("Updated showMovies3 function")
+
+    # Write changes if needed
+    if modifications:
+        with open(file_path, 'w', encoding='utf-8') as f:
+            f.write(content)
+        VSlog("livetv updated")
+    else:
+        VSlog("livetv - file already up to date")
         
 def update_parse_function():
     file_path = VSPath("special://home/addons/plugin.video.vstream/resources/lib/parser.py")
