@@ -6714,7 +6714,7 @@ def update_livetv_module():
         with open(file_path, 'r', encoding='utf-8') as f:
             content = f.read()
     except Exception as e:
-        VSlog(f"[Livetv Error] File read failed: {str(e)}", 4)
+        VSlog(f"[Livetv Error] File read failed: {str(e)}")
         return False
 
     updated = False
