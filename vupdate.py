@@ -6704,6 +6704,93 @@ def update_streamonsport_module():
         VSlog('Streamonsport.py successfully updated')
     else:
         VSlog('No updates needed for streamonsport.py')
+
+def update_livetv_file():
+    # Path to the file (this example treats the VSPath as a normal file path).
+    file_path = VSPath("special://home/addons/plugin.video.vstream/resources/sites/livetv.py")
+    
+    # Verify that the file exists
+    if not os.path.exists(file_path):
+        raise FileNotFoundError(f"{file_path} not found")
+    
+    # Read the existing file content.
+    with open(file_path, "r", encoding="utf-8") as file:
+        content = file.read()
+
+    # Define the desired version of isLinkOnline
+    isLinkOnline_code = '''def isLinkOnline(url):
+    try:
+        sHosterUrl = getHosterIframe(url, url)
+        return sHosterUrl is not False
+    except:
+        return False
+'''
+
+    # Define the desired version of showMovies3
+    showMovies3_code = '''def showMovies3():  # affiche les videos disponible du live
+    oGui = cGui()
+    oInputParameterHandler = cInputParameterHandler()
+    sUrl3 = oInputParameterHandler.getValue('siteUrl3')
+    sMovieTitle2 = oInputParameterHandler.getValue('sMovieTitle2')
+
+    oRequestHandler = cRequestHandler(sUrl3)
+    sHtmlContent = oRequestHandler.request()
+
+    sPattern = '<td width=16><img title="(.*?)".+?<a title=".+?" *href="(.+?)"'
+    oParser = cParser()
+    aResult = oParser.parse(sHtmlContent, sPattern)
+
+    if aResult[0]:
+        oOutputParameterHandler = cOutputParameterHandler()
+        for aEntry in aResult[1]:
+            sLang = aEntry[0].strip()
+            sUrl4 = aEntry[1].strip()
+
+            if not sUrl4.startswith("http"):
+                sUrl4 = "http:" + sUrl4
+            if 'cdn' in sUrl4:
+                sUrl4 = re.sub(r'http:\/\/cdn\.livetv\d+\.me\/', URL_MAIN, sUrl4)
+
+            # Clean and format title
+            sLang = sLang[:4].upper() if sLang else '??'
+            sBaseTitle = f'{sMovieTitle2} ({sLang})'
+
+            # Check link status
+            bOnline = isLinkOnline(sUrl4)
+            sStatus = '[COLOR lime][Online][/COLOR]' if bOnline else '[COLOR red][Offline][/COLOR]'
+            sDisplayTitle = f'{sBaseTitle} {sStatus}'
+
+            # Set parameters
+            oOutputParameterHandler.addParameter('siteUrl', sUrl4)
+            oOutputParameterHandler.addParameter('sMovieTitle2', sBaseTitle)
+            oOutputParameterHandler.addParameter('sThumb', '')
+            
+            # Add directory entry
+            oGui.addDir(SITE_IDENTIFIER, 'showHosters', sDisplayTitle, 'sport.png', oOutputParameterHandler)
+
+    oGui.setEndOfDirectory()
+'''
+
+    # Check for isLinkOnline definition and add if missing.
+    if not re.search(r'^\s*def\s+isLinkOnline\s*\(', content, flags=re.MULTILINE):
+        # Prepend the function code (you may also choose to insert it at a specific location)
+        content = isLinkOnline_code + "\n" + content
+
+    # For showMovies3, update or add the definition.
+    # The following pattern matches from the start of "def showMovies3(" until the start of the next function
+    pattern_showMovies3 = r'^\s*def\s+showMovies3\s*\(.*?(?=^\s*def\s+\S+|\Z)'
+    if re.search(r'^\s*def\s+showMovies3\s*\(', content, flags=re.MULTILINE):
+        # Replace the existing function code with our new version.
+        content = re.sub(pattern_showMovies3, showMovies3_code + "\n", content, flags=re.MULTILINE|re.DOTALL)
+    else:
+        # Append the new function definition if it isn't present.
+        content += "\n\n" + showMovies3_code
+
+    # Write the updated content back to the file.
+    with open(file_path, "w", encoding="utf-8") as file:
+        file.write(content)
+    
+    VSlog("File updated successfully.")
         
 def update_parse_function():
     file_path = VSPath("special://home/addons/plugin.video.vstream/resources/lib/parser.py")
