@@ -4324,7 +4324,7 @@ def get_wiflix_url():
                 if match:
                     extracted_url = match.group(1)
                     # Normalize URL
-                    extracted_url = extracted_url.replace("httpss", "https").replace("http", "https").rstrip('/') + '/'
+                    extracted_url = extracted_url.replace("http", "https").replace("httpss", "https").rstrip('/') + '/'
                     VSlog(f"Extracted candidate URL: {extracted_url}")
                     
                     # Validate extracted URL
