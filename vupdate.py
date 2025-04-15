@@ -6706,24 +6706,24 @@ def update_streamonsport_module():
         VSlog('No updates needed for streamonsport.py')
 
 def update_livetv_module():
-    """Update livetv.py with fixed path and required functionality"""
+    """Update livetv.py with proper regex escaping and required features"""
     file_path = VSPath("special://home/addons/plugin.video.vstream/resources/sites/livetv.py")
-    VSlog(f"[StreamOnSport Updater] Starting update of {file_path}")
+    VSlog(f"[Livetv update] Starting update process for {file_path}")
     
     try:
         with open(file_path, 'r', encoding='utf-8') as f:
             content = f.read()
     except Exception as e:
-        VSlog(f"[StreamOnSport Error] Failed to read file: {str(e)}", 4)
+        VSlog(f"[Livetv update Error] File read failed: {str(e)}", 4)
         return False
 
     updated = False
-    backup_created = False
+    changes = []
 
-    # Add isLinkOnline function if missing
-    if not re.search(r'def\s+isLinkOnline\(url\):', content):
-        VSlog("[StreamOnSport] Adding isLinkOnline function")
-        is_link_online_code = """
+    # 1. Add isLinkOnline function if missing
+    if not re.search(r'def\s+isLinkOnline\(.*?\):', content):
+        VSlog("[Livetv update] Adding isLinkOnline function")
+        is_link_online = """
 def isLinkOnline(url):
     try:
         sHosterUrl = getHosterIframe(url, url)
@@ -6734,15 +6734,16 @@ def isLinkOnline(url):
 """
         content = re.sub(
             r'(def\s+showMovies3\s*\(.*?\)\s*:)',
-            is_link_online_code + r'\n\n\1',
+            is_link_online + r'\n\n\1',
             content,
             flags=re.DOTALL
         )
+        changes.append("Added isLinkOnline function")
         updated = True
 
-    # Update showMovies3 function pattern (fixed regex escapes)
-    show_movies3_pattern = r'def\s+showMovies3\s*\(.*?\)\s*:.*?oGui\.setEndOfDirectory\(\)'
-    new_show_movies3_code = """
+    # 2. Update showMovies3 with corrected regex
+    show_movies3_pattern = r'(def\s+showMovies3\s*\(.*?\)\s*:.*?oGui\.setEndOfDirectory\(\s*\))'
+    new_show_movies3 = """
 def showMovies3():  # affiche les videos disponible du live
     oGui = cGui()
     oInputParameterHandler = cInputParameterHandler()
@@ -6765,7 +6766,7 @@ def showMovies3():  # affiche les videos disponible du live
             if not sUrl4.startswith("http"):
                 sUrl4 = "http:" + sUrl4
             if 'cdn' in sUrl4:
-                sUrl4 = re.sub(r'http:\/\/cdn\.livetv\d+\.me\/', URL_MAIN, sUrl4)
+                sUrl4 = re.sub(r'http://cdn\.livetv\d+\.me/', URL_MAIN, sUrl4)
 
             sLang = sLang[:4].upper() if sLang else '??'
             sBaseTitle = f'{sMovieTitle2} ({sLang})'
@@ -6784,13 +6785,14 @@ def showMovies3():  # affiche les videos disponible du live
 """.strip()
 
     if not re.search(r'sStatus\s*=\s*\[COLOR lime\]\[Online\]', content):
-        VSlog("[StreamOnSport] Updating showMovies3 function")
+        VSlog("[Livetv update] Updating showMovies3 function")
         content = re.sub(
             show_movies3_pattern,
-            new_show_movies3_code,
+            new_show_movies3,
             content,
             flags=re.DOTALL
         )
+        changes.append("Updated showMovies3 with status indicators")
         updated = True
 
     if updated:
@@ -6799,24 +6801,20 @@ def showMovies3():  # affiche les videos disponible du live
             backup_path = file_path + '.bak'
             with open(backup_path, 'w', encoding='utf-8') as f:
                 f.write(content)
-            backup_created = True
-            VSlog(f"[StreamOnSport] Created backup at {backup_path}")
-
-            # Write updated content
+            VSlog(f"[Livetv update] Backup created at {backup_path}")
+            
+            # Write updates
             with open(file_path, 'w', encoding='utf-8') as f:
                 f.write(content)
-            VSlog("[StreamOnSport] Successfully updated livetv.py")
             
+            VSlog(f"[Livetv update] Update successful. Changes made: {', '.join(changes)}")
+            return True
         except Exception as e:
-            VSlog(f"[StreamOnSport Error] Write failed: {str(e)}", 4)
-            if backup_created:
-                VSlog("[StreamOnSport] Restoring from backup...")
-                os.replace(backup_path, file_path)
+            VSlog(f"[Livetv update Error] Write failed: {str(e)}", 4)
             return False
     else:
-        VSlog("[StreamOnSport] File already up-to-date")
-
-    return updated
+        VSlog("[Livetv update] No updates required")
+        return True
         
 def update_parse_function():
     file_path = VSPath("special://home/addons/plugin.video.vstream/resources/lib/parser.py")
