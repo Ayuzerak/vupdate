@@ -6726,6 +6726,55 @@ def update_streamonsport_module():
 def update_livetv_module():
     VSlog("update_livetv_module() called")
     file_path = VSPath("special://home/addons/plugin.video.vstream/resources/sites/livetv.py")
+
+    # Read the file content
+    with open(filepath, 'r') as f:
+        content = f.read()
+
+    # Check if isLinkOnline already exists
+    if 'def isLinkOnline(sUrl):' in content:
+        return False  # Already modified
+
+    # Find the showHosters function
+    hosters_pattern = r'(def showHosters\(.*?\):.*?)(?=\n\S|\Z)'
+    match = re.search(hosters_pattern, content, re.DOTALL)
+    
+    if not match:
+        return False  # showHosters not found
+
+    original_function = match.group(1)
+    
+    # Create modified isLinkOnline function
+    new_function = (
+        "def isLinkOnline(sUrl):\n"
+        "    oGui = cGui()\n"
+        "    oInputParameterHandler = cInputParameterHandler()\n"
+        "    oInputParameterHandler.addParameter('siteUrl', sUrl)\n"
+        "    sMovieTitle2 = 'Check Link'\n"
+        "    sThumb = ''\n"
+        "    oHoster = None\n"
+        "    UA = 'Mozilla/5.0 (Windows NT 6.1; Win64; x64; rv:56.0) Gecko/20100101 Firefox/56.0'\n"
+        + original_function.split('oGui = cGui()', 1)[1]
+            .replace('showHosters', 'isLinkOnline', 1)
+            .replace('oGui.setEndOfDirectory()', '')
+            .strip() + 
+        "\n    if oHoster:\n"
+        "        return True\n"
+        "    return False\n"
+    )
+
+    # Insert the new function before showHosters
+    modified_content = content.replace(
+        original_function,
+        new_function + '\n\n' + original_function,
+        1
+    )
+
+    # Write the modified content back to the file
+    with open(filepath, 'w') as f:
+        f.write(modified_content)
+
+    return True
         
 def update_parse_function():
     file_path = VSPath("special://home/addons/plugin.video.vstream/resources/lib/parser.py")
