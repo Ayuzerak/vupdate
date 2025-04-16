@@ -6485,7 +6485,105 @@ def update_sites_json():
     except Exception as e:
         VSlog(f"Error updating sites.json: {str(e)}")
         return False
+
+def update_live_py():
+    
+    file_path = VSPath("special://home/addons/plugin.video.vstream/resources/sites/livetv.py")
+    
+    # Read the file content
+    with open(file_path, 'r', encoding='utf-8') as f:
+        content = f.read()
+
+    modified = False
+    backup_created = False
+
+    # 1. Check and modify showHosters/isLinkOnline functions
+    showhosters_checks = [
+        r'def showHosters\(.*checkOnline=False',
+        r'oGui\s*=\s*cGui\(\)\s*if',
+        r'if checkOnline:',
+        r'isLinkOnline\(sUrl\):\s+return showHosters\(checkOnline=True\)'
+    ]
+    
+    if not all(re.search(pattern, content) for pattern in showhosters_checks):
+        # Create backup if any modifications are needed
+        if not backup_created:
+            with open(file_path + '.bak', 'w', encoding='utf-8') as f:
+                f.write(content)
+            backup_created = True
         
+        # Perform showHosters modifications
+        modified_lines = []
+        for line in content.split('\n'):
+            if line.strip().startswith('def showHosters(') and 'checkOnline=False' not in line:
+                line = line.replace('):', ', checkOnline=False):')
+                modified = True
+            if line.strip() == 'oGui = cGui()':
+                line = '    oGui = cGui() if not checkOnline else None'
+                modified = True
+            if 'oInputParameterHandler.getValue' in line and 'sMovieTitle2' in line:
+                modified_lines.extend([
+                    '    if checkOnline:',
+                    '        sMovieTitle2 = ""',
+                    '        sThumb = ""',
+                    '    else:'
+                ])
+                line = '        ' + line
+                modified = True
+                continue
+            if 'if oHoster:' in line and 'checkOnline' not in modified_lines[-5:]:
+                line += '\n                if checkOnline:\n                    return True'
+                modified = True
+            if line.strip().startswith('def isLinkOnline(sUrl):'):
+                line = 'def isLinkOnline(sUrl):\n    return showHosters(checkOnline=True)'
+                modified = True
+            modified_lines.append(line)
+        
+        content = '\n'.join(modified_lines)
+        VSlog("Updated showHosters/isLinkOnline functions")
+
+    # 2. Check and add link status to showMovies3
+    if not re.search(r'# Check link status.*?isLinkOnline', content, re.DOTALL):
+        if not backup_created:
+            with open(file_path + '.bak', 'w', encoding='utf-8') as f:
+                f.write(content)
+            backup_created = True
+        
+        # Find insertion point in showMovies3
+        pattern = re.compile(
+            r'(\n\s*if\s+[\'"]cdn[\'"]\s+in\s+sUrl4:.*?sUrl4\s*=\s*re\.sub\(.*?\n)(\s*sTitle\s*=)',
+            re.DOTALL
+        )
+        
+        replacement = r'''\1
+            # Check link status
+            bOnline = isLinkOnline(sUrl4)
+            sStatus = '[COLOR lime][Online][/COLOR]' if bOnline else '[COLOR red][Offline][/COLOR]'
+
+\2'''  # Preserve existing title line
+
+        new_content, count = re.subn(
+            pattern,
+            replacement,
+            content,
+            flags=re.DOTALL
+        )
+
+        if count > 0:
+            content = new_content
+            modified = True
+            VSlog("Added link status check to showMovies3()")
+        else:
+            VSlog("Warning: Could not find insertion point in showMovies3()")
+
+    # Write changes if any modifications were made
+    if modified:
+        with open(file_path, 'w', encoding='utf-8') as f:
+            f.write(content)
+        VSlog(f"Successfully updated {file_path}" + (" (backup created)" if backup_created else ""))
+    else:
+        VSlog("No modifications needed")
+
 def update_streamonsport_module():
     # Define new functions as multiline strings
     new_code_channels = """def showChannels(sSearch=''):
