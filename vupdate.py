@@ -6725,7 +6725,7 @@ def update_streamonsport_module():
 
 def update_livetv_module():
     VSlog("update_livetv_module() called")
-    file_path = VSPath("special://home/addons/plugin.video.vstream/resources/sites/livetv.py")
+    filepath = VSPath("special://home/addons/plugin.video.vstream/resources/sites/livetv.py")
 
     # Read the file content
     with open(filepath, 'r') as f:
