@@ -6726,66 +6726,6 @@ def update_streamonsport_module():
 def update_livetv_module():
     VSlog("update_livetv_module() called")
     file_path = VSPath("special://home/addons/plugin.video.vstream/resources/sites/livetv.py")
-    
-    # Read the file content
-    with open(file_path, 'r') as f:
-        content = f.read()
-
-    # Check if isLinkOnline function already exists
-    if not re.search(r'def isLinkOnline\(sUrl\):', content):
-        # Find the showHosters function
-        hosters_match = re.search(
-            r'(def showHosters\(.*?\):.*?)(?=def\s+\w+\(|\Z)', 
-            content, 
-            re.DOTALL
-        )
-        
-        if hosters_match:
-            # Create modified version for isLinkOnline
-            is_link_online = re.sub(
-                r'def showHosters\(.*?\):',
-                'def isLinkOnline(sUrl):',
-                hosters_match.group(1)
-            )
-            
-            # Remove GUI-related code and modify returns
-            is_link_online = re.sub(
-                r'oGui\..*?\)', 
-                'pass', 
-                is_link_online
-            )
-            is_link_online = re.sub(
-                r'cHosterGui\(\).showHoster\(.*?\);', 
-                'return True', 
-                is_link_online
-            )
-            is_link_online += '\n    return False\n'
-            
-            # Insert the new function after showHosters
-            new_content = content.replace(
-                hosters_match.group(0), 
-                hosters_match.group(0) + '\n\n' + is_link_online
-            )
-            
-            # Write modified content back
-            with open(file_path, 'w') as f:
-                f.write(new_content)
-
-    # Modify original showHosters function
-    modified_content = re.sub(
-        r'(def showHosters\(.*?\):.*?)(oGui\.setEndOfDirectory\(\))', 
-        r'\1    link_found = False\n'
-        r'    if oHoster:\n'
-        r'        link_found = True\n'
-        r'    \2\n'
-        r'    return link_found\n', 
-        content, 
-        flags=re.DOTALL
-    )
-
-    # Write final changes
-    with open(file_path, 'w') as f:
-        f.write(modified_content)
         
 def update_parse_function():
     file_path = VSPath("special://home/addons/plugin.video.vstream/resources/lib/parser.py")
