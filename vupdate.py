@@ -6757,8 +6757,6 @@ def update_livetv_module():
     # Create modified version
     modified_func = (
         "def isLinkOnline(sUrl):\n"
-        "    oInputParameterHandler = cInputParameterHandler()\n"
-        "    oInputParameterHandler.addParameter('siteUrl', sUrl)\n"
         "    sMovieTitle2 = 'Check Link'\n"
         "    sThumb = ''\n"
         "    oHoster = None\n"
