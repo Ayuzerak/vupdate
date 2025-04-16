@@ -6724,55 +6724,76 @@ def update_streamonsport_module():
         VSlog('No updates needed for streamonsport.py')
 
 def update_livetv_module():
-    VSlog("update_livetv_module() called")
-    filepath = VSPath("special://home/addons/plugin.video.vstream/resources/sites/livetv.py")
 
+    VSlog("update_livetv_module() called")
+    filepath = VSPath("special://home/addons/plugin.video.vstream/resources/sites/livetv.py")    
+    
     # Read the file content
     with open(filepath, 'r') as f:
         content = f.read()
 
     # Check if isLinkOnline already exists
     if 'def isLinkOnline(sUrl):' in content:
-        return False  # Already modified
+        return False
 
-    # Find the showHosters function
-    hosters_pattern = r'(def showHosters\(.*?\):.*?)(?=\n\S|\Z)'
-    match = re.search(hosters_pattern, content, re.DOTALL)
+    # Parse the AST to find the showHosters function
+    tree = ast.parse(content)
+    show_hosters = None
     
-    if not match:
-        return False  # showHosters not found
+    for node in ast.walk(tree):
+        if isinstance(node, ast.FunctionDef) and node.name == 'showHosters':
+            show_hosters = node
+            break
 
-    original_function = match.group(1)
-    
-    # Create modified isLinkOnline function
-    new_function = (
+    if not show_hosters:
+        return False
+
+    # Get the original function text using line numbers
+    lines = content.split('\n')
+    start_line = show_hosters.lineno - 1
+    end_line = show_hosters.end_lineno
+    original_func_text = '\n'.join(lines[start_line:end_line])
+
+    # Create modified version
+    modified_func = (
         "def isLinkOnline(sUrl):\n"
-        "    oGui = cGui()\n"
         "    oInputParameterHandler = cInputParameterHandler()\n"
         "    oInputParameterHandler.addParameter('siteUrl', sUrl)\n"
         "    sMovieTitle2 = 'Check Link'\n"
         "    sThumb = ''\n"
         "    oHoster = None\n"
-        "    UA = 'Mozilla/5.0 (Windows NT 6.1; Win64; x64; rv:56.0) Gecko/20100101 Firefox/56.0'\n"
-        + original_function.split('oGui = cGui()', 1)[1]
-            .replace('showHosters', 'isLinkOnline', 1)
-            .replace('oGui.setEndOfDirectory()', '')
-            .strip() + 
+    )
+    
+    # Remove GUI components and modify returns
+    modified_lines = []
+    for line in original_func_text.split('\n'):
+        line = line.replace('oGui = cGui()', '')
+        line = line.replace('oGui.addText', '# oGui.addText')
+        line = line.replace('oGui.setEndOfDirectory()', '')
+        line = line.replace('showHosters', 'isLinkOnline')
+        modified_lines.append(line)
+
+    modified_func += '\n'.join(modified_lines).replace(
+        'def showHosters(oInputParameterHandler=False):', 
+        'def isLinkOnline(sUrl):'
+    )
+    
+    # Add return logic
+    modified_func += (
         "\n    if oHoster:\n"
         "        return True\n"
         "    return False\n"
     )
 
-    # Insert the new function before showHosters
-    modified_content = content.replace(
-        original_function,
-        new_function + '\n\n' + original_function,
-        1
+    # Insert the new function before original
+    new_content = content.replace(
+        original_func_text,
+        f"{modified_func}\n\n{original_func_text}"
     )
 
-    # Write the modified content back to the file
+    # Write back to file
     with open(filepath, 'w') as f:
-        f.write(modified_content)
+        f.write(new_content)
 
     return True
         
