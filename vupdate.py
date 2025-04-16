@@ -6549,7 +6549,7 @@ def update_live_module():
                 f.write(content)
             backup_created = True
         
-        # Find insertion point in showMovies3
+        # Modified regex pattern without flags for compiled pattern
         pattern = re.compile(
             r'(\n\s*if\s+[\'"]cdn[\'"]\s+in\s+sUrl4:.*?sUrl4\s*=\s*re\.sub\(.*?\n)(\s*sTitle\s*=)',
             re.DOTALL
@@ -6560,15 +6560,11 @@ def update_live_module():
             bOnline = isLinkOnline(sUrl4)
             sStatus = '[COLOR lime][Online][/COLOR]' if bOnline else '[COLOR red][Offline][/COLOR]'
 
-\2'''  # Preserve existing title line
+\2'''
 
-        new_content, count = re.subn(
-            pattern,
-            replacement,
-            content,
-            flags=re.DOTALL
-        )
-
+        # Remove flags argument from subn call
+        new_content, count = pattern.subn(replacement, content)
+        
         if count > 0:
             content = new_content
             modified = True
