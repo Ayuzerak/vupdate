@@ -6778,7 +6778,7 @@ def update_livetv_module():
 
     modified_func += '\n'.join(modified_lines).replace(
         'def showHosters(oInputParameterHandler=False):', 
-        'def isLinkOnline(sUrl):'
+        ''
     )
     
     # Add return logic
