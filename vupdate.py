@@ -6765,6 +6765,11 @@ def update_livetv_module():
     # Remove GUI components and modify returns
     modified_lines = []
     for line in original_func_text.split('\n'):
+        line = line.replace('oInputParameterHandler = cInputParameterHandler()', '')
+        line = line.replace('sUrl = oInputParameterHandler.getValue(\'siteUrl\')', '')
+        line = line.replace('sMovieTitle2 = oInputParameterHandler.getValue(\'sMovieTitle2\')', '')
+        line = line.replace('sThumb = oInputParameterHandler.getValue(\'sThumb\')', '')
+
         line = line.replace('oGui = cGui()', '')
         line = line.replace('oGui.addText', '# oGui.addText')
         line = line.replace('oGui.setEndOfDirectory()', '')
