@@ -6486,7 +6486,7 @@ def update_sites_json():
         VSlog(f"Error updating sites.json: {str(e)}")
         return False
 
-def update_live_py():
+def update_live_module():
     
     file_path = VSPath("special://home/addons/plugin.video.vstream/resources/sites/livetv.py")
     
@@ -7543,6 +7543,7 @@ class cUpdate:
             activate_site("channelstream", "False")
             # Exécuter la mise à jour
             update_streamonsport_module()
+            update_live_module()
             activate_site("streamonsport", "True")
 
 
