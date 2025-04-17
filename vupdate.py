@@ -6773,10 +6773,13 @@ def update_livetv_module():
         line = line.replace('oGui = cGui()', '')
         line = line.replace('oGui.addText', '# oGui.addText')
         line = line.replace('oGui.setEndOfDirectory()', '')
-        line = line.replace('showHosters', '')
+        line = line.replace('def showHosters():', 'isLinkOnline')
         modified_lines.append(line)
 
-    modified_func += '\n'.join(modified_lines)
+    modified_func += '\n'.join(modified_lines).replace(
+        'def showHosters(oInputParameterHandler=False):', 
+        'def isLinkOnline(sUrl):'
+    )
     
     # Add return logic
     modified_func += (
