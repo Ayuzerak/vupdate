@@ -6783,9 +6783,9 @@ def update_livetv_module():
     
     # Add return logic
     modified_func += (
-        "\n    if oHoster:\n"
-        "        return True\n"
-        "    return False\n"
+        "\n            if oHoster:\n"
+        "                return True\n"
+        "            return False\n"
     )
 
     # Insert the new function before original
