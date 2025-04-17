@@ -6724,7 +6724,6 @@ def update_streamonsport_module():
         VSlog('No updates needed for streamonsport.py')
 
 def update_livetv_module():
-
     VSlog("update_livetv_module() called")
     filepath = VSPath("special://home/addons/plugin.video.vstream/resources/sites/livetv.py")    
     
@@ -6732,75 +6731,102 @@ def update_livetv_module():
     with open(filepath, 'r') as f:
         content = f.read()
 
-    # Check if isLinkOnline already exists
-    if 'def isLinkOnline(sUrl):' in content:
-        return False
+    modified = False
+    new_content = content
 
-    # Parse the AST to find the showHosters function
-    tree = ast.parse(content)
-    show_hosters = None
-    
-    for node in ast.walk(tree):
-        if isinstance(node, ast.FunctionDef) and node.name == 'showHosters':
-            show_hosters = node
-            break
+    # Part 1: Add isLinkOnline if missing
+    if 'def isLinkOnline(sUrl):' not in content:
+        # Existing code to modify showHosters
+        tree = ast.parse(content)
+        show_hosters = None
+        
+        for node in ast.walk(tree):
+            if isinstance(node, ast.FunctionDef) and node.name == 'showHosters':
+                show_hosters = node
+                break
 
-    if not show_hosters:
-        return False
+        if show_hosters:
+            lines = content.split('\n')
+            start_line = show_hosters.lineno - 1
+            end_line = show_hosters.end_lineno
+            original_func_text = '\n'.join(lines[start_line:end_line])
 
-    # Get the original function text using line numbers
-    lines = content.split('\n')
-    start_line = show_hosters.lineno - 1
-    end_line = show_hosters.end_lineno
-    original_func_text = '\n'.join(lines[start_line:end_line])
+            modified_func = (
+                "def isLinkOnline(sUrl):\n"
+                "    sMovieTitle2 = 'Check Link'\n"
+                "    sThumb = ''\n"
+                "    oHoster = None\n"
+            )
+            
+            modified_lines = []
+            for line in original_func_text.split('\n'):
+                line = line.replace('oInputParameterHandler = cInputParameterHandler()', '')
+                line = line.replace('sUrl = oInputParameterHandler.getValue(\'siteUrl\')', '')
+                line = line.replace('sMovieTitle2 = oInputParameterHandler.getValue(\'sMovieTitle2\')', '')
+                line = line.replace('sThumb = oInputParameterHandler.getValue(\'sThumb\')', '')
+                line = line.replace('oGui = cGui()', '')
+                line = line.replace('oGui.addText', '# oGui.addText')
+                line = line.replace('oGui.setEndOfDirectory()', '')
+                line = line.replace('def showHosters():', '')
+                line = line.replace('cHosterGui().showHoster(oGui, oHoster, sHosterUrl, sThumb)', '')
+                modified_lines.append(line)
 
-    # Create modified version
-    modified_func = (
-        "def isLinkOnline(sUrl):\n"
-        "    sMovieTitle2 = 'Check Link'\n"
-        "    sThumb = ''\n"
-        "    oHoster = None\n"
-    )
-    
-    # Remove GUI components and modify returns
-    modified_lines = []
-    for line in original_func_text.split('\n'):
-        line = line.replace('oInputParameterHandler = cInputParameterHandler()', '')
-        line = line.replace('sUrl = oInputParameterHandler.getValue(\'siteUrl\')', '')
-        line = line.replace('sMovieTitle2 = oInputParameterHandler.getValue(\'sMovieTitle2\')', '')
-        line = line.replace('sThumb = oInputParameterHandler.getValue(\'sThumb\')', '')
+            modified_func += '\n'.join(modified_lines).replace(
+                'def showHosters(oInputParameterHandler=False):', 
+                'def isLinkOnline(sUrl):'
+            )
+            
+            modified_func += (
+                "\n            if oHoster:\n"
+                "                return True\n"
+                "            return False\n"
+            )
 
-        line = line.replace('oGui = cGui()', '')
-        line = line.replace('oGui.addText', '# oGui.addText')
-        line = line.replace('oGui.setEndOfDirectory()', '')
-        line = line.replace('def showHosters():', '')
-        line = line.replace('cHosterGui().showHoster(oGui, oHoster, sHosterUrl, sThumb)', '')
+            new_content = content.replace(
+                original_func_text,
+                f"{modified_func}\n\n{original_func_text}"
+            )
+            modified = True
 
-        modified_lines.append(line)
+    # Part 2: Modify showMovies3 if needed
+    if 'sTitle = (\'%s %s (%s)\') % (sStatus, sMovieTitle2, sLang[:4])' not in new_content:
+        tree = ast.parse(new_content)
+        show_movies3 = None
+        
+        for node in ast.walk(tree):
+            if isinstance(node, ast.FunctionDef) and node.name == 'showMovies3':
+                show_movies3 = node
+                break
 
-    modified_func += '\n'.join(modified_lines).replace(
-        'def showHosters(oInputParameterHandler=False):', 
-        'def isLinkOnline(sUrl):'
-    )
-    
-    # Add return logic
-    modified_func += (
-        "\n            if oHoster:\n"
-        "                return True\n"
-        "            return False\n"
-    )
+        if show_movies3:
+            lines = new_content.split('\n')
+            start_line = show_movies3.lineno - 1
+            end_line = show_movies3.end_lineno
+            show_movies3_block = lines[start_line:end_line]
 
-    # Insert the new function before original
-    new_content = content.replace(
-        original_func_text,
-        f"{modified_func}\n\n{original_func_text}"
-    )
+            # Find target line
+            for i, line in enumerate(show_movies3_block):
+                if 'sTitle = (' in line and 'sMovieTitle2, sLang[:4]' in line:
+                    indent = line[:len(line) - len(line.lstrip())]
+                    new_code = [
+                        f"{indent}# Check link status",
+                        f"{indent}bOnline = isLinkOnline(sUrl4)",
+                        f"{indent}sStatus = '[COLOR lime][Online][/COLOR]' if bOnline else '[COLOR red][Offline][/COLOR]'",
+                        f"{indent}",
+                        f"{indent}sTitle = ('%s %s (%s)') % (sStatus, sMovieTitle2, sLang[:4])"
+                    ]
+                    # Replace the line
+                    lines = lines[:start_line + i] + new_code + lines[start_line + i + 1:]
+                    new_content = '\n'.join(lines)
+                    modified = True
+                    break
 
-    # Write back to file
-    with open(filepath, 'w') as f:
-        f.write(new_content)
-
-    return True
+    # Write back if modifications were made
+    if modified:
+        with open(filepath, 'w') as f:
+            f.write(new_content)
+        return True
+    return False
         
 def update_parse_function():
     file_path = VSPath("special://home/addons/plugin.video.vstream/resources/lib/parser.py")
