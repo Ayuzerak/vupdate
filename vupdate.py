@@ -6774,6 +6774,8 @@ def update_livetv_module():
         line = line.replace('oGui.addText', '# oGui.addText')
         line = line.replace('oGui.setEndOfDirectory()', '')
         line = line.replace('def showHosters():', '')
+        line = line.replace('cHosterGui().showHoster(oGui, oHoster, sHosterUrl, sThumb)', '')
+
         modified_lines.append(line)
 
     modified_func += '\n'.join(modified_lines).replace(
