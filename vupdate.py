@@ -7600,7 +7600,7 @@ def update_wiflix_patterns():
     # Check and modify showHosters function
     if 'showHosters' in content:
         new_content, count = re.subn(
-            r'(def showHosters\(.*?sPattern = ")(%s)' % target_pattern,
+            r'def showHosters\(.*?sPattern = ")(%s)' % target_pattern,
             r'\1%s' % replacement,
             content,
             flags=re.DOTALL
@@ -7612,7 +7612,7 @@ def update_wiflix_patterns():
     # Check and modify showHostersEpisode function
     if 'showHostersEpisode' in content:
         new_content, count = re.subn(
-            r'(def showHostersEpisode\(.*?sPattern = ")(%s)' % target_pattern,
+            r'def showHostersEpisode\(.*?sPattern = ")(%s)' % target_pattern,
             r'\1%s' % replacement,
             content,
             flags=re.DOTALL
