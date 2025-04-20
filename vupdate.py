@@ -7589,23 +7589,32 @@ def update_wiflix_patterns():
     file_path = VSPath("special://home/addons/plugin.video.vstream/resources/sites/wiflix.py") # Replace with your actual file path
     
     original_pattern = 'loadVideo'
-    new_pattern = '+?loadVideo'
+    new_pattern = '.+?loadVideo'
     
-    # Read the file
-    with open(file_path, 'r', encoding='utf-8') as f:
-        content = f.read()
+    try:
+        # Read the file
+        with open(file_path, 'r', encoding='utf-8') as f:
+            content = f.read()
 
-    if '+?loadVideo' in content:
-        VSlog("No need to update wiflix patterns")    
+        if '.+?loadVideo' in content:
+            VSlog("No need to update wiflix patterns")
+            return
     
-    # Replace the pattern
-    modified_content = re.sub(original_pattern, new_pattern, content)
-    
-    # Write back the changes
-    with open(file_path, 'w', encoding='utf-8') as f:
-        f.write(modified_content)
+        # Replace the pattern
+        modified_content = re.sub(original_pattern, new_pattern, content)
+        
+        # Write back the changes
+        with open(file_path, 'w', encoding='utf-8') as f:
+            f.write(modified_content)
 
-    VSlog("Wiflix patterns updated")
+        VSlog("Wiflix patterns updated")
+        
+    except FileNotFoundError:
+        VSlog(f"Error: File not found at {file_path}")
+    except PermissionError:
+        VSlog("Error: Permission denied when trying to access the file")
+    except Exception as e:
+        VSlog(f"An unexpected error occurred: {str(e)}")
 
 # def save_watched_recommendations_to_json():
 #     oDb = cDb()
