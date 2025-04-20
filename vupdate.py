@@ -6870,7 +6870,6 @@ def update_livetv_module():
         return True
     return False
 
-
 def update_checkhoster_hosterpy_function():
 
     VSlog("update_checkhoster_hosterpy_function called")
