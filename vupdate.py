@@ -7604,21 +7604,18 @@ def update_wiflix_patterns():
         for node in ast.walk(tree):
             if isinstance(node, ast.FunctionDef) and node.name in target_functions:
                 start = node.lineno - 1
-                # si pas d'end_lineno (Py<3.8), on prend le dernier body
-                end = getattr(node, 'end_lineno', node.body[-1].lineno) - 1
+                end = getattr(node, 'end_lineno', node.lineno) - 1
                 func_ranges[node.name] = (start, end)
 
         if not func_ranges:
-            VSlog("update_wiflix_patterns: fonctions cibles non trouvées")
+            VSlog("update_wiflix_patterns: target function not found")
             return False
-
+        
         # 4. Définir l'ancien et le nouveau pattern
-        old_pattern = re.compile(
-            r'sPattern\s*=\s*"(?:onclick)\\?"loadVideo\\\(\'([^\']+)\'',
-            re.IGNORECASE
-        )
+        old_pattern = re.compile(r'sPattern\s*=\s*"onclick=\\\\"loadVideo\\\(\'([^\']+)\'"')
+
         # on veut juste capturer le même attribut sans le backslash en trop
-        new_pattern = 'sPattern = "onclick=\\".+?loadVideo\(\'([^\']+)"'
+        new_pattern = r'sPattern = r"onclick=\\\".*?loadVideo\(\'([^\']+)\'"'
 
         modified = False
 
@@ -7637,7 +7634,7 @@ def update_wiflix_patterns():
 
         # Write changes if modifications were made
         if modified:
-            backup_path = f"{file_path}.bak"
+            backup_path = f"{file_path}{int(time.time())}.bak"
             with open(backup_path, 'w', encoding='utf-8') as f:
                 f.write(source)
             VSlog(f"Created backup: {backup_path}")
