@@ -7589,8 +7589,8 @@ def update_wiflix_patterns():
     file_path = VSPath("special://home/addons/plugin.video.vstream/resources/sites/wiflix.py") # Replace with your actual file path
     
     # Define the regex pattern to find and replace
-    original_pattern = 'onclick=\"loadVideo\('
-    new_pattern = 'onclick=\\".+?loadVideo\('
+    original_pattern = 'loadVideo'
+    new_pattern = '+?loadVideo'
     
     # Read the file
     with open(file_path, 'r', encoding='utf-8') as f:
