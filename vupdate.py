@@ -6874,7 +6874,7 @@ def update_livetv_module():
 def update_checkhoster_hosterpy_function():
 
     VSlog("update_checkhoster_hosterpy_function called")
-    file_path = VSPath("special://home/addons/plugin.video.vstream/resources/sites/hoster.py")    
+    file_path = VSPath("special://home/addons/plugin.video.vstream/resources/lib/gui/hoster.py")    
     
     def is_update_already_applied(content):
         """Check for update markers in the file content."""
