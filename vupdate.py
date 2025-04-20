@@ -7603,19 +7603,21 @@ def update_wiflix_patterns():
 
         for node in ast.walk(tree):
             if isinstance(node, ast.FunctionDef) and node.name in target_functions:
-                start_line = node.lineno - 1  # AST lines are 1-based
-                end_line = getattr(node, 'end_lineno', node.lineno) - 1
-                func_ranges[node.name] = (start_line, end_line)
+                start = node.lineno - 1
+                # si pas d'end_lineno (Py<3.8), on prend le dernier body
+                end = getattr(node, 'end_lineno', node.body[-1].lineno) - 1
+                func_ranges[node.name] = (start, end)
 
         if not func_ranges:
-            VSlog("Target functions not found in wiflix.py")
+            VSlog("update_wiflix_patterns: fonctions cibles non trouvées")
             return False
 
-        # Flexible regex pattern (handles quotes and whitespace)
+        # 4. Définir l'ancien et le nouveau pattern
         old_pattern = re.compile(
-            'sPattern\s*=\s*"onclick\"loadVideo\(\'([^\']+)"',
+            r'sPattern\s*=\s*"(?:onclick)\\?"loadVideo\\\(\'([^\']+)\'',
             re.IGNORECASE
         )
+        # on veut juste capturer le même attribut sans le backslash en trop
         new_pattern = 'sPattern = "onclick=\\".+?loadVideo\(\'([^\']+)"'
 
         modified = False
