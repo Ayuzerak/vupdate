@@ -7613,7 +7613,7 @@ def update_wiflix_patterns():
 
         # Flexible regex pattern (handles quotes and whitespace)
         old_pattern = re.compile(
-            r'sPattern\s*=\s*["\']onclick\\?"loadVideo\(\'([^\']+)["\']',
+            'sPattern\s*=\s*"onclick\"loadVideo\(\'([^\']+)"',
             re.IGNORECASE
         )
         new_pattern = 'sPattern = "onclick=\\".+?loadVideo\(\'([^\']+)"'
