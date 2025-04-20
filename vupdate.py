@@ -7586,44 +7586,77 @@ def __randy_boundary(length=10, reshuffle=False):
         VSlog(f"An error occurred: {str(e)}")
 
 def update_wiflix_patterns():
-    file_path = VSPath("special://home/addons/plugin.video.vstream/resources/sites/wiflix.py")   
-    
-    # Define the patterns to find and replace
-    old_pattern = '''sPattern = "onclick=\"loadVideo\('([^']+)"'''
-    new_pattern = '''sPattern = "onclick=\".+?loadVideo\('([^']+)"'''
-    
-    # Read the file content
-    with open(file_path, 'r', encoding='utf-8') as f:
-        lines = f.readlines()
-    
-    in_target_function = False
-    modified = False
-    
-    # Process each line
-    for i, line in enumerate(lines):
-        # Check if we're entering a target function
-        if line.strip().startswith(('def showHosters(', 'def showHostersEpisode(')):
-            in_target_function = True
+
+    try:
+        # Get proper file path
+        file_path = VSlog("special://home/addons/plugin.video.vstream/resources/sites/wiflix.py")
         
-        # Check if we're exiting a function (based on indentation reset)
-        if in_target_function and line.strip() == '':
-            in_target_function = False
-        
-        # Replace pattern within target functions
-        if in_target_function and old_pattern in line:
-            lines[i] = line.replace(
-                old_pattern,
-                new_pattern
-            )
-            modified = True
-    
-    # Write back if modifications were made
-    if modified:
-        with open(file_path, 'w', encoding='utf-8') as f:
-            f.writelines(lines)
-        VSlog("Patterns updated successfully in wiflix.py")
-    else:
-        VSlog("No patterns needed updating in wiflix.py")
+        # Read file content
+        with open(file_path, 'r', encoding='utf-8') as f:
+            source = f.read()
+            lines = source.splitlines()
+
+        # Parse AST to find target functions
+        tree = ast.parse(source)
+        target_functions = {'showHosters', 'showHostersEpisode'}
+        func_ranges = {}
+
+        for node in ast.walk(tree):
+            if isinstance(node, ast.FunctionDef) and node.name in target_functions:
+                start_line = node.lineno - 1  # AST lines are 1-based
+                end_line = getattr(node, 'end_lineno', node.lineno) - 1
+                func_ranges[node.name] = (start_line, end_line)
+
+        if not func_ranges:
+            VSlog("Target functions not found in wiflix.py")
+            return False
+
+        # Flexible regex pattern (handles quotes and whitespace)
+        old_pattern = re.compile(
+            r'sPattern\s*=\s*["\']onclick\\?"loadVideo\(\'([^\']+)["\']',
+            re.IGNORECASE
+        )
+        new_pattern = 'sPattern = "onclick=\\".+?loadVideo\(\'([^\']+)"'
+
+        modified = False
+
+        # Process each target function
+        for func_name, (start, end) in func_ranges.items():
+            VSlog(f"Processing function: {func_name} (lines {start+1}-{end+1})")
+            
+            for i in range(start, end + 1):
+                if i >= len(lines):
+                    continue
+                
+                if old_pattern.search(lines[i]):
+                    lines[i] = old_pattern.sub(new_pattern, lines[i])
+                    modified = True
+                    VSlog(f"Modified line {i+1}: {lines[i]}")
+
+        # Write changes if modifications were made
+        if modified:
+            backup_path = f"{file_path}.bak"
+            with open(backup_path, 'w', encoding='utf-8') as f:
+                f.write(source)
+            VSlog(f"Created backup: {backup_path}")
+
+            with open(file_path, 'w', encoding='utf-8') as f:
+                f.write("\n".join(lines))
+            VSlog("Successfully updated wiflix.py")
+            return True
+
+        VSlog("No patterns needed updating")
+        return False
+
+    except PermissionError:
+        VSlog("Error: Permission denied - check file access rights")
+        return False
+    except FileNotFoundError:
+        VSlog("Error: wiflix.py not found at specified path")
+        return False
+    except Exception as e:
+        VSlog(f"Unexpected error: {str(e)}")
+        return False
         
 # def save_watched_recommendations_to_json():
 #     oDb = cDb()
