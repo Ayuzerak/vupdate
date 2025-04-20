@@ -7589,7 +7589,7 @@ def update_wiflix_patterns():
 
     try:
         # Get proper file path
-        file_path = VSlog("special://home/addons/plugin.video.vstream/resources/sites/wiflix.py")
+        file_path = VSPath("special://home/addons/plugin.video.vstream/resources/sites/wiflix.py")
         
         # Read file content
         with open(file_path, 'r', encoding='utf-8') as f:
