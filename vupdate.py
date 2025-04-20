@@ -7622,7 +7622,7 @@ def update_wiflix_patterns():
             content = new_content
 
     if modified:
-        with open('wiflix.py', 'w') as f:
+        with open(file_path, 'w') as f:
             f.write(content)
         VSlog("Successfully updated patterns in showHosters and showHostersEpisode")
     else:
