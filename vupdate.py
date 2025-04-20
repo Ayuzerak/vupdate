@@ -7585,77 +7585,48 @@ def __randy_boundary(length=10, reshuffle=False):
     except Exception as e:
         VSlog(f"An error occurred: {str(e)}")
 
-def update_wiflix_patterns():
+def update_wiflix_pattern():
 
-    try:
-        # Get proper file path
-        file_path = VSPath("special://home/addons/plugin.video.vstream/resources/sites/wiflix.py")
-        
-        # Read file content
-        with open(file_path, 'r', encoding='utf-8') as f:
-            source = f.read()
-            lines = source.splitlines()
+    file_path = VSPath("special://home/addons/plugin.video.vstream/resources/sites/wiflix.py")
+    
+    """Add .+? to the video URL pattern if not already modified"""
+    modified = False
+    target_pattern = r'onclick=\\"loadVideo\\('
+    replacement = r'onclick=\\".+?loadVideo\\('
+    
+    with open(file_path, 'r') as f:
+        content = f.read()
 
-        # Parse AST to find target functions
-        tree = ast.parse(source)
-        target_functions = {'showHosters', 'showHostersEpisode'}
-        func_ranges = {}
+    # Check and modify showHosters function
+    if 'showHosters' in content:
+        new_content, count = re.subn(
+            r'(def showHosters\(.*?sPattern = ")(%s)' % target_pattern,
+            r'\1%s' % replacement,
+            content,
+            flags=re.DOTALL
+        )
+        if count > 0:
+            modified = True
+            content = new_content
 
-        for node in ast.walk(tree):
-            if isinstance(node, ast.FunctionDef) and node.name in target_functions:
-                start = node.lineno - 1
-                end = getattr(node, 'end_lineno', node.lineno) - 1
-                func_ranges[node.name] = (start, end)
+    # Check and modify showHostersEpisode function
+    if 'showHostersEpisode' in content:
+        new_content, count = re.subn(
+            r'(def showHostersEpisode\(.*?sPattern = ")(%s)' % target_pattern,
+            r'\1%s' % replacement,
+            content,
+            flags=re.DOTALL
+        )
+        if count > 0:
+            modified = True
+            content = new_content
 
-        if not func_ranges:
-            VSlog("update_wiflix_patterns: target function not found")
-            return False
-        
-        # 4. Définir l'ancien et le nouveau pattern
-        old_pattern = re.compile(r'sPattern\s*=\s*"onclick=\\\\"loadVideo\\\(\'([^\']+)\'"')
-
-        # on veut juste capturer le même attribut sans le backslash en trop
-        new_pattern = r'sPattern = r"onclick=\\\".*?loadVideo\(\'([^\']+)\'"'
-
-        modified = False
-
-        # Process each target function
-        for func_name, (start, end) in func_ranges.items():
-            VSlog(f"Processing function: {func_name} (lines {start+1}-{end+1}) in wiflix.py")
-            
-            for i in range(start, end + 1):
-                if i >= len(lines):
-                    continue
-                
-                if old_pattern.search(lines[i]):
-                    lines[i] = old_pattern.sub(new_pattern, lines[i])
-                    modified = True
-                    VSlog(f"Modified line {i+1}: {lines[i]}")
-
-        # Write changes if modifications were made
-        if modified:
-            backup_path = f"{file_path}{int(time.time())}.bak"
-            with open(backup_path, 'w', encoding='utf-8') as f:
-                f.write(source)
-            VSlog(f"Created backup: {backup_path}")
-
-            with open(file_path, 'w', encoding='utf-8') as f:
-                f.write("\n".join(lines))
-            VSlog("Successfully updated wiflix.py")
-            return True
-
-        VSlog("No patterns needed updating")
-        return False
-
-    except PermissionError:
-        VSlog("Error: Permission denied - check file access rights")
-        return False
-    except FileNotFoundError:
-        VSlog("Error: wiflix.py not found at specified path")
-        return False
-    except Exception as e:
-        VSlog(f"Unexpected error: {str(e)}")
-        return False
+    if modified:
+        with open('wiflix.py', 'w') as f:
+            f.write(content)
+        VSlog("Successfully updated patterns in showHosters and showHostersEpisode")
+    else:
+        VSlog("Patterns already correct - no changes needed")
         
 # def save_watched_recommendations_to_json():
 #     oDb = cDb()
