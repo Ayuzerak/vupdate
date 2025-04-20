@@ -6907,8 +6907,7 @@ def update_checkhoster_hosterpy_function():
             # Add /e/ URL handling before final return
             if not re.search(r'if "/e/" in fullURL', new_content):
                 new_content = new_content.replace(
-                    ''' 
-        if ('myfiles.alldebrid.com' in sHostName):
+                    '''        if ('myfiles.alldebrid.com' in sHostName):
             return self.getHoster('lien_direct')
 
         return False''',
