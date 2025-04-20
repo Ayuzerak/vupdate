@@ -6869,6 +6869,88 @@ def update_livetv_module():
             f.write(new_content)
         return True
     return False
+
+
+def update_checkhoster_hosterpy_function():
+
+    VSlog("update_checkhoster_hosterpy_function called")
+    file_path = VSPath("special://home/addons/plugin.video.vstream/resources/sites/hoster.py")    
+    
+    def is_update_already_applied(content):
+        """Check for update markers in the file content."""
+        markers = [
+            r'def checkHoster\(.*recursion_count=0\)',  # Updated function parameters
+            r'MAX_RECURSION\s*=\s*5',                   # Recursion constant
+            r'if "/e/" in fullURL',                     # New URL pattern check
+            r'VSlog\(f"Processing /e/ URL"\)'           # New logging call
+        ]
+        return any(re.search(marker, content) for marker in markers)
+
+    try:
+        with open(file_path, 'r+', encoding='utf-8') as f:
+            content = f.read()
+            
+            if is_update_already_applied(content):
+                print("Update already present. Aborting modification.")
+                return False
+
+            # Update function definition with recursion parameters
+            new_content = re.sub(
+                r'def checkHoster\(self, sHosterUrl, debrid=True\):',
+                'def checkHoster(self, sHosterUrl, debrid=True, recursion_count=0):\n'
+                '        MAX_RECURSION = 5\n'
+                '        if recursion_count > MAX_RECURSION:\n'
+                '            return False\n'
+                '        fullURL = sHosterUrl',
+                content
+            )
+
+            # Add /e/ URL handling before final return
+            if not re.search(r'if "/e/" in fullURL', new_content):
+                new_content = new_content.replace(
+                    '        return False',
+                    '''        # Handle embedded URLs
+        if "/e/" in fullURL:
+            from resources.lib.handler.requestHandler import cRequestHandler
+            from resources.lib.gui.gui import VSlog
+            
+            try:
+                VSlog(f"Checking embedded URL: {fullURL}")
+                oRequest = cRequestHandler(fullURL)
+                html = oRequest.request()
+                
+                # Common URL corrections
+                corrections = {
+                    'voe.com': 'voe.com',
+                    'filemoon': 'filemoon.com'
+                }
+                
+                for pattern, replacement in corrections.items():
+                    if pattern in html:
+                        new_url = fullURL.replace('/e/', f'/{replacement}/')
+                        VSlog(f"Resolved URL: {new_url}")
+                        return self.checkHoster(new_url, debrid, recursion_count + 1)
+                        
+            except Exception as e:
+                VSlog(f"Embedded URL error: {str(e)}")
+
+        return False'''
+                )
+
+            if new_content != content:
+                f.seek(0)
+                f.write(new_content)
+                f.truncate()
+                VSlog("Update of checkhoster function successfully applied.")
+                return True
+                
+            VSlog("No changes required of checkhoster function.")
+            return False
+
+    except Exception as e:
+        VSlog(f"Update of checkhoster function failed: {str(e)}")
+        return False
+
         
 def update_parse_function():
     file_path = VSPath("special://home/addons/plugin.video.vstream/resources/lib/parser.py")
@@ -7573,6 +7655,8 @@ class cUpdate:
             # Execute the function to apply changes
             update_parse_function()
             update_dns_resolution()
+            update_checkhoster_hosterpy_function()
+
 
             # Execute the creation function
             create_streamonsport()
