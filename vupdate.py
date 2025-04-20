@@ -6767,10 +6767,10 @@ def update_streamonsport_module():
 
 def update_livetv_module():
     VSlog("update_livetv_module() called")
-    filepath = VSPath("special://home/addons/plugin.video.vstream/resources/sites/livetv.py")    
+    file_path = VSPath("special://home/addons/plugin.video.vstream/resources/sites/livetv.py")    
     
     # Read the file content
-    with open(filepath, 'r') as f:
+    with open(file_path, 'r') as f:
         content = f.read()
 
     modified = False
@@ -6865,7 +6865,7 @@ def update_livetv_module():
 
     # Write back if modifications were made
     if modified:
-        with open(filepath, 'w') as f:
+        with open(file_path, 'w') as f:
             f.write(new_content)
         return True
     return False
@@ -7586,37 +7586,22 @@ def __randy_boundary(length=10, reshuffle=False):
         VSlog(f"An error occurred: {str(e)}")
 
 def update_wiflix_patterns():
+    """Safely updates video URL patterns in wiflix.py"""
 
-    file_path = VSPath("special://home/addons/plugin.video.vstream/resources/sites/wiflix.py")
+    file_path = VSPath("special://home/addons/plugin.video.vstream/resources/sites/wiflix.py")    
     
-    """Add .+? to the video URL pattern if not already modified"""
     modified = False
-    target_pattern = r'onclick=\\"loadVideo\\('
-    replacement = r'onclick=\\".+?loadVideo\\('
-    
+    target = r'onclick="loadVideo\('
+    replacement = r'onclick=".+?loadVideo\('
+
     with open(file_path, 'r') as f:
         content = f.read()
 
-    # Check and modify showHosters function
-    if 'showHosters' in content:
-        new_content, count = re.subn(
-            r'def showHosters\(.*?sPattern = ")(%s)' % target_pattern,
-            r'\1%s' % replacement,
-            content,
-            flags=re.DOTALL
-        )
-        if count > 0:
-            modified = True
-            content = new_content
-
-    # Check and modify showHostersEpisode function
-    if 'showHostersEpisode' in content:
-        new_content, count = re.subn(
-            r'def showHostersEpisode\(.*?sPattern = ")(%s)' % target_pattern,
-            r'\1%s' % replacement,
-            content,
-            flags=re.DOTALL
-        )
+    # Check and update both functions
+    for func in ['showHosters', 'showHostersEpisode']:
+        pattern = fr'(def {func}\(.*?sPattern = ["\'])({re.escape(target)})'
+        new_content, count = re.subn(pattern, fr'\g<1>{replacement}', content, flags=re.DOTALL)
+        
         if count > 0:
             modified = True
             content = new_content
@@ -7624,9 +7609,9 @@ def update_wiflix_patterns():
     if modified:
         with open(file_path, 'w') as f:
             f.write(content)
-        VSlog("Successfully updated patterns in showHosters and showHostersEpisode")
+        VSlog("Successfully updated patterns")
     else:
-        VSlog("Patterns already correct - no changes needed")
+        VSlog("No changes needed")
         
 # def save_watched_recommendations_to_json():
 #     oDb = cDb()
