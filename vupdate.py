@@ -31,7 +31,7 @@ import pickle
 from typing import List, Optional, Dict, Set, Deque, Tuple, Union
 import glob
 import concurrent.futures
-from concurrent.futures import ProcessPoolExecutor, TimeoutError as FutureTimeoutError
+from concurrent.futures import ThreadPoolExecutor, ProcessPoolExecutor, TimeoutError as FutureTimeoutError
 import threading
 import multiprocessing
 import subprocess
