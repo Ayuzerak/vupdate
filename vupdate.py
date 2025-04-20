@@ -7585,7 +7585,7 @@ def __randy_boundary(length=10, reshuffle=False):
     except Exception as e:
         VSlog(f"An error occurred: {str(e)}")
 
-def update_wiflix_pattern():
+def update_wiflix_patterns():
 
     file_path = VSPath("special://home/addons/plugin.video.vstream/resources/sites/wiflix.py")
     
