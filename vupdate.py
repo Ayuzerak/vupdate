@@ -7584,6 +7584,46 @@ def __randy_boundary(length=10, reshuffle=False):
                 VSlog(f"Updated requestHandler.py at {file_path}.")
     except Exception as e:
         VSlog(f"An error occurred: {str(e)}")
+
+def update_wiflix_patterns():
+    file_path = VSPath("special://home/addons/plugin.video.vstream/resources/sites/wiflix.py")   
+    
+    # Define the patterns to find and replace
+    old_pattern = r'sPattern = "onclick=\\"loadVideo\(\'([^\']+)"'
+    new_pattern = r'sPattern = "onclick=\\".+?loadVideo\(\'([^\']+)"'
+    
+    # Read the file content
+    with open(file_path, 'r', encoding='utf-8') as f:
+        lines = f.readlines()
+    
+    in_target_function = False
+    modified = False
+    
+    # Process each line
+    for i, line in enumerate(lines):
+        # Check if we're entering a target function
+        if line.strip().startswith(('def showHosters(', 'def showHostersEpisode(')):
+            in_target_function = True
+        
+        # Check if we're exiting a function (based on indentation reset)
+        if in_target_function and line.strip() == '':
+            in_target_function = False
+        
+        # Replace pattern within target functions
+        if in_target_function and old_pattern in line:
+            lines[i] = line.replace(
+                'sPattern = "onclick=\\"loadVideo\(\'([^\']+)"',
+                'sPattern = "onclick=\\".+?loadVideo\(\'([^\']+)"'
+            )
+            modified = True
+    
+    # Write back if modifications were made
+    if modified:
+        with open(file_path, 'w', encoding='utf-8') as f:
+            f.writelines(lines)
+        VSlog("Patterns updated successfully in wiflix.py")
+    else:
+        VSlog("No patterns needed updatingin wiflix.py")
         
 # def save_watched_recommendations_to_json():
 #     oDb = cDb()
@@ -7683,6 +7723,7 @@ class cUpdate:
             # Exécuter la mise à jour
             update_streamonsport_module()
             update_livetv_module()
+            update_wiflix_patterns()
             activate_site("streamonsport", "True")
 
 
