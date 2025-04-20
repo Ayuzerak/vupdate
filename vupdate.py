@@ -6890,7 +6890,7 @@ def update_checkhoster_hosterpy_function():
             content = f.read()
             
             if is_update_already_applied(content):
-                print("Update already present. Aborting modification.")
+                VSlog("Update of checkHoster already present. Aborting modification.")
                 return False
 
             # Update function definition with recursion parameters
@@ -6911,7 +6911,7 @@ def update_checkhoster_hosterpy_function():
         if ('myfiles.alldebrid.com' in sHostName):
             return self.getHoster('lien_direct')
 
-        return False'''',
+        return False''',
                     '''        # Handle embedded URLs
         if "/e/" in fullURL:
             from resources.lib.handler.requestHandler import cRequestHandler
