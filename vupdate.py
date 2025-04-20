@@ -7586,32 +7586,23 @@ def __randy_boundary(length=10, reshuffle=False):
         VSlog(f"An error occurred: {str(e)}")
 
 def update_wiflix_patterns():
-    """Safely updates video URL patterns in wiflix.py"""
-
-    file_path = VSPath("special://home/addons/plugin.video.vstream/resources/sites/wiflix.py")    
+    file_path = VSPath("special://home/addons/plugin.video.vstream/resources/sites/wiflix.py") # Replace with your actual file path
     
-    modified = False
-    target = r'onclick="loadVideo\('
-    replacement = r'onclick=".+?loadVideo\('
-
-    with open(file_path, 'r') as f:
+    # Define the regex pattern to find and replace
+    original_pattern = r'onclick=\\"loadVideo\('
+    new_pattern = r'onclick=\\".+?loadVideo\('
+    
+    # Read the file
+    with open(file_path, 'r', encoding='utf-8') as f:
         content = f.read()
+    
+    # Replace the pattern
+    modified_content = re.sub(original_pattern, new_pattern, content)
+    
+    # Write back the changes
+    with open(file_path, 'w', encoding='utf-8') as f:
+        f.write(modified_content)
 
-    # Check and update both functions
-    for func in ['showHosters', 'showHostersEpisode']:
-        pattern = fr'(def {func}\(.*?sPattern = ["\'])({re.escape(target)})'
-        new_content, count = re.subn(pattern, fr'\g<1>{replacement}', content, flags=re.DOTALL)
-        
-        if count > 0:
-            modified = True
-            content = new_content
-
-    if modified:
-        with open(file_path, 'w') as f:
-            f.write(content)
-        VSlog("Successfully updated patterns")
-    else:
-        VSlog("No changes needed")
         
 # def save_watched_recommendations_to_json():
 #     oDb = cDb()
