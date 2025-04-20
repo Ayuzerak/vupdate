@@ -7622,7 +7622,7 @@ def update_wiflix_patterns():
 
         # Process each target function
         for func_name, (start, end) in func_ranges.items():
-            VSlog(f"Processing function: {func_name} (lines {start+1}-{end+1})")
+            VSlog(f"Processing function: {func_name} (lines {start+1}-{end+1}) in wiflix.py")
             
             for i in range(start, end + 1):
                 if i >= len(lines):
