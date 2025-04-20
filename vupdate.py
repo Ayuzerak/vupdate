@@ -7588,13 +7588,15 @@ def __randy_boundary(length=10, reshuffle=False):
 def update_wiflix_patterns():
     file_path = VSPath("special://home/addons/plugin.video.vstream/resources/sites/wiflix.py") # Replace with your actual file path
     
-    # Define the regex pattern to find and replace
     original_pattern = 'loadVideo'
     new_pattern = '+?loadVideo'
     
     # Read the file
     with open(file_path, 'r', encoding='utf-8') as f:
         content = f.read()
+
+    if '+?loadVideo' in content:
+        VSlog("No need to update wiflix patterns")    
     
     # Replace the pattern
     modified_content = re.sub(original_pattern, new_pattern, content)
@@ -7603,7 +7605,8 @@ def update_wiflix_patterns():
     with open(file_path, 'w', encoding='utf-8') as f:
         f.write(modified_content)
 
-        
+    VSlog("Wiflix patterns updated")
+
 # def save_watched_recommendations_to_json():
 #     oDb = cDb()
 #     ADDON = addon()
