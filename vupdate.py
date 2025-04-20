@@ -6913,7 +6913,8 @@ def update_checkhoster_hosterpy_function():
         return False''',
                     '''
         if ('myfiles.alldebrid.com' in sHostName):
-            return self.getHoster('lien_direct')                    
+            return self.getHoster('lien_direct')
+            
         # Handle embedded URLs
         if "/e/" in fullURL:
             from resources.lib.handler.requestHandler import cRequestHandler
