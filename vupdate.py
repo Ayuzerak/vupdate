@@ -3953,6 +3953,10 @@ except ImportError:
     DNS_MODULE_AVAILABLE = False
 VSlog(f"DNS resolver module {'available' if DNS_MODULE_AVAILABLE else 'unavailable, using fallback'}")
 
+# DNS caching setup
+_DNS_CACHE = {}
+_DNS_CACHE_TTL = 60  # seconds
+
 class PatchedDNSContext:
     """Context manager to override DNS resolution for a specific hostname."""
     def __init__(self, hostname, ip):
@@ -3978,16 +3982,20 @@ def is_valid_ip(ip_str):
     """Check if the IP is valid (not loopback, private, etc.)."""
     try:
         ip = ipaddress.ip_address(ip_str)
-        invalid_reasons = [
-            (ip.is_loopback, "loopback"),
-            (ip.is_private, "private"),
-            (ip.is_link_local, "link-local"),
-            (ip.is_multicast, "multicast"),
-            (ip.is_reserved, "reserved")
-        ]
-        reasons = [reason for condition, reason in invalid_reasons if condition]
-        if reasons:
-            VSlog(f"IP {ip_str} invalid: {', '.join(reasons)}")
+        if ip.is_loopback:
+            VSlog(f"IP {ip_str} invalid: loopback")
+            return False
+        if ip.is_private:
+            VSlog(f"IP {ip_str} invalid: private")
+            return False
+        if ip.is_link_local:
+            VSlog(f"IP {ip_str} invalid: link-local")
+            return False
+        if ip.is_multicast:
+            VSlog(f"IP {ip_str} invalid: multicast")
+            return False
+        if ip.is_reserved:
+            VSlog(f"IP {ip_str} invalid: reserved")
             return False
         return True
     except ValueError:
@@ -3995,7 +4003,17 @@ def is_valid_ip(ip_str):
         return False
 
 def resolve_hostname(hostname, providers=None, all_ips=False):
-    """Resolve hostname using specified DNS providers."""
+    """Resolve hostname using specified DNS providers with optimized early exit."""
+    # Check cache first
+    cache_key = (hostname, all_ips)
+    current_time = time.time()
+    if cache_key in _DNS_CACHE and current_time - _DNS_CACHE[cache_key]['timestamp'] < _DNS_CACHE_TTL:
+        cached_ips = _DNS_CACHE[cache_key]['ips']
+        valid_ips = [ip for ip in cached_ips if is_valid_ip(ip)]
+        if valid_ips:
+            VSlog(f"Using cached IPs for {hostname}: {valid_ips}")
+            return valid_ips if all_ips else valid_ips[0]
+
     VSlog(f"Resolving {hostname} (all_ips={all_ips})")
     providers = providers or ['system', 'public', 'doh']
     valid_ips = []
@@ -4004,21 +4022,38 @@ def resolve_hostname(hostname, providers=None, all_ips=False):
         try:
             ips = []
             if provider == 'system':
-                addr_info = socket.getaddrinfo(hostname, 80, socket.AF_INET, socket.SOCK_STREAM)
-                ips = [info[4][0] for info in addr_info]
-                VSlog(f"SystemDNS: {hostname} → {ips}")
-                
+                try:
+                    with ThreadPoolExecutor(max_workers=1) as executor:
+                        future = executor.submit(
+                            socket.getaddrinfo, hostname, 80, socket.AF_INET, socket.SOCK_STREAM
+                        )
+                        addr_info = future.result(timeout=2)
+                        ips = [info[4][0] for info in addr_info]
+                        VSlog(f"SystemDNS: {hostname} → {ips}")
+                except TimeoutError:
+                    VSlog("SystemDNS: Timeout after 2 seconds")
+                    continue
+                except Exception as e:
+                    VSlog(f"SystemDNS error: {str(e)}")
+                    continue
+
             elif provider in ['public', 'google', 'cloudflare'] and DNS_MODULE_AVAILABLE:
-                resolver = dns.resolver.Resolver()
-                resolver.nameservers = (
-                    ['8.8.8.8', '1.1.1.1'] if provider == 'public' else
-                    ['8.8.8.8'] if provider == 'google' else
-                    ['1.1.1.1']
-                )
-                answers = resolver.resolve(hostname, 'A')
-                ips = [str(r) for r in answers]
-                VSlog(f"{provider} DNS: {hostname} → {ips}")
-                
+                try:
+                    resolver = dns.resolver.Resolver()
+                    resolver.timeout = 1
+                    resolver.lifetime = 2
+                    resolver.nameservers = (
+                        ['8.8.8.8', '1.1.1.1'] if provider == 'public' else
+                        ['8.8.8.8'] if provider == 'google' else
+                        ['1.1.1.1']
+                    )
+                    answers = resolver.resolve(hostname, 'A')
+                    ips = [str(r) for r in answers]
+                    VSlog(f"{provider} DNS: {hostname} → {ips}")
+                except Exception as e:
+                    VSlog(f"{provider} DNS error: {str(e)}")
+                    continue
+
             elif provider == 'doh':
                 doh_endpoints = [
                     f'https://dns.google/resolve?name={hostname}&type=A',
@@ -4026,7 +4061,7 @@ def resolve_hostname(hostname, providers=None, all_ips=False):
                 ]
                 for url in doh_endpoints:
                     try:
-                        response = requests.get(url, headers={'Accept': 'application/dns-json'}, timeout=5)
+                        response = requests.get(url, headers={'Accept': 'application/dns-json'}, timeout=2)
                         data = response.json()
                         ips = [a['data'] for a in data.get('Answer', []) if a.get('type') == 1]
                         if ips:
@@ -4041,11 +4076,18 @@ def resolve_hostname(hostname, providers=None, all_ips=False):
                 if is_valid_ip(ip):
                     valid_ips.append(ip)
                     if not all_ips:
-                        break
+                        break  # Break inner loop after first valid IP
+            # Early exit if we have result and don't need all IPs
+            if valid_ips and not all_ips:
+                break  # Break provider loop after first valid IP
 
         except Exception as e:
             VSlog(f"{provider} resolution error: {str(e)}")
             continue
+
+    # Update cache with valid IPs
+    if valid_ips:
+        _DNS_CACHE[cache_key] = {'ips': valid_ips, 'timestamp': current_time}
 
     VSlog(f"Final IPs for {hostname}: {valid_ips}")
     return valid_ips if all_ips else (valid_ips[0] if valid_ips else None)
@@ -4080,8 +4122,8 @@ def create_http_session(retries=1, backoff_factor=1, android_optimized=False, ve
     session.verify = ssl_verify() if verify_ssl else False
     return session
 
-def ping_server(server: str, timeout=20, retries=1, backoff_factor=2, verify_ssl=True):
-    """Check server availability with DNS override."""
+def ping_server(server: str, timeout=20, retries=1, backoff_factor=1, verify_ssl=True):
+    """Check server availability with optimized DNS and timeout settings."""
     parsed = urlparse(server)
     if not parsed.scheme:
         server = f"http://{server}"
