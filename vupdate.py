@@ -7589,8 +7589,8 @@ def update_wiflix_patterns():
     file_path = VSPath("special://home/addons/plugin.video.vstream/resources/sites/wiflix.py")   
     
     # Define the patterns to find and replace
-    old_pattern = r'sPattern = "onclick=\\"loadVideo\(\'([^\']+)"'
-    new_pattern = r'sPattern = "onclick=\\".+?loadVideo\(\'([^\']+)"'
+    old_pattern = 'sPattern = "onclick=\"loadVideo\(\'([^\']+)"'
+    new_pattern = 'sPattern = "onclick=\\".+?loadVideo\(\'([^\']+)"'
     
     # Read the file content
     with open(file_path, 'r', encoding='utf-8') as f:
@@ -7612,8 +7612,8 @@ def update_wiflix_patterns():
         # Replace pattern within target functions
         if in_target_function and old_pattern in line:
             lines[i] = line.replace(
-                'sPattern = "onclick=\\"loadVideo\(\'([^\']+)"',
-                'sPattern = "onclick=\\".+?loadVideo\(\'([^\']+)"'
+                old_pattern,
+                new_pattern
             )
             modified = True
     
@@ -7623,7 +7623,7 @@ def update_wiflix_patterns():
             f.writelines(lines)
         VSlog("Patterns updated successfully in wiflix.py")
     else:
-        VSlog("No patterns needed updatingin wiflix.py")
+        VSlog("No patterns needed updating in wiflix.py")
         
 # def save_watched_recommendations_to_json():
 #     oDb = cDb()
