@@ -6830,9 +6830,8 @@ def update_livetv_module():
             )
             modified = True
 
-    # Part 2: Update showMovies3 with threaded implementation if missing
-    # Check if threading logic exists in showMovies3
-    if 'threading.Thread' not in new_content:
+    # Part 2: Modify showMovies3 if needed
+    if 'sTitle = (\'%s %s (%s)\') % (sStatus, sMovieTitle2, sLang[:4])' not in new_content:
         tree = ast.parse(new_content)
         show_movies3 = None
         
@@ -6845,75 +6844,24 @@ def update_livetv_module():
             lines = new_content.split('\n')
             start_line = show_movies3.lineno - 1
             end_line = show_movies3.end_lineno
-            original_func_text = '\n'.join(lines[start_line:end_line])
+            show_movies3_block = lines[start_line:end_line]
 
-            # New threaded showMovies3 implementation
-            new_show_movies3 = (
-                "def showMovies3():  # Display available live videos\n"
-                "    oGui = cGui()\n"
-                "    oInputParameterHandler = cInputParameterHandler()\n"
-                "    sUrl3 = oInputParameterHandler.getValue('siteUrl3')\n"
-                "    sMovieTitle2 = oInputParameterHandler.getValue('sMovieTitle2')\n"
-                "    sThumb = oInputParameterHandler.getValue('sThumb')\n\n"
-                "    oRequestHandler = cRequestHandler(sUrl3)\n"
-                "    sHtmlContent = oRequestHandler.request()\n\n"
-                "    oParser = cParser()\n"
-                "    sPattern = r'<td width=16><img title=\"(.*?)\".+?<a title=\".+?\" *href=\"(.+?)\"'\n"
-                "    aResult = oParser.parse(sHtmlContent, sPattern)\n\n"
-                "    if not aResult[0]:\n"
-                "        oGui.addText(SITE_IDENTIFIER)\n"
-                "        oGui.setEndOfDirectory()\n"
-                "        return\n\n"
-                "    entries = []\n"
-                "    for idx, aEntry in enumerate(aResult[1]):\n"
-                "        sLang = aEntry[0]\n"
-                "        sUrl4 = aEntry[1]\n"
-                "        if not sUrl4.startswith(\"http\"):\n"
-                "            sUrl4 = \"http:\" + sUrl4\n"
-                "        if 'cdn' in sUrl4:\n"
-                "            sUrl4 = re.sub(r'http://cdn\\\.livetv\\d+\\\.me/', URL_MAIN, sUrl4)\n"
-                "        entries.append((idx, sLang, sUrl4, sMovieTitle2))\n\n"
-                "    results = [None] * len(entries)\n\n"
-                "    def check_link(idx, sUrl4, sLang, sMovieTitle2, results):\n"
-                "        try:\n"
-                "            bOnline = isLinkOnline(sUrl4)\n"
-                "            results[idx] = (sLang, sUrl4, sMovieTitle2, bOnline)\n"
-                "        except:\n"
-                "            results[idx] = (sLang, sUrl4, sMovieTitle2, False)\n\n"
-                "    threads = []\n"
-                "    for entry in entries:\n"
-                "        idx, sLang, sUrl4, sMovieTitle2 = entry\n"
-                "        thread = threading.Thread(target=check_link, args=(idx, sUrl4, sLang, sMovieTitle2, results))\n"
-                "        threads.append(thread)\n"
-                "        thread.start()\n\n"
-                "    for thread in threads:\n"
-                "        thread.join()\n\n"
-                "    oOutputParameterHandler = cOutputParameterHandler()\n"
-                "    for result in results:\n"
-                "        if result is None:\n"
-                "            continue\n"
-                "        sLang, sUrl4, sMovieTitle2, bOnline = result\n"
-                "        sStatus = '[COLOR lime][Online][/COLOR]' if bOnline else '[COLOR red][Offline][/COLOR]'\n"
-                "        sTitle = f'{sStatus} {sMovieTitle2} ({sLang[:4]})'\n\n"
-                "        oOutputParameterHandler.addParameter('siteUrl', sUrl4)\n"
-                "        oOutputParameterHandler.addParameter('sMovieTitle2', sTitle)\n"
-                "        oOutputParameterHandler.addParameter('sThumb', sThumb)\n"
-                "        oGui.addDir(SITE_IDENTIFIER, 'showHosters', sTitle, 'sport.png', oOutputParameterHandler)\n\n"
-                "    oGui.setEndOfDirectory()"
-            )
-
-            # Replace the old showMovies3 with the new implementation
-            new_content = new_content.replace(original_func_text, new_show_movies3)
-            modified = True
-
-    # Add threading import at top if missing
-    if 'import threading' not in new_content:
-        import_line = "import threading"
-        new_content = new_content.replace(
-            "import xbmc",
-            "import xbmc\nimport threading"
-        )
-        modified = True
+            # Find target line
+            for i, line in enumerate(show_movies3_block):
+                if 'sTitle = (' in line and 'sMovieTitle2, sLang[:4]' in line:
+                    indent = line[:len(line) - len(line.lstrip())]
+                    new_code = [
+                        f"{indent}# Check link status",
+                        f"{indent}bOnline = isLinkOnline(sUrl4)",
+                        f"{indent}sStatus = '[COLOR lime][Online][/COLOR]' if bOnline else '[COLOR red][Offline][/COLOR]'",
+                        f"{indent}",
+                        f"{indent}sTitle = ('%s %s (%s)') % (sStatus, sMovieTitle2, sLang[:4])"
+                    ]
+                    # Replace the line
+                    lines = lines[:start_line + i] + new_code + lines[start_line + i + 1:]
+                    new_content = '\n'.join(lines)
+                    modified = True
+                    break
 
     # Write back if modifications were made
     if modified:
