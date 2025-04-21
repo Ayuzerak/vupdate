@@ -6872,7 +6872,7 @@ def update_livetv_module():
                 "        if not sUrl4.startswith(\"http\"):\n"
                 "            sUrl4 = \"http:\" + sUrl4\n"
                 "        if 'cdn' in sUrl4:\n"
-                "            sUrl4 = re.sub(r'http://cdn\\\.livetv\\d+\\\.me/', URL_MAIN, sUrl4)\n"
+                "            sUrl4 = re.sub('http:\\/\\/cdn\\.livetv\\d+\\.me\\/', URL_MAIN, sUrl4)\n"
                 "        entries.append((idx, sLang, sUrl4, sMovieTitle2))\n\n"
                 "    results = [None] * len(entries)\n\n"
                 "    def check_link(idx, sUrl4, sLang, sMovieTitle2, results):\n"
