@@ -6849,6 +6849,7 @@ def update_livetv_module():
 
             # New threaded showMovies3 implementation
             new_show_movies3 = (
+                "import threading\n"
                 "def showMovies3():  # Display available live videos\n"
                 "    oGui = cGui()\n"
                 "    oInputParameterHandler = cInputParameterHandler()\n"
