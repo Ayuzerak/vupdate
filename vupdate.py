@@ -4122,13 +4122,34 @@ def create_http_session(retries=1, backoff_factor=1, android_optimized=False, ve
     session.verify = ssl_verify() if verify_ssl else False
     return session
 
-def ping_server(server: str, timeout=20, retries=1, backoff_factor=1, verify_ssl=True):
-    """Check server availability with optimized DNS and timeout settings."""
+def ping_server(server: str, timeout: float = 20, retries: int = 1, backoff_factor: float = 1, verify_ssl: bool = True) -> bool:
+    """Check server availability with optimized DNS and timeout settings.
+
+    Args:
+        server: Server URL to ping (supports http/https, auto-adds scheme if missing)
+        timeout: Total timeout in seconds for the request
+        retries: Number of retry attempts (total requests = retries + 1)
+        backoff_factor: Multiplier for exponential delay between retries
+        verify_ssl: Verify SSL certificates for HTTPS requests
+
+    Returns:
+        bool: True if server responds with 2xx status, False otherwise
+    """
+    # Add scheme if missing (try HTTPS first)
     parsed = urlparse(server)
     if not parsed.scheme:
-        server = f"http://{server}"
+        server = f"https://{server}"  # Prefer HTTPS first
         parsed = urlparse(server)
-    
+        
+        # Validate HTTPS connection or fallback to HTTP
+        try:
+            requests.head(server, timeout=2, verify=verify_ssl)
+        except requests.exceptions.SSLError:
+            server = f"http://{server}"
+            parsed = urlparse(server)
+        except Exception:
+            pass
+
     hostname = parsed.hostname
     if not hostname:
         return False
@@ -4145,12 +4166,24 @@ def ping_server(server: str, timeout=20, retries=1, backoff_factor=1, verify_ssl
 
     with PatchedDNSContext(hostname, resolved_ip):
         try:
-            response = session.get(server, timeout=timeout)
-            return response.status_code < 500
+            # Use HEAD for faster checks, fallback to GET if needed
+            response = session.head(
+                server,
+                timeout=timeout,
+                headers={'Host': hostname}  # Ensure correct Host header
+            )
+            
+            # Consider successful if status code is 2xx
+            return 200 <= response.status_code < 300
         except requests.exceptions.SSLError as e:
             VSlog(f"SSL Error: {str(e)}")
+            if "doesn't match" in str(e):
+                VSlog(f"Certificate hostname mismatch: {hostname}")
+        except requests.exceptions.ConnectionError as e:
+            VSlog(f"Connection failed: {str(e)}")
         except Exception as e:
             VSlog(f"Ping failed: {str(e)}")
+    
     return False
 
 def is_using_cloudflare(url):
@@ -5683,7 +5716,7 @@ def check_site(site_name, data):
                 VSlog(f"Site {site_name} is missing a 'url' key.")
                 return
 
-            is_active = ping_server(site_url)
+            is_active = ping_server(site_url) and not cloudflare_protected(site_url)
             data['sites'][site_name]['active'] = "True" if is_active else "False"
 
             VSlog(f"Site {site_name} status updated to {'active' if is_active else 'inactive'}.")
