@@ -5351,7 +5351,7 @@ def get_elitegol_url():
     
     CONFIG_FILE = VSPath('special://home/addons/service.vstreamupdate/site_config.ini').replace('\\', '/')
 
-    default_url = 'https://kakarotfoot.ru/'
+    default_url = 'https://www.elitegoltv.win/'
 
     def save_valid_url(url):
         try:
