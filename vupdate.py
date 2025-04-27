@@ -5683,7 +5683,7 @@ def check_site(site_name, data):
                 VSlog(f"Site {site_name} is missing a 'url' key.")
                 return
 
-            is_active = ping_server(site_url) and not cloudflare_protected(site_url)
+            is_active = ping_server(site_url)
             data['sites'][site_name]['active'] = "True" if is_active else "False"
 
             VSlog(f"Site {site_name} status updated to {'active' if is_active else 'inactive'}.")
