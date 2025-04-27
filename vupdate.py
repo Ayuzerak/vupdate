@@ -4124,50 +4124,77 @@ def create_http_session(retries=1, backoff_factor=1, android_optimized=False, ve
 
 def ping_server(server: str, timeout=10, retries=1, backoff_factor=2, verify_ssl=True):
     """
-    Ping server to check if it's reachable, with retry mechanism and optional SSL verification.
+    Ping server to check if it's reachable and returns a 200 status code, with retries, DNS optimization, and SSL handling.
 
     Args:
         server (str): Server URL to ping.
         timeout (int): Timeout for each request in seconds.
-        retries (int): Number of retry attempts on failure.
-        backoff_factor (int): Exponential backoff multiplier for retry delays.
-        verify_ssl (bool): Whether to verify SSL certificates. Default is True.
-        
-    Returns:
-        bool: True if the server is reachable, False otherwise.
-    """
-    if not server.startswith(("http://", "https://")):
-        server = "https://" + server
+        retries (int): Number of retry attempts after initial failure.
+        backoff_factor (int): Multiplier for exponential retry delays.
+        verify_ssl (bool): Verify SSL certificates. Disables on SSL errors if enabled.
 
+    Returns:
+        bool: True if server responds with 200, False otherwise.
+    """
+    # Ensure URL has a scheme, defaulting to HTTPS
+    if not server.startswith(("http://", "https://")):
+        server = f"https://{server}"
+    
+    parsed = urlparse(server)
+    hostname = parsed.hostname
+    if not hostname:
+        VSlog(f"Invalid URL: {server}")
+        return False
+    
+    # Resolve hostname to IP upfront
+    resolved_ip = resolve_hostname(hostname)
+    if not resolved_ip:
+        VSlog(f"DNS resolution failed for {hostname}")
+        return False
+    
     headers = {
         'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/58.0.3029.110 Safari/537.3'
     }
-
-    for attempt in range(1, retries + 1):
+    session = requests.Session()
+    session.headers.update(headers)
+    
+    current_verify_ssl = verify_ssl  # Track SSL verification state
+    
+    for attempt in range(1, retries + 2):  # Total attempts: retries + 1
         try:
-            response = requests.get(server, headers=headers, timeout=timeout, verify=verify_ssl)
-            if response.status_code == 200:
-                VSlog(f"Ping succeeded for {server}. Status code: {response.status_code}")
-                return True
+            with PatchedDNSContext(hostname, resolved_ip):
+                response = session.get(
+                    server,
+                    timeout=timeout,
+                    verify=current_verify_ssl,
+                    allow_redirects=True  # Follow redirects to validate final endpoint
+                )
+                if response.status_code == 200:
+                    VSlog(f"Successfully pinged {server} (attempt {attempt})")
+                    return True
+                else:
+                    VSlog(f"Non-200 status {response.status_code} from {server} (attempt {attempt})")
+                    return False  # No retry on non-200 responses
+        except SSLError as e:
+            if current_verify_ssl:
+                VSlog(f"SSL error (attempt {attempt}), disabling verification: {e}")
+                current_verify_ssl = False  # Disable SSL for subsequent attempts
+                continue  # Retry immediately without delay
             else:
-                VSlog(f"Ping failed for {server}. Status code: {response.status_code}")
-                return False
-        except SSLError as ssl_error:
-            if verify_ssl:
-                VSlog(f"Ping failed for {server}. SSL Error: {ssl_error}")
-                return ping_server(server, timeout, retries, backoff_factor, False)  # SSL errors are critical if SSL verification is enabled
-            else:
-                VSlog(f"Ping attempt {attempt} failed for {server}. Ignoring SSL Error due to verify_ssl=False.")
-        except RequestException as error:
-            VSlog(f"Ping attempt {attempt} failed for {server}. Error: {error}")
-
-            if attempt < retries:
+                VSlog(f"SSL error persists without verification (attempt {attempt}): {e}")
+                return False  # Fatal if SSL fails even after disabling
+        except RequestException as e:
+            VSlog(f"Attempt {attempt} failed: {e}")
+            if attempt <= retries:
                 delay = backoff_factor * (2 ** (attempt - 1))
-                VSlog(f"Retrying in {delay} seconds...")
+                VSlog(f"Retrying in {delay}s...")
                 time.sleep(delay)
-            else:
-                VSlog(f"All {retries} attempts failed for {server}.")
-                return False
+        except Exception as e:
+            VSlog(f"Unexpected error: {e}")
+            return False
+    
+    VSlog(f"All {retries + 1} attempts failed for {server}")
+    return False
 
 def is_using_cloudflare(url):
     """Comprehensive Cloudflare detection with DNS fallbacks."""
