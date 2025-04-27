@@ -5387,7 +5387,7 @@ def get_elitegol_url():
         try:
             response = requests.get(url, timeout=15)
             response_lowered = response.text.lower()
-            return "matchs" in response_lowered and "direct" in response_lowered in response_lowered
+            return "Ligue 1" in response_lowered and "Direct" in response_lowered in response_lowered
         except Exception as e:
             VSlog(f"Content validation failed for {url}: {str(e)}")
             return False
