@@ -6870,6 +6870,132 @@ def update_livetv_module():
         return True
     return False
 
+def update_elitegol_module():
+    VSlog("update_elitegol_module() called")
+    file_path = VSPath("special://home/addons/plugin.video.vstream/resources/sites/elitegol.py") 
+    
+    # Define the replacement patterns
+    replacements = {
+        r'def showMovies\(\):.*?^(\s+)oGui\.setEndOfDirectory\(\)': 
+        '''
+def showMovies():
+    oGui = cGui()
+    oInputParameterHandler = cInputParameterHandler()
+    
+    # Fetch the homepage HTML
+    oRequestHandler = cRequestHandler(URL_MAIN)
+    sHtmlContent = oRequestHandler.request()
+
+    # Improved regex pattern to extract events
+    pattern = r'<tr><td>([^<]+):<a href=\\\'([^\\\']+)\\\'.*?<b>(.*?)</b>.*?<span class=\\\'t\\\'>([^<]+)</span>'
+    aResult = re.findall(pattern, sHtmlContent, re.DOTALL)
+
+    if not aResult:
+        oGui.addText(SITE_IDENTIFIER)
+        oGui.setEndOfDirectory()
+        return
+
+    oOutputParameterHandler = cOutputParameterHandler()
+    for sLeague, sUrl, sTitle, sTime in aResult:
+        # Clean and format title
+        sTitle = f'[B]{sLeague.strip()}[/B] {sTitle.strip()} ({sTime.strip()})'
+        sUrl = URL_MAIN + sUrl if sUrl.startswith('/') else URL_MAIN + '/' + sUrl
+
+        oOutputParameterHandler.addParameter('siteUrl', sUrl)
+        oOutputParameterHandler.addParameter('sMovieTitle', sTitle)
+        oOutputParameterHandler.addParameter('sThumb', 'sport.png')
+        
+        oGui.addDir(SITE_IDENTIFIER, 'showHoster', sTitle, 'sport.png', oOutputParameterHandler)
+
+    oGui.setEndOfDirectory()
+''',
+
+        r'def showHoster\(\):.*?^(\s+)oGui\.setEndOfDirectory\(\)':
+        '''
+def showHoster():
+    oGui = cGui()
+    oInputParameterHandler = cInputParameterHandler()
+    sUrl = oInputParameterHandler.getValue('siteUrl')
+    sThumb = oInputParameterHandler.getValue('sThumb')
+    sMovieTitle = oInputParameterHandler.getValue('sMovieTitle')
+
+    # Get final stream URL
+    sHosterUrl = getHosterIframe(sUrl, URL_MAIN)
+    
+    if sHosterUrl:
+        oHosterGui = cHosterGui()
+        oHoster = oHosterGui.checkHoster(sHosterUrl)
+        if oHoster:
+            oHoster.setDisplayName(sMovieTitle)
+            oHoster.setFileName(sMovieTitle)
+            oHosterGui.showHoster(oGui, oHoster, sHosterUrl, sThumb)
+
+    oGui.setEndOfDirectory()
+''',
+
+        r'def getHosterIframe\(.*?^(\s+)return False':
+        '''
+def getHosterIframe(url, referer):
+    if not url.startswith('http'):
+        url = URL_MAIN + url
+    
+    oRequestHandler = cRequestHandler(url)
+    oRequestHandler.addHeaderEntry('Referer', referer)
+    sHtmlContent = oRequestHandler.request()
+    
+    # Updated extraction patterns
+    patterns = [
+        r'player\\.load\\(\\s*{\\s*source:\\s*(["\\\'])(.*?)\\1',
+        r'file:\\s*["\\\'](https.*?\\.m3u8)["\\\']',
+        r'<iframe[^>]+src=["\\\'](https?://[^"\\\']+)["\\\']'
+    ]
+    
+    for pattern in patterns:
+        aResult = re.findall(pattern, sHtmlContent, re.DOTALL)
+        if aResult:
+            sHosterUrl = aResult[0] if isinstance(aResult[0], str) else aResult[0][1]
+            if '//' in sHosterUrl and not sHosterUrl.startswith('http'):
+                sHosterUrl = 'https:' + sHosterUrl
+            return sHosterUrl + '|Referer=' + referer
+    
+    return False
+''',
+
+        r'def load\(\):.*?^(\s+)oGui\.setEndOfDirectory\(\)':
+        '''
+def load():
+    oGui = cGui()
+    oOutputParameterHandler = cOutputParameterHandler()
+    
+    # Live Events
+    oOutputParameterHandler.addParameter('siteUrl', URL_MAIN)
+    oGui.addDir(SITE_IDENTIFIER, 'showMovies', 'Live Events', 'replay.png', oOutputParameterHandler)
+
+    # TV Channels (if still needed)
+    oOutputParameterHandler.addParameter('siteUrl', SPORT_TV[0])
+    oGui.addDir(SITE_IDENTIFIER, SPORT_TV[1], 'TV Channels', 'tv.png', oOutputParameterHandler)
+
+    oGui.setEndOfDirectory()
+'''
+    }
+
+    # Read the original file
+    with open(file_path, 'r', encoding='utf-8') as f:
+        content = f.read()
+
+    # Apply replacements
+    for pattern, replacement in replacements.items():
+        content = re.sub(
+            pattern, 
+            replacement.replace('\\', '\\\\'),  # Escape backslashes for regex
+            content, 
+            flags=re.DOTALL|re.MULTILINE
+        )
+
+    # Write modified content back
+    with open(file_path, 'w', encoding='utf-8') as f:
+        f.write(content)
+
 def update_checkhoster_hosterpy_function():
 
     VSlog("update_checkhoster_hosterpy_function called")
@@ -6956,7 +7082,6 @@ def update_checkhoster_hosterpy_function():
     except Exception as e:
         VSlog(f"Update of checkhoster function failed: {str(e)}")
         return False
-
         
 def update_parse_function():
     file_path = VSPath("special://home/addons/plugin.video.vstream/resources/lib/parser.py")
@@ -7714,6 +7839,7 @@ class cUpdate:
             # Exécuter la mise à jour
             update_streamonsport_module()
             update_livetv_module()
+            update_elitegol_module()
             update_wiflix_patterns()
             activate_site("streamonsport", "True")
 
