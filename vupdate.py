@@ -4122,40 +4122,31 @@ def create_http_session(retries=1, backoff_factor=1, android_optimized=False, ve
     session.verify = ssl_verify() if verify_ssl else False
     return session
 
-def ping_server(server: str, timeout: float = 20, retries: int = 1, backoff_factor: float = 1, verify_ssl: bool = True) -> bool:
-    """Check server availability with optimized DNS and timeout settings.
-
-    Args:
-        server: Server URL to ping (supports http/https, auto-adds scheme if missing)
-        timeout: Total timeout in seconds for the request
-        retries: Number of retry attempts (total requests = retries + 1)
-        backoff_factor: Multiplier for exponential delay between retries
-        verify_ssl: Verify SSL certificates for HTTPS requests
-
-    Returns:
-        bool: True if server responds with 2xx status, False otherwise
-    """
-    # Add scheme if missing (try HTTPS first)
+def ping_server(server: str, timeout: float = 5, retries: int = 2, backoff_factor: float = 1.5, verify_ssl: bool = True) -> bool:
+    """Check server availability with comprehensive error handling."""
     parsed = urlparse(server)
-    if not parsed.scheme:
-        server = f"https://{server}"  # Prefer HTTPS first
-        parsed = urlparse(server)
-        
-        # Validate HTTPS connection or fallback to HTTP
-        try:
-            requests.head(server, timeout=2, verify=verify_ssl)
-        except requests.exceptions.SSLError:
-            server = f"http://{server}"
-            parsed = urlparse(server)
-        except Exception:
-            pass
+    original_scheme = parsed.scheme
+    
+    # Scheme handling improvements
+    if not original_scheme:
+        # Test both HTTPS and HTTP schemes
+        for scheme in ['https', 'http']:
+            test_server = f"{scheme}://{server}"
+            if quick_connect(test_server, verify_ssl):
+                server = test_server
+                parsed = urlparse(server)
+                break
+        else:
+            VSlog(f"Failed to connect to {server} with both HTTP/HTTPS")
+            return False
 
     hostname = parsed.hostname
-    if not hostname:
-        return False
+    port = parsed.port or (443 if parsed.scheme == 'https' else 80)
 
-    resolved_ip = resolve_hostname(hostname)
-    if not resolved_ip:
+    # DNS resolution with multiple attempts
+    resolved_ips = resolve_hostname(hostname, multiple=True)
+    if not resolved_ips:
+        VSlog(f"DNS resolution failed for {hostname}")
         return False
 
     session = create_http_session(
@@ -4164,27 +4155,56 @@ def ping_server(server: str, timeout: float = 20, retries: int = 1, backoff_fact
         verify_ssl=verify_ssl
     )
 
-    with PatchedDNSContext(hostname, resolved_ip):
+    # Try all resolved IP addresses
+    for ip_address in resolved_ips:
         try:
-            # Use HEAD for faster checks, fallback to GET if needed
-            response = session.head(
-                server,
-                timeout=timeout,
-                headers={'Host': hostname}  # Ensure correct Host header
-            )
-            
-            # Consider successful if status code is 2xx
-            return 200 <= response.status_code < 300
+            with PatchedDNSContext(hostname, ip_address):
+                # Use GET instead of HEAD for broader compatibility
+                response = session.get(
+                    server,
+                    timeout=timeout,
+                    headers={
+                        'Host': hostname,
+                        'User-Agent': 'Mozilla/5.0 (compatible; ServerPing/1.0)'
+                    },
+                    allow_redirects=True  # Handle redirects properly
+                )
+                
+                # Consider 2xx and 3xx status codes as successful
+                if 200 <= response.status_code < 400:
+                    return True
+                
+                # Log unexpected status codes
+                VSlog(f"Unexpected status {response.status_code} from {server}")
+
         except requests.exceptions.SSLError as e:
-            VSlog(f"SSL Error: {str(e)}")
-            if "doesn't match" in str(e):
-                VSlog(f"Certificate hostname mismatch: {hostname}")
+            error_msg = f"SSL Error ({ip_address}): {str(e)}"
+            if not verify_ssl:
+                error_msg += " (SSL verification disabled but error still occurred)"
+            VSlog(error_msg)
+            
         except requests.exceptions.ConnectionError as e:
-            VSlog(f"Connection failed: {str(e)}")
+            VSlog(f"Connection failed to {ip_address}: {str(e)}")
+            
+        except requests.exceptions.Timeout:
+            VSlog(f"Timeout occurred after {timeout}s with {ip_address}")
+            
         except Exception as e:
-            VSlog(f"Ping failed: {str(e)}")
-    
+            VSlog(f"Unexpected error with {ip_address}: {str(e)}")
+
     return False
+
+def quick_connect(url: str, verify_ssl: bool, timeout: float = 3) -> bool:
+    """Quick test connection with socket for basic reachability."""
+    parsed = urlparse(url)
+    hostname = parsed.hostname
+    port = parsed.port or (443 if parsed.scheme == 'https' else 80)
+    
+    try:
+        with socket.create_connection((hostname, port), timeout=timeout):
+            return True
+    except:
+        return False
 
 def is_using_cloudflare(url):
     """Comprehensive Cloudflare detection with DNS fallbacks."""
