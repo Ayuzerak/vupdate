@@ -4122,89 +4122,52 @@ def create_http_session(retries=1, backoff_factor=1, android_optimized=False, ve
     session.verify = ssl_verify() if verify_ssl else False
     return session
 
-def ping_server(server: str, timeout: float = 5, retries: int = 2, backoff_factor: float = 1.5, verify_ssl: bool = True) -> bool:
-    """Check server availability with comprehensive error handling."""
-    parsed = urlparse(server)
-    original_scheme = parsed.scheme
-    
-    # Scheme handling improvements
-    if not original_scheme:
-        # Test both HTTPS and HTTP schemes
-        for scheme in ['https', 'http']:
-            test_server = f"{scheme}://{server}"
-            if quick_connect(test_server, verify_ssl):
-                server = test_server
-                parsed = urlparse(server)
-                break
-        else:
-            VSlog(f"Failed to connect to {server} with both HTTP/HTTPS")
-            return False
+def ping_server(server: str, timeout=10, retries=1, backoff_factor=2, verify_ssl=True):
+    """
+    Ping server to check if it's reachable, with retry mechanism and optional SSL verification.
 
-    hostname = parsed.hostname
-    port = parsed.port or (443 if parsed.scheme == 'https' else 80)
+    Args:
+        server (str): Server URL to ping.
+        timeout (int): Timeout for each request in seconds.
+        retries (int): Number of retry attempts on failure.
+        backoff_factor (int): Exponential backoff multiplier for retry delays.
+        verify_ssl (bool): Whether to verify SSL certificates. Default is True.
+        
+    Returns:
+        bool: True if the server is reachable, False otherwise.
+    """
+    if not server.startswith(("http://", "https://")):
+        server = "https://" + server
 
-    # DNS resolution with multiple attempts
-    resolved_ips = resolve_hostname(hostname, multiple=True)
-    if not resolved_ips:
-        VSlog(f"DNS resolution failed for {hostname}")
-        return False
+    headers = {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/58.0.3029.110 Safari/537.3'
+    }
 
-    session = create_http_session(
-        retries=retries,
-        backoff_factor=backoff_factor,
-        verify_ssl=verify_ssl
-    )
-
-    # Try all resolved IP addresses
-    for ip_address in resolved_ips:
+    for attempt in range(1, retries + 1):
         try:
-            with PatchedDNSContext(hostname, ip_address):
-                # Use GET instead of HEAD for broader compatibility
-                response = session.get(
-                    server,
-                    timeout=timeout,
-                    headers={
-                        'Host': hostname,
-                        'User-Agent': 'Mozilla/5.0 (compatible; ServerPing/1.0)'
-                    },
-                    allow_redirects=True  # Handle redirects properly
-                )
-                
-                # Consider 2xx and 3xx status codes as successful
-                if 200 <= response.status_code < 400:
-                    return True
-                
-                # Log unexpected status codes
-                VSlog(f"Unexpected status {response.status_code} from {server}")
+            response = requests.get(server, headers=headers, timeout=timeout, verify=verify_ssl)
+            if response.status_code == 200:
+                VSlog(f"Ping succeeded for {server}. Status code: {response.status_code}")
+                return True
+            else:
+                VSlog(f"Ping failed for {server}. Status code: {response.status_code}")
+                return False
+        except SSLError as ssl_error:
+            if verify_ssl:
+                VSlog(f"Ping failed for {server}. SSL Error: {ssl_error}")
+                return ping_server(server, timeout, retries, backoff_factor, False)  # SSL errors are critical if SSL verification is enabled
+            else:
+                VSlog(f"Ping attempt {attempt} failed for {server}. Ignoring SSL Error due to verify_ssl=False.")
+        except RequestException as error:
+            VSlog(f"Ping attempt {attempt} failed for {server}. Error: {error}")
 
-        except requests.exceptions.SSLError as e:
-            error_msg = f"SSL Error ({ip_address}): {str(e)}"
-            if not verify_ssl:
-                error_msg += " (SSL verification disabled but error still occurred)"
-            VSlog(error_msg)
-            
-        except requests.exceptions.ConnectionError as e:
-            VSlog(f"Connection failed to {ip_address}: {str(e)}")
-            
-        except requests.exceptions.Timeout:
-            VSlog(f"Timeout occurred after {timeout}s with {ip_address}")
-            
-        except Exception as e:
-            VSlog(f"Unexpected error with {ip_address}: {str(e)}")
-
-    return False
-
-def quick_connect(url: str, verify_ssl: bool, timeout: float = 3) -> bool:
-    """Quick test connection with socket for basic reachability."""
-    parsed = urlparse(url)
-    hostname = parsed.hostname
-    port = parsed.port or (443 if parsed.scheme == 'https' else 80)
-    
-    try:
-        with socket.create_connection((hostname, port), timeout=timeout):
-            return True
-    except:
-        return False
+            if attempt < retries:
+                delay = backoff_factor * (2 ** (attempt - 1))
+                VSlog(f"Retrying in {delay} seconds...")
+                time.sleep(delay)
+            else:
+                VSlog(f"All {retries} attempts failed for {server}.")
+                return False
 
 def is_using_cloudflare(url):
     """Comprehensive Cloudflare detection with DNS fallbacks."""
