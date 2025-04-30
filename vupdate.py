@@ -3280,8 +3280,8 @@ def add_parameter_to_function(file_path, function_name, parameter, after_paramet
 
         with open(file_path, 'w', encoding='utf-8') as file:
             for line in lines:
-                stripped_line = line.strip()
-                if stripped_line.startswith(f"def {function_name}("):
+                # Check if current line is the target function definition using regex
+                if re.match(rf'^\s*def\s+{re.escape(function_name)}\s*\(', line):
                     start_paren_index = line.find('(')
                     closing_paren_index = line.rfind(')')
 
@@ -3293,16 +3293,25 @@ def add_parameter_to_function(file_path, function_name, parameter, after_paramet
                     param_list_str = line[start_paren_index + 1 : closing_paren_index]
                     params = split_parameters(param_list_str)
 
-                    if parameter in params:
-                        VSlog(f"Parameter '{parameter}' already present in function '{function_name}'. Skipping modification.")
+                    # Check if parameter already exists
+                    existing_params = {p.split('=')[0].strip(): p for p in params}
+                    param_name = parameter.split('=')[0].split(':')[0].strip()
+                    if param_name in existing_params:
+                        VSlog(f"Parameter '{parameter}' already present in function '{function_name}' as '{existing_params[param_name]}'. Skipping modification.")
                         file.write(line)
                         continue
 
-                    VSlog(f"Modifying line: {stripped_line}")
+                    VSlog(f"Modifying line: {line.strip()}")
 
-                    if after_parameter and after_parameter in params:
-                        index = params.index(after_parameter)
-                        params.insert(index + 1, parameter)
+                    # Find insertion index
+                    insert_index = None
+                    if after_parameter:
+                        for idx, p in enumerate(params):
+                            if p.split('=')[0].split(':')[0].strip() == after_parameter:
+                                insert_index = idx + 1
+                                break
+                    if insert_index is not None:
+                        params.insert(insert_index, parameter)
                     else:
                         params.append(parameter)
 
