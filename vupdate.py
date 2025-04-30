@@ -3380,9 +3380,9 @@ def add_parameter_to_function_call(file_path, function_name, parameter):
         return args
 
     try:
-        # Validate inputs
-        if not re.match(r'^[a-zA-Z_]\w*$', function_name):
-            raise ValueError(f"Invalid function name: {function_name}")
+        # More flexible validation for method calls
+        if not re.match(r'^[a-zA-Z_]\w*(\.\w+)*$', function_name):
+            raise ValueError(f"Invalid function pattern: {function_name}")
         if not parameter.strip():
             raise ValueError("Empty parameter specified")
 
@@ -3469,10 +3469,8 @@ def add_parameter_to_function_call(file_path, function_name, parameter):
 
     except FileNotFoundError as e:
         VSlog(f"File not found: {file_path}")
-        raise ValueError(f"Invalid file path: {file_path}") from e
     except Exception as e:
         VSlog(f"Error processing {file_path}: {str(e)}")
-        raise RuntimeError(f"Failed to modify {file_path}") from e
 
 class AssignmentVisitor(ast.NodeVisitor):
     def __init__(self):
