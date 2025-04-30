@@ -3324,47 +3324,113 @@ def add_parameter_to_function(file_path, function_name, parameter, after_paramet
         VSlog(f"Error while modifying file '{file_path}': {str(e)}")
 
 def add_parameter_to_function_call(file_path, function_name, parameter):
+    """Adds a parameter to all calls of a specified function in a Python file.
+    
+    Handles nested parentheses, multi-line function calls, and skips function definitions.
+    Maintains existing formatting and indentation when modifying arguments.
+
+    Args:
+        file_path (str): Path to the Python file to modify
+        function_name (str): Name of the function whose calls need modification
+        parameter (str): Parameter to add to the function calls
+
+    Raises:
+        FileNotFoundError: If the specified file doesn't exist
+        Exception: For other unexpected errors during processing
+    """
     VSlog(f"Starting to add parameter '{parameter}' to calls of function '{function_name}' in file: {file_path}")
+    
+    def split_arguments(args_str):
+        """Splits function arguments string into individual arguments, handling nested structures."""
+        args = []
+        current = []
+        stack = []
+        for c in args_str:
+            if c in '([{':
+                stack.append(c)
+            elif c in ')]}':
+                if stack:
+                    stack.pop()
+            if c == ',' and not stack:
+                args.append(''.join(current).strip())
+                current = []
+            else:
+                current.append(c)
+        if current:
+            args.append(''.join(current).strip())
+        return args
+
     try:
         with open(file_path, 'r', encoding='utf-8') as file:
-            lines = file.readlines()
+            content = file.read()
 
         modified = False
-        # This regex matches a function call like: function_name( ... )
-        # It captures the opening part, the content inside, and the closing parenthesis.
-        pattern = re.compile(rf'({function_name}\()\s*(.*?)\s*(\))')
+        pattern = re.compile(r'\b' + re.escape(function_name) + r'\(')
+        new_content = []
+        last_pos = 0
 
-        def replacer(match):
-            start, inner, end = match.groups()
-            # If the parameter already appears in the call, leave it unchanged.
-            if parameter in inner:
-                return match.group(0)
-            # If there are no existing arguments, simply insert the parameter.
-            if inner.strip() == '':
-                return f'{start}{parameter}{end}'
+        def_pattern = re.compile(r'^\s*def\s+' + re.escape(function_name) + r'\s*\(', re.MULTILINE)
+
+        for match in pattern.finditer(content):
+            start = match.start()
+            # Check if this match is part of a function definition
+            line_start = content.rfind('\n', 0, start) + 1
+            line_end = content.find('\n', start)
+            line = content[line_start:line_end] if line_end != -1 else content[line_start:]
+            if def_pattern.match(line):
+                continue
+
+            open_pos = match.end() - 1  # position of '('
+            pos = open_pos + 1
+            counter = 1
+            while pos < len(content) and counter > 0:
+                if content[pos] == '(':
+                    counter += 1
+                elif content[pos] == ')':
+                    counter -= 1
+                pos += 1
+            if counter != 0:
+                continue  # unbalanced parentheses
+
+            close_pos = pos - 1
+            args_str = content[open_pos+1:close_pos].strip()
+
+            args_list = split_arguments(args_str)
+            if any(arg == parameter for arg in args_list):
+                continue
+
+            if not args_str:
+                new_args = parameter
             else:
-                return f'{start}{inner}, {parameter}{end}'
+                if '\n' in args_str:
+                    last_newline_pos = args_str.rfind('\n')
+                    last_line = args_str[last_newline_pos+1:]
+                    indent = re.match(r'^\s*', last_line).group(0)
+                    new_args = args_str + ',\n' + indent + parameter
+                else:
+                    new_args = args_str + ', ' + parameter
 
-        with open(file_path, 'w', encoding='utf-8') as file:
-            for line in lines:
-                # Skip lines that define the function (i.e. lines starting with "def")
-                if f'{function_name}(' in line and not line.strip().startswith('def'):
-                    new_line = pattern.sub(replacer, line)
-                    if new_line != line:
-                        VSlog(f"Modifying function call in line: {line.strip()}")
-                        line = new_line
-                        modified = True
-                file.write(line)
+            new_content.append(content[last_pos:open_pos+1])
+            new_content.append(new_args)
+            last_pos = close_pos
+            modified = True
+
+        new_content.append(content[last_pos:])
+        new_content = ''.join(new_content)
 
         if modified:
+            with open(file_path, 'w', encoding='utf-8') as file:
+                file.write(new_content)
             VSlog(f"Parameter '{parameter}' successfully added to calls of function '{function_name}' in file: {file_path}")
         else:
             VSlog(f"No modifications needed for calls of function '{function_name}' in file: {file_path}")
 
     except FileNotFoundError:
         VSlog(f"Error: File not found - {file_path}")
+        raise
     except Exception as e:
         VSlog(f"Error while modifying file '{file_path}': {str(e)}")
+        raise
 
 class AssignmentVisitor(ast.NodeVisitor):
     def __init__(self):
