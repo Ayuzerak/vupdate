@@ -3225,45 +3225,93 @@ def rewrite_file_to_avoid_regex_infinite_loops(file_path, dry_run=False, backup=
         VSlog(f"Unexpected error while modifying file: {e}")
 
 def add_parameter_to_function(file_path, function_name, parameter, after_parameter=None):
+    """
+    Add a parameter to a Python function definition in a specified file.
+    
+    Handles complex parameter definitions with type annotations and default values,
+    skips existing parameters, and avoids multi-line parameter definitions.
+    Uses VSlog for logging operations and errors.
+
+    Args:
+        file_path (str): Path to the Python file to modify
+        function_name (str): Name of the target function to modify
+        parameter (str): New parameter to add (e.g., 'verbose: bool = False')
+        after_parameter (str, optional): Existing parameter to insert after. 
+            If None or not found, appends to end.
+
+    Raises:
+        FileNotFoundError: If specified file doesn't exist
+        Exception: For general file processing errors
+
+    Example:
+        >>> add_parameter_to_function('example.py', 'process_data', 
+        ...                          'verbose: bool = False', after_parameter='mode')
+        Adds 'verbose: bool = False' parameter after 'mode' parameter in process_data()
+    """
+    
     VSlog(f"Starting to add parameter '{parameter}' to function '{function_name}' in file: {file_path}")
+    
     try:
         with open(file_path, 'r', encoding='utf-8') as file:
             lines = file.readlines()
 
         modified = False
 
+        def split_parameters(param_str):
+            params = []
+            current = []
+            depth = 0
+            for c in param_str:
+                if c in '([{':
+                    depth += 1
+                elif c in ')]}':
+                    depth -= 1
+                elif c == ',' and depth == 0:
+                    param = ''.join(current).strip()
+                    if param:
+                        params.append(param)
+                    current = []
+                    continue
+                current.append(c)
+            param = ''.join(current).strip()
+            if param:
+                params.append(param)
+            return params
+
         with open(file_path, 'w', encoding='utf-8') as file:
             for line in lines:
                 stripped_line = line.strip()
                 if stripped_line.startswith(f"def {function_name}("):
-                    # Only modify if the parameter isn't already present
-                    if parameter not in line:
-                        VSlog(f"Modifying line: {stripped_line}")
-                        start_paren_index = line.find('(')
-                        closing_paren_index = line.rfind(')')
-                        
-                        # Fallback if the parenthesis aren't found as expected
-                        if start_paren_index == -1 or closing_paren_index == -1:
-                            VSlog("Warning: Couldn't parse the function signature correctly. Appending parameter.")
-                            line = line.rstrip('\n')[:-1] + f', {parameter})\n'
-                        else:
-                            # Extract the existing parameters
-                            param_list_str = line[start_paren_index+1:closing_paren_index]
-                            params = [p.strip() for p in param_list_str.split(',') if p.strip()]
-                            
-                            if after_parameter and after_parameter in params:
-                                # Insert the new parameter right after the specified one
-                                index = params.index(after_parameter)
-                                params.insert(index + 1, parameter)
-                            else:
-                                # Append if no after_parameter is provided or it's not found
-                                params.append(parameter)
-                            
-                            # Reassemble the function definition with the new parameter list
-                            new_param_list = ', '.join(params)
-                            line = line[:start_paren_index+1] + new_param_list + line[closing_paren_index:]
-                        modified = True
-                file.write(line)
+                    start_paren_index = line.find('(')
+                    closing_paren_index = line.rfind(')')
+
+                    if start_paren_index == -1 or closing_paren_index == -1:
+                        VSlog(f"Skipping function '{function_name}' due to multi-line parameters or syntax issues.")
+                        file.write(line)
+                        continue
+
+                    param_list_str = line[start_paren_index + 1 : closing_paren_index]
+                    params = split_parameters(param_list_str)
+
+                    if parameter in params:
+                        VSlog(f"Parameter '{parameter}' already present in function '{function_name}'. Skipping modification.")
+                        file.write(line)
+                        continue
+
+                    VSlog(f"Modifying line: {stripped_line}")
+
+                    if after_parameter and after_parameter in params:
+                        index = params.index(after_parameter)
+                        params.insert(index + 1, parameter)
+                    else:
+                        params.append(parameter)
+
+                    new_param_list = ', '.join(params)
+                    modified_line = line[:start_paren_index + 1] + new_param_list + line[closing_paren_index:]
+                    file.write(modified_line)
+                    modified = True
+                else:
+                    file.write(line)
 
         if modified:
             VSlog(f"Parameter '{parameter}' successfully added to function '{function_name}' in file: {file_path}")
