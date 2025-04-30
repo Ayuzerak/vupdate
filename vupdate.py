@@ -5193,7 +5193,7 @@ def get_streamonsport_url():
     VSlog("Starting Streamonsport URL retrieval process")
     
     CONFIG_FILE = VSPath('special://home/addons/service.vstreamupdate/site_config.ini').replace('\\', '/')
-    default_url = 'https://gaotfoot.ru/'
+    default_url = 'https://tous-sports.ru/'
     sites_json = VSPath('special://home/addons/plugin.video.vstream/resources/sites.json').replace('\\', '/')
 
     def save_valid_url(url):
