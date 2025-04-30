@@ -5084,7 +5084,7 @@ def get_darkiworld_url():
         try:
             response = requests.get(url, timeout=15)
             response_lowered = response.text.lower()
-            return "films" in response_lowered and "ajout" in response_lowered in response_lowered
+            return "films" in response_lowered and "ajout" in response_lowered
         except Exception as e:
             VSlog(f"Content validation failed for {url}: {str(e)}")
             return False
