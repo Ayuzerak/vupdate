@@ -3326,151 +3326,109 @@ def add_parameter_to_function(file_path, function_name, parameter, after_paramet
 def add_parameter_to_function_call(file_path, function_name, parameter):
     """Adds a parameter to all calls of a specified function in a Python file.
     
-    Features:
-    - Skips function definitions
-    - Handles nested parentheses and brackets
-    - Maintains multi-line formatting and indentation
-    - Avoids duplicate parameters
-    - Preserves comments in arguments
-    - Better error handling and logging
+    Handles nested parentheses, multi-line function calls, and skips function definitions.
+    Maintains existing formatting and indentation when modifying arguments.
 
     Args:
         file_path (str): Path to the Python file to modify
-        function_name (str): Name of the target function
-        parameter (str): Parameter to add (can be positional or keyword)
+        function_name (str): Name of the function whose calls need modification
+        parameter (str): Parameter to add to the function calls
 
     Raises:
-        FileNotFoundError: For missing files
-        ValueError: For invalid function names/parameters
-        Exception: For unexpected errors with context
+        FileNotFoundError: If the specified file doesn't exist
+        Exception: For other unexpected errors during processing
     """
-    VSlog(f"Starting parameter addition for {function_name}() in {file_path}")
-
+    VSlog(f"Starting to add parameter '{parameter}' to calls of function '{function_name}' in file: {file_path}")
+    
     def split_arguments(args_str):
-        """Splits function arguments while handling nested structures and strings."""
+        """Splits function arguments string into individual arguments, handling nested structures."""
         args = []
         current = []
         stack = []
-        in_string = False
-        string_char = None
-
         for c in args_str:
-            if c in ('"', "'") and not in_string:
-                in_string = True
-                string_char = c
-            elif c == string_char and in_string:
-                in_string = False
-                string_char = None
-
-            if not in_string:
-                if c in '([{':
-                    stack.append(c)
-                elif c in ')]}':
-                    if stack:
-                        stack.pop()
-            
-            if c == ',' and not stack and not in_string:
+            if c in '([{':
+                stack.append(c)
+            elif c in ')]}':
+                if stack:
+                    stack.pop()
+            if c == ',' and not stack:
                 args.append(''.join(current).strip())
                 current = []
             else:
                 current.append(c)
-        
         if current:
             args.append(''.join(current).strip())
         return args
 
     try:
-        # More flexible validation for method calls
-        if not re.match(r'^[a-zA-Z_]\w*(\.\w+)*$', function_name):
-            raise ValueError(f"Invalid function pattern: {function_name}")
-        if not parameter.strip():
-            raise ValueError("Empty parameter specified")
-
-        with open(file_path, 'r+', encoding='utf-8') as file:
+        with open(file_path, 'r', encoding='utf-8') as file:
             content = file.read()
 
-            # Create safer pattern that avoids partial matches
-            pattern = re.compile(rf'(?<!\w)(?<!\.){re.escape(function_name)}\(')
-            new_content = []
-            last_pos = 0
-            modified = False
+        modified = False
+        pattern = re.compile(r'\b' + re.escape(function_name) + r'\(')
+        new_content = []
+        last_pos = 0
 
-            # Find all function call matches
-            for match in pattern.finditer(content):
-                start = match.start()
-                end = match.end()
+        def_pattern = re.compile(r'^\s*def\s+' + re.escape(function_name) + r'\s*\(', re.MULTILINE)
 
-                # Check for function definitions
-                if start > 0 and content.rfind('def', 0, start) != -1:
-                    def_match = re.search(r'^\s*def\s+' + re.escape(function_name) + r'\s*\(', 
-                                        content[:start], flags=re.MULTILINE)
-                    if def_match:
-                        continue
+        for match in pattern.finditer(content):
+            start = match.start()
+            # Check if this match is part of a function definition
+            line_start = content.rfind('\n', 0, start) + 1
+            line_end = content.find('\n', start)
+            line = content[line_start:line_end] if line_end != -1 else content[line_start:]
+            if def_pattern.match(line):
+                continue
 
-                # Find matching parentheses
-                open_pos = end - 1
-                close_pos = open_pos + 1
-                depth = 1
+            open_pos = match.end() - 1  # position of '('
+            pos = open_pos + 1
+            counter = 1
+            while pos < len(content) and counter > 0:
+                if content[pos] == '(':
+                    counter += 1
+                elif content[pos] == ')':
+                    counter -= 1
+                pos += 1
+            if counter != 0:
+                continue  # unbalanced parentheses
 
-                while close_pos < len(content) and depth > 0:
-                    if content[close_pos] in '([{':
-                        depth += 1
-                    elif content[close_pos] in ')]}':
-                        depth -= 1
-                    close_pos += 1
+            close_pos = pos - 1
+            args_str = content[open_pos+1:close_pos].strip()
 
-                if depth != 0:
-                    VSlog(f"Skipping unmatched parentheses in {file_path}")
-                    continue
+            args_list = split_arguments(args_str)
+            if any(arg == parameter for arg in args_list):
+                continue
 
-                # Extract arguments section
-                args_str = content[open_pos+1:close_pos-1].strip()
-                args_list = split_arguments(args_str)
-
-                # Check for existing parameter
-                param_exists = any(
-                    arg.strip().startswith(f"{parameter}=") or 
-                    arg.strip() == parameter.strip()
-                    for arg in args_list
-                )
-
-                if param_exists:
-                    continue
-
-                # Determine indentation for multi-line calls
-                if '\n' in args_str:
-                    first_line = content[:open_pos].rfind('\n') + 1
-                    base_indent = re.match(r'^\s*', content[first_line:open_pos]).group(0)
-                    new_param = f",\n{base_indent}{parameter}"
-                else:
-                    new_param = f", {parameter}"
-
-                # Preserve existing trailing comma if present
-                if args_str and args_str.strip()[-1] == ',':
-                    new_param = new_param.lstrip(',').lstrip()
-
-                # Construct new arguments
-                new_args = f"{args_str}{new_param}" if args_str else parameter
-
-                new_content.append(content[last_pos:open_pos+1])
-                new_content.append(new_args)
-                last_pos = close_pos - 1
-                modified = True
-
-            new_content.append(content[last_pos:])
-
-            if modified:
-                file.seek(0)
-                file.write(''.join(new_content))
-                file.truncate()
-                VSlog(f"Added {parameter} to {function_name}() calls in {file_path}")
+            if not args_str:
+                new_args = parameter
             else:
-                VSlog(f"No {function_name}() calls needed modification in {file_path}")
+                if '\n' in args_str:
+                    last_newline_pos = args_str.rfind('\n')
+                    last_line = args_str[last_newline_pos+1:]
+                    indent = re.match(r'^\s*', last_line).group(0)
+                    new_args = args_str + ',\n' + indent + parameter
+                else:
+                    new_args = args_str + ', ' + parameter
 
-    except FileNotFoundError as e:
-        VSlog(f"File not found: {file_path}")
+            new_content.append(content[last_pos:open_pos+1])
+            new_content.append(new_args)
+            last_pos = close_pos
+            modified = True
+
+        new_content.append(content[last_pos:])
+        new_content = ''.join(new_content)
+
+        if modified:
+            with open(file_path, 'w', encoding='utf-8') as file:
+                file.write(new_content)
+            VSlog(f"Parameter '{parameter}' successfully added to calls of function '{function_name}' in file: {file_path}")
+        else:
+            VSlog(f"No modifications needed for calls of function '{function_name}' in file: {file_path}")
+
+    except FileNotFoundError:
+        VSlog(f"Error: File not found - {file_path}")
     except Exception as e:
-        VSlog(f"Error processing {file_path}: {str(e)}")
+        VSlog(f"Error while modifying file '{file_path}': {str(e)}")
 
 class AssignmentVisitor(ast.NodeVisitor):
     def __init__(self):
