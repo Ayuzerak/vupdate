@@ -5223,12 +5223,14 @@ def get_streamonsport_url():
     def validate_url_content(url):
         try:
             response = requests.get(url, timeout=15)
-            if response.status_code != 200:
-                return False
             response_lowered = response.text.lower()
-            return "matchs" in response_lowered and "direct" in response_lowered and "nba" in response_lowered and "dmca" in response_lowered and "vpn" in response_lowered
+            # Log missing keywords
+            missing = [kw for kw in ["matchs", "direct", "nba", "dmca", "vpn"] if kw not in response_lowered]
+            if missing:
+                VSlog(f"Missing keywords in {url}: {missing}")
+            return all(kw in response_lowered for kw in ["matchs", "direct", "nba", "dmca", "vpn"])
         except Exception as e:
-            VSlog(f"Content validation failed for {url}: {str(e)}")
+            VSlog(f"Validation error: {str(e)}")
             return False
     
     current_valid_url = None
