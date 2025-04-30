@@ -4345,21 +4345,55 @@ def get_wiflix_url():
         return None
     
     def validate_url_content(url):
-        """Validate if URL content contains 'wiflix' after redirects."""
+        """Validate if URL content contains wiflix indicators after redirects."""
         try:
             headers = {
-                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36"
+                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36",
+                "Accept-Language": "en-US,en;q=0.9",
+                "Referer": "https://www.google.com/"
             }
-            response = requests.get(url, headers=headers, timeout=15, allow_redirects=True)
+        
+            response = requests.get(
+                url, 
+                headers=headers, 
+                timeout=15, 
+                allow_redirects=True,
+                verify=False  # Only if SSL verification causes issues
+            )
             response.raise_for_status()
-            effective_url = response.url
-            if 'ajout' in response.text.lower():
-                VSlog(f"Validated URL: {effective_url}")
-                return effective_url
-            else:
-                VSlog(f"Content check failed for {effective_url}")
+        
+            effective_url = response.url.lower()
+            content = response.text.lower()
+
+            # Check multiple indicators to avoid false positives
+            wiflix_indicators = [
+                'wiflix', 
+                'ajout',
+                'film', 
+                'série', 
+                'streaming'
+            ]
+        
+            # Check both URL and content
+            url_check = any(kw in effective_url for kw in wiflix_indicators)
+            content_check = any(kw in content for kw in wiflix_indicators)
+        
+            if url_check or content_check:
+                VSlog(f"Valid Wiflix URL detected: {response.url}")
+                return response.url
+            
+            VSlog(f"Wiflix validation failed for {response.url}")
+            return None
+
+        except requests.HTTPError as e:
+            VSlog(f"HTTP Error ({e.response.status_code}) for {url}: {str(e)}")
+        except requests.Timeout:
+            VSlog(f"Timeout occurred while validating {url}")
+        except requests.RequestException as e:
+            VSlog(f"Connection error for {url}: {str(e)}")
         except Exception as e:
-            VSlog(f"Validation failed for {url}: {str(e)}")
+            VSlog(f"Unexpected error validating {url}: {str(e)}")
+    
         return None
     
     current_valid_url = None
