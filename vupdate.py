@@ -4476,8 +4476,8 @@ def get_wiflix_url():
             url_check = any(kw in effective_url for kw in wiflix_indicators)
             
             # Check if at least 90% keywords are present in content
-            required = math.ceil(0.9 * len(keywords))  # Strictly enforces 90%+
-            content_check = sum(kw in content for kw in keywords) >= required
+            required = math.ceil(0.9 * len(wiflix_indicators))  # Strictly enforces 90%+
+            content_check = sum(kw in content for kw in wiflix_indicators) >= required
         
             if url_check or content_check:
                 VSlog(f"Valid Wiflix URL detected: {response.url}")
