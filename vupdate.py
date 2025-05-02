@@ -2730,6 +2730,8 @@ def modify_showEpisodes(file_path):
                     f"{' ' * sTitle_indent}VSlog(f'Normalized {variable_name}: {{ {variable_name} }}')\n",
                     f"{' ' * sTitle_indent}pattern = r\"(Saison|Season|S)\\s*(\\d+)\\s*([Ee]pisode|E)\\s*(\\d+)\"\n",
                     f"{' ' * sTitle_indent}VSlog(f'Pattern set to: {{ pattern }}')\n",
+                    f"{' ' * sTitle_indent}{variable_name} = re.sub(r'\\w+(\\d+)[x](\\d+)\\w+', r' S\\1 E\\2', {variable_name})\n",
+                    f"{' ' * sTitle_indent}VSlog(f'Format 1x4 converti : {{ {variable_name} }}')\n",
                     f"{' ' * sTitle_indent}{variable_name} = re.sub(pattern, lambda m: f\" S{{m.group(2)}} E{{m.group(4)}}\", {variable_name}, flags=re.IGNORECASE)\n",
                     f"{' ' * sTitle_indent}VSlog(f'Regex replaced {variable_name}: {{ {variable_name} }}')\n",
                     f"{' ' * sTitle_indent}match = re.search(pattern, {variable_name}, flags=re.IGNORECASE)\n",
