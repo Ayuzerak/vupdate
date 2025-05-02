@@ -4403,33 +4403,6 @@ def set_wiflix_url(url):
         VSlog(f"Error while updating Wiflix URL: {e}")
 
 def get_wiflix_url():
-    """Retrieve the Wiflix URL from its website."""
-    VSlog("Retrieving Wiflix URL from its website.")
-    sites_json = VSPath('special://home/addons/plugin.video.vstream/resources/sites.json').replace('\\','/')
-    try:
-        with open(sites_json, 'r') as fichier:
-            data = json.load(fichier)
-        if 'wiflix' in data['sites']:
-            site_info_new_address = data['sites']['wiflix']['site_info']
-
-        response = requests.get(site_info_new_address)
-        html_content = response.text
-
-        # Rechercher l'URL dans l'attribut onclick
-        match = re.search(r"window\.location\.href='(.*?)'", html_content)
-
-        # Extraire et afficher l'URL si elle existe
-        if match:
-            url = match.group(1).replace("http", "https").replace("httpss", "https") + "/"
-            VSlog(f"Wiflix URL found: {url}")
-            return url
-        VSlog("No web addresses found..")
-        return None
-    except requests.RequestException as e:
-        VSlog(f"Error while retrieving Wiflix URL: {e}")
-        return None
-
-def get_wiflix_url():
     """Retrieve Wiflix URL with content validation from multiple sources."""
     VSlog("Starting Wiflix URL retrieval process")
     
@@ -4500,7 +4473,7 @@ def get_wiflix_url():
         
             # Check both URL and content
             url_check = any(kw in effective_url for kw in wiflix_indicators)
-            content_check = any(kw in content for kw in wiflix_indicators)
+            content_check = all(kw in content for kw in wiflix_indicators)
         
             if url_check or content_check:
                 VSlog(f"Valid Wiflix URL detected: {response.url}")
