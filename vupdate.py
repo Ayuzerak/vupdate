@@ -4479,7 +4479,7 @@ def get_wiflix_url():
             required = math.ceil(0.9 * len(wiflix_indicators))  # Strictly enforces 90%+
             content_check = sum(kw in content for kw in wiflix_indicators) >= required
         
-            if url_check or content_check:
+            if url_check or content_check and effective_url != "https://wiflix-nouvelle-adresse.site":
                 VSlog(f"Valid Wiflix URL detected: {response.url}")
                 return response.url
             
