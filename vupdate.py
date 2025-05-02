@@ -4490,7 +4490,8 @@ def get_wiflix_url():
 
             # Check multiple indicators to avoid false positives
             wiflix_indicators = [
-                'wiflix', 
+                'wiflix',
+                'dmca',
                 'ajout',
                 'film', 
                 'série', 
