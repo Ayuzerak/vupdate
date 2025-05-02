@@ -18,6 +18,7 @@ import re
 import builtins
 import keyword
 import ast
+import math
 import socket
 import textwrap
 import difflib
