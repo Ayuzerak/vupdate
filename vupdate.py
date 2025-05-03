@@ -4483,7 +4483,7 @@ def get_wiflix_url():
             ]
         
             # Check both URL and content
-            url_check = any(kw in effective_url for kw in wiflix_indicators) and effective_url != "https://wiflix-nouvelle-adresse.site"
+            url_check = any(kw in effective_url for kw in wiflix_indicators) and "wiflix-nouvelle-adresse.site" not in effective_url
             
             # Check if at least 90% keywords are present in content
             required = math.ceil(0.9 * len(wiflix_indicators))  # Strictly enforces 90%+
