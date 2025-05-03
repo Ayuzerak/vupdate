@@ -5659,7 +5659,7 @@ def get_livetv_url():
     VSlog("Starting LiveTV URL retrieval process")
     
     CONFIG_FILE = VSPath('special://home/addons/service.vstreamupdate/site_config.ini').replace('\\', '/')
-    default_url = "https://livetv.sx/frx/"
+    default_url = "https://livetv.sx"
     bypass_url = "https://livetv774.me"
     
     def save_valid_url(url):
