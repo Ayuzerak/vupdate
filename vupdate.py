@@ -2740,7 +2740,7 @@ def modify_showEpisodes(file_path):
                     f"{' ' * sTitle_indent}if match:\n",
                     f"{' ' * (sTitle_indent + 4)}season_number_default = int(match.group(2))\n",
                     f"{' ' * (sTitle_indent + 4)}episode_number_default = int(match.group(4))\n",
-                    f"{' ' * (sTitle_indent + 4)}VSlog(f'Default season: {{ season_number_default }}, episode: {{ episode_number_default }}')\n",
+                    f"{' ' * (sTitle_indent + 4)}VSlog(f'Default season: {{ season_number_default }}, Default episode: {{ episode_number_default }}')\n",
                     f"{' ' * sTitle_indent}if not re.search(r'\\s*S\\d+\\s*E\\d+', {variable_name}):\n",
                     f"{' ' * (sTitle_indent + 4)}# Clean existing S<num> or E<num> from sMovieTitle\n",
                     f"{' ' * (sTitle_indent + 4)}{variable_name} = re.sub(r'(Saison\\s*\\d+|\\s*S\\d+\\s*|[Ee]pisode\\s*\\d+|\\s*E\\d+\\s*)', '', {variable_name}, flags=re.IGNORECASE).strip()\n",
