@@ -4408,8 +4408,8 @@ def get_wiflix_url():
     VSlog("Starting Wiflix URL retrieval process")
     
     CONFIG_FILE = VSPath('special://home/addons/service.vstreamupdate/site_config.ini').replace('\\', '/')
-    default_url = "https://wiflix-max.top/"  # Update with appropriate default URL
-    bypass_url = "https://wiflix-max.top/"  # Define a bypass URL if available
+    default_url = "https://flemmix.ws/"  # Update with appropriate default URL
+    bypass_url = "https://flemmix.ws/"  # Define a bypass URL if available
     
     def save_valid_url(url):
         """Save validated URL to configuration file."""
@@ -4468,7 +4468,7 @@ def get_wiflix_url():
                 'dmca',
                 'ajout',
                 'film', 
-                'série', 
+                'serie', 
                 'streaming'
             ]
 
@@ -4478,7 +4478,7 @@ def get_wiflix_url():
                 'dmca',
                 'ajout',
                 'film', 
-                'série', 
+                'serie', 
                 'streaming'
             ]
         
