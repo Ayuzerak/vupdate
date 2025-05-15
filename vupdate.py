@@ -7901,15 +7901,12 @@ def __randy_boundary(length=10, reshuffle=False):
         VSlog(f"An error occurred: {str(e)}")
 
 def update_wiflix_module():
-    file_path = VSPath("special://home/addons/plugin.video.vstream/resources/sites/wiflix.py") # Replace with your actual file path
-
+    file_path = VSPath("special://home/addons/plugin.video.vstream/resources/sites/wiflix.py")
     modified = False
-    
-    original_pattern = 'loadVideo'
-    new_pattern = '.+?loadVideo'
 
-    # New code to add (if missing)
-    site_title_code = """
+    # New code block to inject for site title
+    site_title_block = '''
+
 def get_siteTitle():
     sUrl = URL_MAIN
     oParser = cParser()
@@ -7919,51 +7916,73 @@ def get_siteTitle():
     sPattern = r'<section class="site-desc clearfix">.*?<h3>(.*?):'
     aResult = oParser.parse(sHtmlContent, sPattern)
     
-    site_title = ""
-    
     if not aResult[0]:
-        return site_title
-    
-    site_title = aResult[1][0].strip()
-    return site_title
+        return ""
+    return aResult[1][0].strip()
 
-SITE_TITLE = get_siteTitle()"""
-    
+SITE_TITLE = get_siteTitle()'''
+
     try:
-        # Read the file
         with open(file_path, 'r', encoding='utf-8') as f:
             content = f.read()
-            modified_content = content
+            updated = content
 
-        # 2. Add site title code if missing
+        # 1) Inject site title block if missing
         if 'SITE_TITLE = get_siteTitle()' not in content:
-            # Add entire block if function missing
             if 'def get_siteTitle():' not in content:
-                modified_content += "\n\n" + site_title_code.strip()
+                updated += site_title_block
                 modified = True
-                VSlog("Added get_siteTitle() and SITE_TITLE")
+                VSlog("Added get_siteTitle() and SITE_TITLE assignment")
             else:
-                # Just add the SITE_TITLE assignment
-                modified_content += "\nSITE_TITLE = get_siteTitle()"
+                updated += "\nSITE_TITLE = get_siteTitle()"
                 modified = True
                 VSlog("Added SITE_TITLE assignment")
 
-        if '.+?loadVideo' in content:
-            VSlog("No need to update wiflix patterns")
-        else:
-            # Replace the pattern
-            modified_content = re.sub(original_pattern, new_pattern, content)
+        # 2) Update loadVideo pattern
+        # Ensure regex only replaces standalone loadVideo references
+        if 'loadVideo' in content and '.+?loadVideo' not in content:
+            updated = re.sub(r"(?<!\.)loadVideo", r".+?loadVideo", updated)
             modified = True
-            VSlog("Wiflix patterns updated")
-
-        if modified:
-            # Write back the changes
-            with open(file_path, 'w', encoding='utf-8') as f:
-                f.write(modified_content)
-                VSlog("wiflix.py updated")
+            VSlog("Updated loadVideo pattern to .+?loadVideo")
         else:
-                VSlog("No need to update wiflix.py")
-        
+            VSlog("No need to update loadVideo pattern")
+
+        # 3) Inject sTitle.replace(SITE_TITLE) in showSeries
+        def inject_sitetitle_replacement(code):
+            lines = code.splitlines(keepends=True)
+            out = []
+            in_func = False
+            injected = False
+            pattern_def = re.compile(r'^\s*def\s+showSeries\s*\(')
+            pattern_title = re.compile(r"\s*sTitle\s*=\s*aEntry\[1\]\.replace\('- Saison ', 'S'\)\.replace\(' wiflix', ''\)")
+
+            for line in lines:
+                out.append(line)
+                if pattern_def.match(line):
+                    in_func = True
+                    continue
+                if in_func and pattern_title.search(line) and not injected:
+                    indent = re.match(r"^(\s*)", line).group(1)
+                    out.append(f"{indent}sTitle = sTitle.replace(SITE_TITLE, '')\n")
+                    injected = True
+                    in_func = False
+            return ''.join(out), injected
+
+        updated, did = inject_sitetitle_replacement(updated)
+        if did:
+            modified = True
+            VSlog("Injected sTitle.replace(SITE_TITLE) in showSeries")
+        else:
+            VSlog("No injection needed for sTitle replacement")
+
+        # Write back if modified
+        if modified:
+            with open(file_path, 'w', encoding='utf-8') as f:
+                f.write(updated)
+            VSlog("wiflix.py successfully updated")
+        else:
+            VSlog("wiflix.py is already up to date")
+
     except FileNotFoundError:
         VSlog(f"Error: File not found at {file_path}")
     except PermissionError:
