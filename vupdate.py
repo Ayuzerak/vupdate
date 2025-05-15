@@ -7901,6 +7901,7 @@ def __randy_boundary(length=10, reshuffle=False):
         VSlog(f"An error occurred: {str(e)}")
 
 def update_wiflix_module():
+    VSlog("update_wiflix_module() called")
     file_path = VSPath("special://home/addons/plugin.video.vstream/resources/sites/wiflix.py")
     modified = False
 
