@@ -7954,7 +7954,7 @@ SITE_TITLE = get_siteTitle()'''
             in_func = False
             injected = False
             pattern_def = re.compile(r'^\s*def\s+showSeries\s*\(')
-            pattern_title = re.compile(r"\s*sTitle\s*=\s*aEntry\[1\]\.replace\('- Saison ', 'S'\)\.replace\(' wiflix', ''\)")
+            pattern_title = re.compile(r"\s*sTitle\s*=\s*aEntry\[1\]")
 
             for line in lines:
                 out.append(line)
