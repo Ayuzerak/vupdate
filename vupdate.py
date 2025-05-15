@@ -5,6 +5,7 @@ import configparser
 import datetime, time
 from datetime import datetime
 from collections import deque, defaultdict
+from functools import partial
 import xbmc
 import xbmcvfs
 import shutil
@@ -5650,9 +5651,9 @@ def set_elitegol_url(url):
     
     except Exception as e:
         VSlog(f"Error while setting EliteGol URL: {e}")
-        
+
 def get_livetv_url():
-    """Retrieve LiveTV URL with validation through multiple fallback strategies."""
+    """Retrieve LiveTV URL through prioritized validation strategies."""
     VSlog("Starting LiveTV URL retrieval process")
 
     # Constants
@@ -5704,75 +5705,76 @@ def get_livetv_url():
         """Persist valid URL to config."""
         try:
             config = get_config()
-            config["livetv"] = {"current_url": url}
+            if not config.has_section("livetv"):
+                config.add_section("livetv")
+            config.set("livetv", "current_url", url)
             with open(CONFIG_FILE, "w") as f:
                 config.write(f)
             VSlog(f"URL saved: {url}")
         except Exception as e:
             VSlog(f"Config save failed: {str(e)}")
 
-    # Validation pipeline
-    for strategy in [
-        {"name": "sites.json", "validator": lambda: _validate_sites_json()},
-        {"name": "saved_config", "validator": lambda: _validate_saved_url()},
-        {"name": "bypass_url", "validator": lambda: _validate_url(URL_SOURCES["bypass"])},
-        {"name": "external_source", "validator": lambda: _validate_external()},
-        {"name": "default", "validator": lambda: _validate_fallback()}
-    ]:
-        if result := strategy["validator"]():
-            return result
-
-    return URL_SOURCES["default"]  # Ultimate fallback
-
     # Validation implementations
     def _validate_sites_json():
+        """Validate URL from sites.json file."""
         sites_json = VSPath('special://home/addons/plugin.video.vstream/resources/sites.json').replace('\\', '/')
         try:
             with open(sites_json) as f:
-                candidate = json.load(f).get("sites", {}).get("livetv", {}).get("url", "")
-                if response := safe_request(candidate):
-                    valid, final_url = validate_content(response)
-                    if valid:
-                        save_valid_url(final_url)
-                        return final_url
+                data = json.load(f)
+                candidate = data.get("sites", {}).get("livetv", {}).get("url", "")
+                if not candidate:
+                    return None
+                
+                response = safe_request(candidate)
+                valid, final_url = validate_content(response)
+                if valid:
+                    save_valid_url(final_url)
+                    return final_url
         except Exception as e:
             VSlog(f"sites.json validation failed: {str(e)}")
         return None
 
     def _validate_saved_url():
+        """Validate URL from config file."""
         try:
             config = get_config()
-            if saved_url := config.get("livetv", "current_url", fallback=""):
-                if response := safe_request(saved_url):
-                    valid, final_url = validate_content(response)
-                    if valid:
-                        return final_url
+            saved_url = config.get("livetv", "current_url", fallback="")
+            if not saved_url:
+                return None
+                
+            response = safe_request(saved_url)
+            valid, final_url = validate_content(response)
+            if valid:
+                return final_url
         except Exception as e:
             VSlog(f"Saved URL validation failed: {str(e)}")
         return None
 
-    def _validate_url(url):
-        if response := safe_request(url):
-            valid, final_url = validate_content(response)
-            if valid:
-                save_valid_url(final_url)
-                return final_url
+    def _validate_url(target_url):
+        """Generic URL validation."""
+        response = safe_request(target_url)
+        valid, final_url = validate_content(response)
+        if valid:
+            save_valid_url(final_url)
+            return final_url
         return None
 
     def _validate_external():
+        """Extract URL from external source."""
         try:
-            if not (response := safe_request(URL_SOURCES["external"])):
-                return None
-                
-            if "LiveTV est accessible via" not in response.text:
+            response = safe_request(URL_SOURCES["external"])
+            if not response or "LiveTV est accessible via" not in response.text:
                 return None
 
-            # Improved URL extraction
+            # Find and clean URLs
             matches = re.findall(r'https?://[^\s\'"<>]+', response.text)
-            for url in matches:
-                parsed = urlparse(url)
+            for raw_url in matches:
+                parsed = urlparse(raw_url)
                 if "livetv" in parsed.netloc.lower():
-                    cleaned = parsed._replace(path=parsed.path.rstrip('/') + '/').geturl()
+                    cleaned = parsed._replace(
+                        scheme="https",
+                        path=parsed.path.rstrip('/') + '/'
+                    ).geturl()
                     if result := _validate_url(cleaned):
                         return result
         except Exception as e:
@@ -5780,13 +5782,33 @@ def get_livetv_url():
         return None
 
     def _validate_fallback():
-        if response := safe_request(URL_SOURCES["default"]):
-            valid, final_url = validate_content(response)
-            if valid:
-                save_valid_url(final_url)
-                return final_url
-            return final_url  # Return even if invalid as ultimate fallback
+        """Final fallback validation."""
+        response = safe_request(URL_SOURCES["default"])
+        valid, final_url = validate_content(response)
+        if valid:
+            save_valid_url(final_url)
+            return final_url
         return URL_SOURCES["default"]
+
+    # Strategy execution order
+    strategies = [
+        {"name": "sites.json", "validator": _validate_sites_json},
+        {"name": "saved_config", "validator": _validate_saved_url},
+        {"name": "bypass_url", "validator": partial(_validate_url, URL_SOURCES["bypass"])},
+        {"name": "external_source", "validator": _validate_external},
+        {"name": "default_fallback", "validator": _validate_fallback}
+    ]
+
+    # Execute strategies in order
+    for strategy in strategies:
+        VSlog(f"Attempting strategy: {strategy['name']}")
+        result = strategy["validator"]()
+        if result:
+            VSlog(f"Success with {strategy['name']}: {result}")
+            return result
+
+    VSlog("All strategies failed, using hardcoded default")
+    return URL_SOURCES["default"]
 
 def set_livetv_url(url):
     """Met à jour l'URL de LiveTV dans le fichier sites.json."""
