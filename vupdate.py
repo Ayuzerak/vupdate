@@ -7173,18 +7173,30 @@ def load():
     with open(file_path, 'r', encoding='utf-8') as f:
         content = f.read()
 
-    # Apply replacements
-    for pattern, replacement in replacements.items():
-        content = re.sub(
-            pattern, 
-            replacement.replace('\\', '\\\\'),  # Escape backslashes for regex
-            content, 
-            flags=re.DOTALL|re.MULTILINE
-        )
+    changed = False
 
-    # Write modified content back
-    with open(file_path, 'w', encoding='utf-8') as f:
-        f.write(content)
+    # Apply replacements and track changes
+    for pattern, replacement in replacements.items():
+        # Escape backslashes for regex replacement
+        replacement_escaped = replacement.replace('\\', '\\\\')
+        # Perform substitution and check if any replacements were made
+        new_content, count = re.subn(
+            pattern, 
+            replacement_escaped, 
+            content, 
+            flags=re.DOTALL | re.MULTILINE
+        )
+        if count > 0:
+            changed = True
+            content = new_content
+
+    # Write modified content back only if changes were detected
+    if changed:
+        with open(file_path, 'w', encoding='utf-8') as f:
+            f.write(content)
+        VSlog("Elitegol module updated successfully")
+    else:
+        VSlog("Elitegol module already up to date")
 
 def update_checkhoster_hosterpy_function():
 
