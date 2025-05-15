@@ -5695,8 +5695,9 @@ def get_livetv_url():
         return None
     
     def validate_url_content(url):
-        """Check if the URL's content contains the keyword 'matchs'.
+        """Check if the URL's content contains required keywords.
         Returns the final effective URL (after redirection) if valid, or None.
+        Logs detailed reasons for validation success/failure.
         """
         try:
             headers = {
@@ -5709,37 +5710,60 @@ def get_livetv_url():
             response = requests.get(url, headers=headers, timeout=15, allow_redirects=True)
             response_lowered = response.text.lower()
             effective_url = response.url  # Final URL after any redirects
-            
-            if "matchs" in response_lowered and "direct" in response_lowered and "nba" in response_lowered:
+
+            # List of required keywords and their validation status
+            required_keywords = {
+                "matchs": False,
+                "direct": False,
+                "nba": False
+            }
+
+            # Check each keyword individually and log results
+            for keyword in required_keywords:
+                if keyword in response_lowered:
+                    required_keywords[keyword] = True
+                    VSlog(f"Keyword check ✓ - '{keyword}' found in {effective_url}")
+                else:
+                    VSlog(f"Keyword check ✗ - '{keyword}' missing in {effective_url}")
+
+            # Determine if all keywords are present
+            all_keywords_present = all(required_keywords.values())
+        
+            if all_keywords_present:
                 if effective_url != url:
                     VSlog(f"Redirection detected: {url} -> {effective_url}")
+                VSlog(f"Validation SUCCESS for {effective_url} - All required keywords found")
                 return effective_url
             else:
-                VSlog(f"Content validation failed for {url}: keyword 'matchs' not found")
+                missing = [k for k, v in required_keywords.items() if not v]
+                VSlog(f"Validation FAILED for {effective_url} - Missing keywords: {', '.join(missing)}")
                 return None
+
         except Exception as e:
-            VSlog(f"Content validation failed for {url}: {str(e)}")
+            VSlog(f"Validation ERROR for {url}: {str(e)}")
+            import traceback  # For detailed error logging
+            VSlog(f"Traceback: {traceback.format_exc()}")  # Log full error stack
             return None
 
     current_valid_url = None
     
-    # Candidate 0: Try the URL saved in the json file.
+    # Candidate 0: Try the URL saved in the json file with validation.
     if not current_valid_url:
         sites_json = VSPath('special://home/addons/plugin.video.vstream/resources/sites.json').replace('\\', '/')
-    
         try:
-            # Load the JSON file
             with open(sites_json, 'r') as fichier:
                 data = json.load(fichier)
-
-            if 'livetv' in data['sites']:
-                effective_url = data['sites']['livetv']['url']
-                if effective_url:
-                    VSlog(f"sites.json saved URL is valid: {effective_url}")
-                    save_valid_url(effective_url)
-                    current_valid_url = effective_url
+            if 'livetv' in data.get('sites', {}):
+                candidate_url = data['sites']['livetv'].get('url', '')
+                if candidate_url:
+                    VSlog(f"Found URL in sites.json: {candidate_url}")
+                    effective_url = validate_url_content(candidate_url)
+                    if effective_url:
+                        VSlog(f"sites.json URL is valid: {effective_url}")
+                        save_valid_url(effective_url)
+                        current_valid_url = effective_url
         except Exception as e:
-            VSlog(f"Erreur lors de la récupération de l'URL de LiveTV depuis le fichier json : {e}")
+            VSlog(f"Error retrieving URL from sites.json: {e}")
 
     # Candidate 1: Try the URL saved in the config file.
     if not current_valid_url:
@@ -5775,17 +5799,17 @@ def get_livetv_url():
             target_position = content.find("LiveTV est accessible via")
             if target_position != -1:
                 content_after_target = content[target_position:]
+                # Improved regex to capture URLs more accurately
                 web_addresses = re.findall(
-                    r'https?://[\w\.-]+(?:\.[\w\.-]+)+(?::\d+)?(?:/[\w\.-]*)*(?:\?[\w&=.-]*)?(?:#[\w.-]*)?',
+                    r'https?://(?:[a-zA-Z]|[0-9]|[$-_@.&+]|[!*\\(\\),]|(?:%[0-9a-fA-F][0-9a-fA-F]))+',
                     content_after_target
                 )
                 if web_addresses:
-                    # Prefer the second match if it contains "livetv"
-                    if len(web_addresses) > 1 and "livetv" in web_addresses[1]:
-                        candidate_url = web_addresses[1].replace("httpss", "https").rstrip('/') + '/'
-                    else:
-                        candidate_url = web_addresses[0].replace("httpss", "https").rstrip('/') + '/'
-                    VSlog(f"Candidate URL found from external source: {candidate_url}")
+                    # Clean and prioritize URLs containing 'livetv'
+                    candidate_urls = [url.replace("httpss", "https").rstrip('/') + '/' for url in web_addresses]
+                    # Find the first URL containing 'livetv' or fallback to the first
+                    candidate_url = next((url for url in candidate_urls if 'livetv' in url.lower()), None) or candidate_urls[0]
+                    VSlog(f"Candidate URL from external source: {candidate_url}")
                     effective_url = validate_url_content(candidate_url)
                     if effective_url:
                         VSlog(f"External candidate URL is valid: {effective_url}")
@@ -5803,7 +5827,7 @@ def get_livetv_url():
             current_valid_url = effective_url
         else:
             current_valid_url = default_url
-            VSlog("Default URL failed content validation, returning as fallback")
+            VSlog("Default URL failed validation, using as fallback")
     
     return current_valid_url
 
