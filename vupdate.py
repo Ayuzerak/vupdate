@@ -5652,187 +5652,141 @@ def set_elitegol_url(url):
         VSlog(f"Error while setting EliteGol URL: {e}")
         
 def get_livetv_url():
-    """Retrieve LiveTV URL with content validation using several means.
-    Only a valid final (redirected) URL is saved to the config file when detected.
-    The default URL is used only as a last resort.
-    """
+    """Retrieve LiveTV URL with validation through multiple fallback strategies."""
     VSlog("Starting LiveTV URL retrieval process")
-    
+
+    # Constants
+    HEADERS = {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36"
+    }
     CONFIG_FILE = VSPath('special://home/addons/service.vstreamupdate/site_config.ini').replace('\\', '/')
-    default_url = "https://livetv.sx"
-    bypass_url = "https://livetv774.me"
-    
-    def save_valid_url(url):
+    URL_SOURCES = {
+        "default": "https://livetv.sx",
+        "bypass": "https://livetv774.me",
+        "external": "https://top-infos.com/live-tv-sx-nouvelle-adresse/"
+    }
+
+    # Helper functions
+    def safe_request(url):
+        """Handle requests with SSL error fallback."""
         try:
-            config = configparser.ConfigParser()
-            if os.path.exists(CONFIG_FILE):
-                config.read(CONFIG_FILE)
-            if "livetv" not in config:
-                config["livetv"] = {}
-            config["livetv"]["current_url"] = url
-            with open(CONFIG_FILE, "w") as configfile:
-                config.write(configfile)
-            VSlog(f"URL saved successfully: {url}")
+            return requests.get(url, headers=HEADERS, timeout=15, allow_redirects=True, verify=True)
+        except requests.exceptions.SSLError:
+            VSlog(f"SSL Error, retrying without verification: {url}")
+            return requests.get(url, headers=HEADERS, timeout=15, allow_redirects=True, verify=False)
         except Exception as e:
-            VSlog(f"Cannot save valid URL: {str(e)}")
-    
-    def load_and_validate_url():
-        """Attempt to load a URL from config and validate it.
-        Returns the effective URL if valid, otherwise None.
-        """
-        VSlog("load_and_validate_url()")
-        try:
-            config = configparser.ConfigParser()
-            if os.path.exists(CONFIG_FILE):
-                config.read(CONFIG_FILE)
-                if "livetv" in config and "current_url" in config["livetv"]:
-                    saved_url = config["livetv"]["current_url"]
-                    effective_url = validate_url_content(saved_url)
-                    if effective_url:
-                        return effective_url
-        except Exception as e:
-            VSlog(f"URL load error: {str(e)}")
-        return None
-    
-    def validate_url_content(url):
-        """Check if the URL's content contains required keywords.
-        Returns the final effective URL (after redirection) if valid, or None.
-        Logs detailed reasons for validation success/failure.
-        """
-        try:
-            headers = {
-                "User-Agent": (
-                    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-                    "AppleWebKit/537.36 (KHTML, like Gecko) "
-                    "Chrome/91.0.4472.124 Safari/537.36"
-                )
-            }
-            # First attempt with SSL verification
-            response = requests.get(url, headers=headers, timeout=15, allow_redirects=True, verify=True)
-        except requests.exceptions.SSLError as ssl_err:
-            VSlog(f"SSL Certificate Error (1st attempt): {ssl_err}")
-            VSlog("Retrying without SSL verification...")
-            # Second attempt without verification
-            response = requests.get(url, headers=headers, timeout=15, allow_redirects=True, verify=False)
-            
-        try:            
-            response_lowered = response.text.lower()
-            effective_url = response.url  # Final URL after any redirects
-
-            # List of required keywords and their validation status
-            required_keywords = {
-                "matchs": False,
-                "direct": False,
-                "nba": False
-            }
-
-            # Check each keyword individually and log results
-            for keyword in required_keywords:
-                if keyword in response_lowered:
-                    required_keywords[keyword] = True
-
-            # Determine if all keywords are present
-            all_keywords_present = all(required_keywords.values())
-        
-            if all_keywords_present:
-                if effective_url != url:
-                    VSlog(f"Redirection detected: {url} -> {effective_url}")
-                VSlog(f"✓ -Validation SUCCESS for {effective_url} - All required keywords found")
-                return effective_url
-            else:
-                missing = [k for k, v in required_keywords.items() if not v]
-                VSlog(f"✗ -Validation FAILED for {effective_url} - Missing keywords: {', '.join(missing)}")
-                return None
-
-        except Exception as e:
-            VSlog(f"Validation ERROR for {url}: {str(e)}")
+            VSlog(f"Request failed for {url}: {str(e)}")
             return None
 
-    current_valid_url = None
-    
-    # Candidate 0: Try the URL saved in the json file with validation.
-    if not current_valid_url:
+    def validate_content(response):
+        """Check for required keywords in response content."""
+        REQUIRED_KEYWORDS = {"matchs", "direct", "nba"}
+        if not response:
+            return False, None
+        
+        content = response.text.lower()
+        found_keywords = {kw for kw in REQUIRED_KEYWORDS if kw in content}
+        missing = REQUIRED_KEYWORDS - found_keywords
+        
+        if not missing:
+            return True, response.url
+        VSlog(f"Missing keywords: {', '.join(missing)}")
+        return False, response.url
+
+    def get_config():
+        """Handle config file operations."""
+        config = configparser.ConfigParser()
+        if os.path.exists(CONFIG_FILE):
+            config.read(CONFIG_FILE)
+        return config
+
+    def save_valid_url(url):
+        """Persist valid URL to config."""
+        try:
+            config = get_config()
+            config["livetv"] = {"current_url": url}
+            with open(CONFIG_FILE, "w") as f:
+                config.write(f)
+            VSlog(f"URL saved: {url}")
+        except Exception as e:
+            VSlog(f"Config save failed: {str(e)}")
+
+    # Validation pipeline
+    for strategy in [
+        {"name": "sites.json", "validator": lambda: _validate_sites_json()},
+        {"name": "saved_config", "validator": lambda: _validate_saved_url()},
+        {"name": "bypass_url", "validator": lambda: _validate_url(URL_SOURCES["bypass"])},
+        {"name": "external_source", "validator": lambda: _validate_external()},
+        {"name": "default", "validator": lambda: _validate_fallback()}
+    ]:
+        if result := strategy["validator"]():
+            return result
+
+    return URL_SOURCES["default"]  # Ultimate fallback
+
+    # Validation implementations
+    def _validate_sites_json():
         sites_json = VSPath('special://home/addons/plugin.video.vstream/resources/sites.json').replace('\\', '/')
         try:
-            with open(sites_json, 'r') as fichier:
-                data = json.load(fichier)
-            if 'livetv' in data.get('sites', {}):
-                candidate_url = data['sites']['livetv'].get('url', '')
-                if candidate_url:
-                    VSlog(f"Found URL in sites.json: {candidate_url}")
-                    effective_url = validate_url_content(candidate_url)
-                    if effective_url:
-                        VSlog(f"sites.json URL is valid: {effective_url}")
-                        save_valid_url(effective_url)
-                        current_valid_url = effective_url
+            with open(sites_json) as f:
+                candidate = json.load(f).get("sites", {}).get("livetv", {}).get("url", "")
+                if response := safe_request(candidate):
+                    valid, final_url = validate_content(response)
+                    if valid:
+                        save_valid_url(final_url)
+                        return final_url
         except Exception as e:
-            VSlog(f"Error retrieving URL from sites.json: {e}")
+            VSlog(f"sites.json validation failed: {str(e)}")
+        return None
 
-    # Candidate 1: Try the URL saved in the config file.
-    if not current_valid_url:
-        effective_url = load_and_validate_url()
-        if effective_url:
-            VSlog(f"Saved URL is valid: {effective_url}")
-            save_valid_url(effective_url)
-            current_valid_url = effective_url
-
-    # Candidate 2: Try the bypass URL.
-    if not current_valid_url:
-        effective_url = validate_url_content(bypass_url)
-        if effective_url:
-            VSlog(f"Bypass URL is valid: {effective_url}")
-            save_valid_url(effective_url)
-            current_valid_url = effective_url
-
-    # Candidate 3: Try to extract URL from an external source.
-    if not current_valid_url:
+    def _validate_saved_url():
         try:
-            response = requests.get(
-                "https://top-infos.com/live-tv-sx-nouvelle-adresse/",
-                headers={
-                    "User-Agent": (
-                        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-                        "AppleWebKit/537.36 (KHTML, like Gecko) "
-                        "Chrome/91.0.4472.124 Safari/537.36"
-                    )
-                },
-                timeout=10
-            )
-            content = response.text
-            target_position = content.find("LiveTV est accessible via")
-            if target_position != -1:
-                content_after_target = content[target_position:]
-                # Improved regex to capture URLs more accurately
-                web_addresses = re.findall(
-                    r'https?://(?:[a-zA-Z]|[0-9]|[$-_@.&+]|[!*\\(\\),]|(?:%[0-9a-fA-F][0-9a-fA-F]))+',
-                    content_after_target
-                )
-                if web_addresses:
-                    # Clean and prioritize URLs containing 'livetv'
-                    candidate_urls = [url.replace("httpss", "https").rstrip('/') + '/' for url in web_addresses]
-                    # Find the first URL containing 'livetv' or fallback to the first
-                    candidate_url = next((url for url in candidate_urls if 'livetv' in url.lower()), None) or candidate_urls[0]
-                    VSlog(f"Candidate URL from external source: {candidate_url}")
-                    effective_url = validate_url_content(candidate_url)
-                    if effective_url:
-                        VSlog(f"External candidate URL is valid: {effective_url}")
-                        save_valid_url(effective_url)
-                        current_valid_url = effective_url
+            config = get_config()
+            if saved_url := config.get("livetv", "current_url", fallback=""):
+                if response := safe_request(saved_url):
+                    valid, final_url = validate_content(response)
+                    if valid:
+                        return final_url
         except Exception as e:
-            VSlog(f"Error retrieving URL from external source: {str(e)}")
-    
-    # Candidate 4: Last resort, use the default URL.
-    if not current_valid_url:
-        effective_url = validate_url_content(default_url)
-        if effective_url:
-            VSlog(f"Default URL is valid: {effective_url}")
-            save_valid_url(effective_url)
-            current_valid_url = effective_url
-        else:
-            current_valid_url = default_url
-            VSlog("Default URL failed validation, using as fallback")
-    
-    return current_valid_url
+            VSlog(f"Saved URL validation failed: {str(e)}")
+        return None
+
+    def _validate_url(url):
+        if response := safe_request(url):
+            valid, final_url = validate_content(response)
+            if valid:
+                save_valid_url(final_url)
+                return final_url
+        return None
+
+    def _validate_external():
+        try:
+            if not (response := safe_request(URL_SOURCES["external"])):
+                return None
+                
+            if "LiveTV est accessible via" not in response.text:
+                return None
+
+            # Improved URL extraction
+            matches = re.findall(r'https?://[^\s\'"<>]+', response.text)
+            for url in matches:
+                parsed = urlparse(url)
+                if "livetv" in parsed.netloc.lower():
+                    cleaned = parsed._replace(path=parsed.path.rstrip('/') + '/').geturl()
+                    if result := _validate_url(cleaned):
+                        return result
+        except Exception as e:
+            VSlog(f"External validation failed: {str(e)}")
+        return None
+
+    def _validate_fallback():
+        if response := safe_request(URL_SOURCES["default"]):
+            valid, final_url = validate_content(response)
+            if valid:
+                save_valid_url(final_url)
+                return final_url
+            return final_url  # Return even if invalid as ultimate fallback
+        return URL_SOURCES["default"]
 
 def set_livetv_url(url):
     """Met à jour l'URL de LiveTV dans le fichier sites.json."""
