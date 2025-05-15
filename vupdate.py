@@ -5788,7 +5788,7 @@ def get_livetv_url():
         if valid:
             save_valid_url(final_url)
             return final_url
-        return URL_SOURCES["default"]
+        URL_SOURCES["default"] = final_url
 
     # Strategy execution order
     strategies = [
