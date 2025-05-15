@@ -5707,7 +5707,15 @@ def get_livetv_url():
                     "Chrome/91.0.4472.124 Safari/537.36"
                 )
             }
-            response = requests.get(url, headers=headers, timeout=15, allow_redirects=True)
+            # First attempt with SSL verification
+            response = requests.get(url, headers=headers, timeout=15, allow_redirects=True, verify=True)
+        except requests.exceptions.SSLError as ssl_err:
+            VSlog(f"SSL Certificate Error (1st attempt): {ssl_err}")
+            VSlog("Retrying without SSL verification...")
+            # Second attempt without verification
+            response = requests.get(url, headers=headers, timeout=15, allow_redirects=True, verify=False)
+            
+        try:            
             response_lowered = response.text.lower()
             effective_url = response.url  # Final URL after any redirects
 
@@ -5738,8 +5746,6 @@ def get_livetv_url():
 
         except Exception as e:
             VSlog(f"Validation ERROR for {url}: {str(e)}")
-            import traceback  # For detailed error logging
-            VSlog(f"Traceback: {traceback.format_exc()}")  # Log full error stack
             return None
 
     current_valid_url = None
