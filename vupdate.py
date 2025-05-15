@@ -5722,9 +5722,6 @@ def get_livetv_url():
             for keyword in required_keywords:
                 if keyword in response_lowered:
                     required_keywords[keyword] = True
-                    VSlog(f"Keyword check ✓ - '{keyword}' found in {effective_url}")
-                else:
-                    VSlog(f"Keyword check ✗ - '{keyword}' missing in {effective_url}")
 
             # Determine if all keywords are present
             all_keywords_present = all(required_keywords.values())
@@ -5732,11 +5729,11 @@ def get_livetv_url():
             if all_keywords_present:
                 if effective_url != url:
                     VSlog(f"Redirection detected: {url} -> {effective_url}")
-                VSlog(f"Validation SUCCESS for {effective_url} - All required keywords found")
+                VSlog(f"✓ -Validation SUCCESS for {effective_url} - All required keywords found")
                 return effective_url
             else:
                 missing = [k for k, v in required_keywords.items() if not v]
-                VSlog(f"Validation FAILED for {effective_url} - Missing keywords: {', '.join(missing)}")
+                VSlog(f"✗ -Validation FAILED for {effective_url} - Missing keywords: {', '.join(missing)}")
                 return None
 
         except Exception as e:
