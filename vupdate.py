@@ -5782,33 +5782,31 @@ def get_livetv_url():
         return None
 
     def _validate_fallback():
-        """Final fallback validation."""
-        response = safe_request(URL_SOURCES["default"])
-        valid, final_url = validate_content(response)
-        if valid:
-            save_valid_url(final_url)
-            return final_url
-        URL_SOURCES["default"] = final_url
-
-    # Strategy execution order
-    strategies = [
-        {"name": "sites.json", "validator": _validate_sites_json},
-        {"name": "saved_config", "validator": _validate_saved_url},
-        {"name": "bypass_url", "validator": partial(_validate_url, URL_SOURCES["bypass"])},
-        {"name": "external_source", "validator": _validate_external},
-        {"name": "default_fallback", "validator": _validate_fallback}
-    ]
-
-    # Execute strategies in order
-    for strategy in strategies:
-        VSlog(f"Attempting strategy: {strategy['name']}")
-        result = strategy["validator"]()
-        if result:
-            VSlog(f"Success with {strategy['name']}: {result}")
-            return result
-
-    VSlog("All strategies failed, using hardcoded default")
-    return URL_SOURCES["default"]
+        """Final fallback that returns URL after redirects, even if validation fails."""
+        try:
+            # Attempt request with original default
+            response = safe_request(URL_SOURCES["default"])
+        
+            if response:
+                # Always capture final URL after redirects
+                final_url = response.url
+                valid, _ = validate_content(response)  # Check but ignore validation result
+            
+                # Update default URL to followed redirects
+                URL_SOURCES["default"] = final_url
+            
+                # Only save if validation passed
+                if valid:
+                    save_valid_url(final_url)
+            
+                VSlog(f"Fallback returning URL (validation {'passed' if valid else 'failed'}): {final_url}")
+                return final_url
+        
+        except Exception as e:
+            VSlog(f"Fallback validation error: {str(e)}")
+    
+        # If all else fails, return original hardcoded default
+        return URL_SOURCES["default"]
 
 def set_livetv_url(url):
     """Met à jour l'URL de LiveTV dans le fichier sites.json."""
