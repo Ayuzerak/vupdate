@@ -4506,7 +4506,7 @@ def get_wiflix_url():
 
             # Validation parameters
             POSITIVE_KEYWORDS = {'wiflix', 'ajout', 'film', 'serie', 'streaming', 'regarder'}
-            NEGATIVE_KEYWORDS = {'blocked', '404', 'error', 'not found'}
+            NEGATIVE_KEYWORDS = {'404', 'error', 'not found'}
 
             # Negative check
             if any(nk in content for nk in NEGATIVE_KEYWORDS):
