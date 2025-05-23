@@ -4510,7 +4510,7 @@ def get_wiflix_url():
     
     current_valid_url = None
     
-    # Candidate 0: Check sites.json for pre-saved URL
+    # Candidate 1: Check sites.json for pre-saved URL
     if not current_valid_url:
         sites_json = VSPath('special://home/addons/plugin.video.vstream/resources/sites.json').replace('\\', '/')
         try:
@@ -4528,14 +4528,14 @@ def get_wiflix_url():
         except Exception as e:
             VSlog(f"Error reading sites.json: {str(e)}")
     
-    # Candidate 1: Check config file
+    # Candidate 2: Check config file
     if not current_valid_url:
         effective_url = load_and_validate_url()
         if effective_url:
             current_valid_url = effective_url
             return current_valid_url
     
-    # Candidate 2: Extract from site_info URL
+    # Candidate 3: Extract from site_info URL
     if not current_valid_url:
         try:
             sites_json = VSPath('special://home/addons/plugin.video.vstream/resources/sites.json').replace('\\', '/')
@@ -4568,8 +4568,75 @@ def get_wiflix_url():
                     VSlog("No redirect URL found in site_info content")
         except Exception as e:
             VSlog(f"Error processing site_info: {str(e)}")
+
+# Candidate 4: Extract from wiflix.name with redirect handling
+if not current_valid_url:
+    try:
+        VSlog("Attempting wiflix.name domain extraction with redirect handling")
+        
+        headers = {
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36",
+            "Accept-Language": "en-US,en;q=0.9"
+        }
+
+        # Follow redirects and get final URL
+        response = requests.get(
+            "http://www.wiflix.name",
+            headers=headers,
+            timeout=15,
+            allow_redirects=True
+        )
+        response.raise_for_status()
+        
+        VSlog(f"Final URL after redirects: {response.url}")
+        content = response.text
+
+        # First try to find "Nouveau site" section
+        nouveau_match = re.search(
+            r'<div class="alert alert-success"[^>]*>.*?<a href="(.*?)"[^>]*>.*?Nouveau site',
+            content,
+            re.DOTALL | re.IGNORECASE
+        )
+
+        if nouveau_match:
+            extracted_url = nouveau_match.group(1).strip()
+            VSlog(f"Found 'Nouveau site' URL: {extracted_url}")
+        else:
+            # Fallback to first valid alert link
+            first_alert_match = re.search(
+                r'<div class="alert alert-success"[^>]*>.*?<a href="(.*?)"',
+                content,
+                re.DOTALL | re.IGNORECASE
+            )
+            if first_alert_match:
+                extracted_url = first_alert_match.group(1).strip()
+                VSlog(f"Using first alert URL: {extracted_url}")
+            else:
+                extracted_url = None
+                VSlog("No valid alert links found in content")
+
+        if extracted_url:
+            # Normalize URL format
+            parsed = urlparse(extracted_url)
+            if not parsed.scheme:
+                extracted_url = f"http://{extracted_url}"
+            normalized_url = urlparse(extracted_url)._replace(path="", query="", fragment="").geturl() + "/"
+            
+            # Validate before use
+            VSlog(f"Normalized URL: {normalized_url}")
+            effective_url = validate_url_content(normalized_url)
+            
+            if effective_url:
+                current_valid_url = effective_url
+                save_valid_url(current_valid_url)
+                return current_valid_url
+
+    except requests.HTTPError as e:
+        VSlog(f"HTTP error fetching wiflix.name: {e.response.status_code}")
+    except Exception as e:
+        VSlog(f"Error during wiflix.name processing: {str(e)}")
     
-    # Candidate 3: Default URL
+    # Candidate 5: Default URL
     if not current_valid_url:
         effective_url = validate_url_content(default_url)
         if effective_url:
