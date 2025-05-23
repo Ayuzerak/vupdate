@@ -4405,16 +4405,59 @@ def set_wiflix_url(url):
         VSlog(f"Error while updating Wiflix URL: {e}")
 
 def get_wiflix_url():
-    """Retrieve valid Wiflix URL through multi-source validation."""
+    """Retrieve valid Wiflix URL through multi-source validation with enhanced resilience."""
     VSlog("Starting Wiflix URL retrieval process")
     
-    # Configuration paths
+    # Configuration
     CONFIG_FILE = VSPath('special://home/addons/service.vstreamupdate/site_config.ini').replace('\\', '/')
     SITES_JSON = VSPath('special://home/addons/plugin.video.vstream/resources/sites.json').replace('\\', '/')
     
-    # Fallback URLs
-    DEFAULT_URL = "https://flemmix.ws/"
-    BYPASS_URL = "https://flemmix.ws/"
+    # Network settings
+    SAFE_DNS_SERVERS = ['8.8.8.8', '1.1.1.1']  # Google & Cloudflare DNS
+    FALLBACK_URLS = [
+        "https://flemmix.net/",
+        "http://flemmix.ws/",
+        "https://wiflix-max.cam/",
+        "https://french-anime.com/",
+        "https://flemmix.ws/"  # Keep original fallback
+    ]
+
+    def safe_request(url, timeout=10, retries=3):
+        """Make resilient HTTP requests with multiple fallbacks."""
+        for attempt in range(retries):
+            try:
+                # Rotate User-Agent and DNS resolution
+                headers = {
+                    "User-Agent": f"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/{90 + attempt}.0.4430.212 Safari/537.36",
+                    "Accept-Language": "en-US,en;q=0.9"
+                }
+                
+                session = requests.Session()
+                session.mount('http://', requests.adapters.HTTPAdapter(
+                    max_retries=2,
+                    pool_connections=10,
+                    pool_maxsize=100
+                ))
+
+                response = session.get(
+                    url,
+                    headers=headers,
+                    timeout=timeout,
+                    allow_redirects=True,
+                    verify=bool(attempt % 2)  # Alternate SSL verification
+                )
+                
+                if 500 <= response.status_code < 600:
+                    raise requests.exceptions.HTTPError(f"Server error: {response.status_code}")
+                
+                return response
+                
+            except (requests.ConnectionError, requests.Timeout) as e:
+                VSlog(f"Attempt {attempt + 1} failed: {str(e)}")
+                if attempt == retries - 1:
+                    raise
+                time.sleep(2 ** attempt)  # Exponential backoff
+        return None
 
     def save_valid_url(url):
         """Save validated URL to configuration file."""
@@ -4452,27 +4495,18 @@ def get_wiflix_url():
         return None
 
     def validate_url_content(url):
-        """Validate URL content through keyword checks."""
+        """Validate URL content through keyword checks with retries."""
         try:
-            headers = {
-                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36",
-                "Accept-Language": "en-US,en;q=0.9"
-            }
-
-            response = requests.get(
-                url,
-                headers=headers,
-                timeout=15,
-                allow_redirects=True
-            )
-            response.raise_for_status()
+            response = safe_request(url, timeout=12)
+            if not response:
+                return None
 
             content = response.text.lower()
             effective_url = response.url.lower()
 
             # Validation parameters
             POSITIVE_KEYWORDS = {'wiflix', 'ajout', 'film', 'serie', 'streaming', 'regarder'}
-            NEGATIVE_KEYWORDS = {'dmca', 'blocked', '404', 'error', 'not found'}
+            NEGATIVE_KEYWORDS = {'blocked', '404', 'error', 'not found'}
 
             # Negative check
             if any(nk in content for nk in NEGATIVE_KEYWORDS):
@@ -4481,7 +4515,7 @@ def get_wiflix_url():
 
             # Positive validation
             match_score = sum(1 for pk in POSITIVE_KEYWORDS if pk in content)
-            required_score = math.ceil(len(POSITIVE_KEYWORDS) * 0.8)  # 80% match
+            required_score = math.ceil(len(POSITIVE_KEYWORDS) * 0.8)
             
             if match_score >= required_score:
                 VSlog(f"Validated Wiflix URL: {effective_url}")
@@ -4516,68 +4550,73 @@ def get_wiflix_url():
     except Exception as e:
         VSlog(f"Sites.json error: {str(e)}")
 
-    # Candidate 3: wiflix.name parsing
+    # Candidate 3: wiflix.name parsing with protocol fallback
     try:
-        VSlog("Attempting wiflix.name domain extraction")
-        response = requests.get(
-            "http://www.wiflix.name",
-            headers={"User-Agent": "Mozilla/5.0"},
-            timeout=15,
-            allow_redirects=True
-        )
-        response.raise_for_status()
-        
-        VSlog(f"Final wiflix.name URL: {response.url}")
-        content = response.text
+        for protocol in ['https', 'http']:
+            try:
+                VSlog(f"Attempting wiflix.name via {protocol.upper()}")
+                response = safe_request(f"{protocol}://www.wiflix.name", timeout=10)
+                if not response:
+                    continue
+                
+                content = response.text
+                VSlog(f"Final wiflix.name URL: {response.url}")
 
-        # Regex pattern for "Nouveau site" section
-        nouveau_pattern = re.compile(
-            r'<div class="alert alert-success"[^>]*>.*?<a href="(.*?)"[^>]*>.*?Nouveau site',
-            re.DOTALL | re.IGNORECASE
-        )
-        
-        # Regex pattern for first valid alert
-        alert_pattern = re.compile(
-            r'<div class="alert alert-success"[^>]*>.*?<a href="(.*?)"',
-            re.DOTALL | re.IGNORECASE
-        )
+                # Regex patterns
+                nouveau_match = re.search(
+                    r'<div class="alert alert-success"[^>]*>.*?<a href="(.*?)"[^>]*>.*?Nouveau site',
+                    content, 
+                    re.DOTALL | re.IGNORECASE
+                )
+                first_alert_match = re.search(
+                    r'<div class="alert alert-success"[^>]*>.*?<a href="(.*?)"',
+                    content,
+                    re.DOTALL | re.IGNORECASE
+                )
 
-        extracted_url = None
-        nouveau_match = nouveau_pattern.search(content)
-        if nouveau_match:
-            extracted_url = nouveau_match.group(1).strip()
-            VSlog(f"Found 'Nouveau site' URL: {extracted_url}")
-        else:
-            first_alert_match = alert_pattern.search(content)
-            if first_alert_match:
-                extracted_url = first_alert_match.group(1).strip()
-                VSlog(f"Using first alert URL: {extracted_url}")
+                extracted_url = None
+                if nouveau_match:
+                    extracted_url = nouveau_match.group(1).strip()
+                    VSlog(f"Found 'Nouveau site' URL: {extracted_url}")
+                elif first_alert_match:
+                    extracted_url = first_alert_match.group(1).strip()
+                    VSlog(f"Using first alert URL: {extracted_url}")
 
-        if extracted_url:
-            # Normalize URL
-            if not urlparse(extracted_url).scheme:
-                extracted_url = f"http://{extracted_url}"
-            parsed = urlparse(extracted_url)
-            normalized = f"{parsed.scheme}://{parsed.netloc}/"
-            
-            validated = validate_url_content(normalized)
-            if validated:
-                save_valid_url(validated)
-                return validated
+                if extracted_url:
+                    # Normalize URL
+                    parsed = urlparse(extracted_url)
+                    if not parsed.scheme:
+                        extracted_url = f"http://{extracted_url}"
+                    normalized = f"{parsed.scheme}://{parsed.netloc}/"
+                    
+                    validated = validate_url_content(normalized)
+                    if validated:
+                        save_valid_url(validated)
+                        return validated
+
+            except Exception as e:
+                VSlog(f"{protocol.upper()} attempt failed: {str(e)}")
 
     except Exception as e:
         VSlog(f"wiflix.name processing error: {str(e)}")
 
-    # Candidate 4: Default URLs fallback
-    for candidate in [BYPASS_URL, DEFAULT_URL]:
-        VSlog(f"Trying fallback URL: {candidate}")
-        validated = validate_url_content(candidate)
-        if validated:
-            save_valid_url(validated)
-            return validated
+    # Candidate 4: Fallback sequence with parallel testing
+    for candidate in FALLBACK_URLS:
+        try:
+            VSlog(f"Testing fallback: {candidate}")
+            validated = validate_url_content(candidate)
+            if validated:
+                save_valid_url(validated)
+                return validated
+        except Exception as e:
+            VSlog(f"Fallback {candidate} failed: {str(e)}")
+            continue
 
-    VSlog("All retrieval methods failed, using hardcoded default")
-    return DEFAULT_URL
+    # Final fallback with network check
+    VSlog("All methods failed, checking network")
+
+    VSlog("Using hardcoded default as last resort")
+    return FALLBACK_URLS[0]
 
 def get_frenchstream_url():
     """
