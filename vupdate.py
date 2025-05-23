@@ -4506,22 +4506,24 @@ def get_wiflix_url():
 
             # Validation parameters
             POSITIVE_KEYWORDS = {'wiflix', 'ajout', 'film', 'serie', 'streaming', 'regarder'}
-            NEGATIVE_KEYWORDS = {'404', 'Legal'}
+            NEGATIVE_KEYWORDS = {'was dmca for legal reasons', 'was taken down for legal reasons'}  # Fixed case sensitivity
 
-            # Negative check
-            if any(nk in content for nk in NEGATIVE_KEYWORDS):
-                VSlog(f"Negative keywords found in {effective_url}")
+            # Negative check with detailed logging
+            found_negative = [nk for nk in NEGATIVE_KEYWORDS if nk in content]
+            if found_negative:
+                VSlog(f"Negative keywords found in {effective_url}: {', '.join(found_negative)}")
                 return None
 
-            # Positive validation
-            match_score = sum(1 for pk in POSITIVE_KEYWORDS if pk in content)
+            # Positive validation with keyword tracking
+            found_positive = [pk for pk in POSITIVE_KEYWORDS if pk in content]
+            match_score = len(found_positive)
             required_score = math.ceil(len(POSITIVE_KEYWORDS) * 0.8)
-            
+        
             if match_score >= required_score:
-                VSlog(f"Validated Wiflix URL: {effective_url}")
+                VSlog(f"Validated Wiflix URL: {effective_url} | Found keywords: {', '.join(found_positive)}")
                 return response.url
 
-            VSlog(f"Validation failed for {effective_url} (Score: {match_score}/{required_score})")
+            VSlog(f"Validation failed for {effective_url} | Score: {match_score}/{required_score} | Found: {', '.join(found_positive) or 'None'}")
             return None
 
         except Exception as e:
