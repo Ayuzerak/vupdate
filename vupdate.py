@@ -4405,248 +4405,179 @@ def set_wiflix_url(url):
         VSlog(f"Error while updating Wiflix URL: {e}")
 
 def get_wiflix_url():
-    """Retrieve Wiflix URL with content validation from multiple sources."""
+    """Retrieve valid Wiflix URL through multi-source validation."""
     VSlog("Starting Wiflix URL retrieval process")
     
+    # Configuration paths
     CONFIG_FILE = VSPath('special://home/addons/service.vstreamupdate/site_config.ini').replace('\\', '/')
-    default_url = "https://flemmix.ws/"  # Update with appropriate default URL
-    bypass_url = "https://flemmix.ws/"  # Define a bypass URL if available
+    SITES_JSON = VSPath('special://home/addons/plugin.video.vstream/resources/sites.json').replace('\\', '/')
     
+    # Fallback URLs
+    DEFAULT_URL = "https://flemmix.ws/"
+    BYPASS_URL = "https://flemmix.ws/"
+
     def save_valid_url(url):
         """Save validated URL to configuration file."""
         try:
             config = configparser.ConfigParser()
             if os.path.exists(CONFIG_FILE):
                 config.read(CONFIG_FILE)
-            if "wiflix" not in config:
-                config["wiflix"] = {}
-            config["wiflix"]["current_url"] = url
+            
+            if not config.has_section("wiflix"):
+                config.add_section("wiflix")
+            
+            config.set("wiflix", "current_url", url)
+            
             with open(CONFIG_FILE, "w") as configfile:
                 config.write(configfile)
-            VSlog(f"Wiflix URL saved: {url}")
+            
+            VSlog(f"Saved valid URL to config: {url}")
         except Exception as e:
-            VSlog(f"Error saving URL: {str(e)}")
-    
+            VSlog(f"Config save error: {str(e)}")
+
     def load_and_validate_url():
         """Load and validate URL from config file."""
         try:
             config = configparser.ConfigParser()
             if os.path.exists(CONFIG_FILE):
                 config.read(CONFIG_FILE)
-                if "wiflix" in config and "current_url" in config["wiflix"]:
-                    saved_url = config["wiflix"]["current_url"]
+                if config.has_option("wiflix", "current_url"):
+                    saved_url = config.get("wiflix", "current_url")
                     effective_url = validate_url_content(saved_url)
                     if effective_url:
+                        VSlog(f"Using valid config URL: {effective_url}")
                         return effective_url
         except Exception as e:
             VSlog(f"Config load error: {str(e)}")
         return None
-    
+
     def validate_url_content(url):
-        """Validate if URL content contains wiflix indicators after redirects."""
+        """Validate URL content through keyword checks."""
         try:
             headers = {
                 "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36",
-                "Accept-Language": "en-US,en;q=0.9",
-                "Referer": "https://www.google.com/"
+                "Accept-Language": "en-US,en;q=0.9"
             }
-        
+
             response = requests.get(
-                url, 
-                headers=headers, 
-                timeout=15, 
-                allow_redirects=True,
-                verify=False  # Only if SSL verification causes issues
+                url,
+                headers=headers,
+                timeout=15,
+                allow_redirects=True
             )
             response.raise_for_status()
-        
-            effective_url = response.url.lower()
+
             content = response.text.lower()
+            effective_url = response.url.lower()
 
-            # Check multiple indicators to avoid false positives
-            wiflix_indicators = [
-                'wiflix',
-                'dmca',
-                'ajout',
-                'film', 
-                'serie', 
-                'streaming'
-            ]
+            # Validation parameters
+            POSITIVE_KEYWORDS = {'wiflix', 'ajout', 'film', 'serie', 'streaming', 'regarder'}
+            NEGATIVE_KEYWORDS = {'dmca', 'blocked', '404', 'error', 'not found'}
 
-            # Check multiple desindicators to avoid false positives
-            wiflix_desindicators = [
-                'wiflix',
-                'dmca',
-                'ajout',
-                'film', 
-                'serie', 
-                'streaming'
-            ]
-        
-            # Check both URL and content
-            url_check = any(kw in effective_url for kw in wiflix_indicators) and "wiflix-nouvelle-adresse.site" not in effective_url
+            # Negative check
+            if any(nk in content for nk in NEGATIVE_KEYWORDS):
+                VSlog(f"Negative keywords found in {effective_url}")
+                return None
+
+            # Positive validation
+            match_score = sum(1 for pk in POSITIVE_KEYWORDS if pk in content)
+            required_score = math.ceil(len(POSITIVE_KEYWORDS) * 0.8)  # 80% match
             
-            # Check if at least 90% keywords are present in content
-            required = math.ceil(0.9 * len(wiflix_indicators))  # Strictly enforces 90%+
-            content_check = sum(kw in content for kw in wiflix_indicators) >= required
-        
-            if url_check or content_check:
-                VSlog(f"Valid Wiflix URL detected: {response.url}")
+            if match_score >= required_score:
+                VSlog(f"Validated Wiflix URL: {effective_url}")
                 return response.url
-            
-            VSlog(f"Wiflix validation failed for {response.url}")
+
+            VSlog(f"Validation failed for {effective_url} (Score: {match_score}/{required_score})")
             return None
 
-        except requests.HTTPError as e:
-            VSlog(f"HTTP Error ({e.response.status_code}) for {url}: {str(e)}")
-        except requests.Timeout:
-            VSlog(f"Timeout occurred while validating {url}")
-        except requests.RequestException as e:
-            VSlog(f"Connection error for {url}: {str(e)}")
         except Exception as e:
-            VSlog(f"Unexpected error validating {url}: {str(e)}")
-    
-        return None
-    
+            VSlog(f"Validation error: {str(e)}")
+            return None
+
+    # Main execution flow
     current_valid_url = None
     
-    # Candidate 1: Check sites.json for pre-saved URL
-    if not current_valid_url:
-        sites_json = VSPath('special://home/addons/plugin.video.vstream/resources/sites.json').replace('\\', '/')
-        try:
-            with open(sites_json, 'r') as f:
-                data = json.load(f)
-                wiflix_data = data.get('sites', {}).get('wiflix', {})
-                # Check for direct URL entry first
-                if 'url' in wiflix_data:
-                    saved_url = wiflix_data['url']
-                    effective_url = validate_url_content(saved_url)
-                    if effective_url:
-                        current_valid_url = effective_url
-                        save_valid_url(current_valid_url)
-                        return current_valid_url
-        except Exception as e:
-            VSlog(f"Error reading sites.json: {str(e)}")
-    
-    # Candidate 2: Check config file
-    if not current_valid_url:
-        effective_url = load_and_validate_url()
-        if effective_url:
-            current_valid_url = effective_url
-            return current_valid_url
-    
-    # Candidate 3: Extract from site_info URL
-    if not current_valid_url:
-        try:
-            sites_json = VSPath('special://home/addons/plugin.video.vstream/resources/sites.json').replace('\\', '/')
-            with open(sites_json, 'r') as f:
-                data = json.load(f)
-                site_info_url = data.get('sites', {}).get('wiflix', {}).get('site_info')
-                if not site_info_url:
-                    raise ValueError("No site_info URL found in sites.json")
-                
-                VSlog(f"Fetching site_info URL: {site_info_url}")
-                response = requests.get(site_info_url, timeout=10)
-                response.raise_for_status()
-                html_content = response.text
-                
-                # Search for redirect URL pattern
-                match = re.search(r"window\.location\.href=['\"](.*?)['\"]", html_content)
-                if match:
-                    extracted_url = match.group(1)
-                    # Normalize URL
-                    extracted_url = extracted_url.replace("http", "https").replace("httpss", "https").rstrip('/') + '/'
-                    VSlog(f"Extracted candidate URL: {extracted_url}")
-                    
-                    # Validate extracted URL
-                    effective_url = validate_url_content(extracted_url)
-                    if effective_url:
-                        current_valid_url = effective_url
-                        save_valid_url(current_valid_url)
-                        return current_valid_url
-                else:
-                    VSlog("No redirect URL found in site_info content")
-        except Exception as e:
-            VSlog(f"Error processing site_info: {str(e)}")
+    # Candidate 1: Check config file
+    current_valid_url = load_and_validate_url()
+    if current_valid_url:
+        return current_valid_url
 
-# Candidate 4: Extract from wiflix.name with redirect handling
-if not current_valid_url:
+    # Candidate 2: Check sites.json
     try:
-        VSlog("Attempting wiflix.name domain extraction with redirect handling")
-        
-        headers = {
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36",
-            "Accept-Language": "en-US,en;q=0.9"
-        }
+        with open(SITES_JSON, 'r') as f:
+            data = json.load(f)
+            wiflix_data = data.get('sites', {}).get('wiflix', {})
+            if wiflix_data.get('url'):
+                candidate = wiflix_data['url']
+                validated = validate_url_content(candidate)
+                if validated:
+                    save_valid_url(validated)
+                    return validated
+    except Exception as e:
+        VSlog(f"Sites.json error: {str(e)}")
 
-        # Follow redirects and get final URL
+    # Candidate 3: wiflix.name parsing
+    try:
+        VSlog("Attempting wiflix.name domain extraction")
         response = requests.get(
             "http://www.wiflix.name",
-            headers=headers,
+            headers={"User-Agent": "Mozilla/5.0"},
             timeout=15,
             allow_redirects=True
         )
         response.raise_for_status()
         
-        VSlog(f"Final URL after redirects: {response.url}")
+        VSlog(f"Final wiflix.name URL: {response.url}")
         content = response.text
 
-        # First try to find "Nouveau site" section
-        nouveau_match = re.search(
+        # Regex pattern for "Nouveau site" section
+        nouveau_pattern = re.compile(
             r'<div class="alert alert-success"[^>]*>.*?<a href="(.*?)"[^>]*>.*?Nouveau site',
-            content,
+            re.DOTALL | re.IGNORECASE
+        )
+        
+        # Regex pattern for first valid alert
+        alert_pattern = re.compile(
+            r'<div class="alert alert-success"[^>]*>.*?<a href="(.*?)"',
             re.DOTALL | re.IGNORECASE
         )
 
+        extracted_url = None
+        nouveau_match = nouveau_pattern.search(content)
         if nouveau_match:
             extracted_url = nouveau_match.group(1).strip()
             VSlog(f"Found 'Nouveau site' URL: {extracted_url}")
         else:
-            # Fallback to first valid alert link
-            first_alert_match = re.search(
-                r'<div class="alert alert-success"[^>]*>.*?<a href="(.*?)"',
-                content,
-                re.DOTALL | re.IGNORECASE
-            )
+            first_alert_match = alert_pattern.search(content)
             if first_alert_match:
                 extracted_url = first_alert_match.group(1).strip()
                 VSlog(f"Using first alert URL: {extracted_url}")
-            else:
-                extracted_url = None
-                VSlog("No valid alert links found in content")
 
         if extracted_url:
-            # Normalize URL format
-            parsed = urlparse(extracted_url)
-            if not parsed.scheme:
+            # Normalize URL
+            if not urlparse(extracted_url).scheme:
                 extracted_url = f"http://{extracted_url}"
-            normalized_url = urlparse(extracted_url)._replace(path="", query="", fragment="").geturl() + "/"
+            parsed = urlparse(extracted_url)
+            normalized = f"{parsed.scheme}://{parsed.netloc}/"
             
-            # Validate before use
-            VSlog(f"Normalized URL: {normalized_url}")
-            effective_url = validate_url_content(normalized_url)
-            
-            if effective_url:
-                current_valid_url = effective_url
-                save_valid_url(current_valid_url)
-                return current_valid_url
+            validated = validate_url_content(normalized)
+            if validated:
+                save_valid_url(validated)
+                return validated
 
-    except requests.HTTPError as e:
-        VSlog(f"HTTP error fetching wiflix.name: {e.response.status_code}")
     except Exception as e:
-        VSlog(f"Error during wiflix.name processing: {str(e)}")
-    
-    # Candidate 5: Default URL
-    if not current_valid_url:
-        effective_url = validate_url_content(default_url)
-        if effective_url:
-            current_valid_url = effective_url
-            save_valid_url(current_valid_url)
-        else:
-            current_valid_url = default_url
-            VSlog("Using default URL as fallback")
-    
-    return current_valid_url
+        VSlog(f"wiflix.name processing error: {str(e)}")
+
+    # Candidate 4: Default URLs fallback
+    for candidate in [BYPASS_URL, DEFAULT_URL]:
+        VSlog(f"Trying fallback URL: {candidate}")
+        validated = validate_url_content(candidate)
+        if validated:
+            save_valid_url(validated)
+            return validated
+
+    VSlog("All retrieval methods failed, using hardcoded default")
+    return DEFAULT_URL
 
 def get_frenchstream_url():
     """
